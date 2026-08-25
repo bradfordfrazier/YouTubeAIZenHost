@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.wav
+*.mp3
+*.log
+.vscode/
+.idea/
+.env
+.env.*
+!.env.example
+!.env.*.example
+test_output/

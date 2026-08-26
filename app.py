@@ -477,6 +477,43 @@ class LocalCoHostApp:
     # --------------------------------------------------------------------------
     # 1. State & Engagement State Management
     # --------------------------------------------------------------------------
+    def _wake_up_and_trigger_comment(self, viewers: int):
+        """
+        Wakes up the system when a viewer enters an empty room (0 -> 1+) or on initial boot with active viewers.
+        Immediately triggers the next scripted comment event and establishes the active cadence.
+        """
+        now = time.time()
+        cooldown = getattr(self.cfg, "viewer_join_cooldown_sec", 60.0)
+        if (now - self.last_viewer_join_welcome_time) < cooldown:
+            logger.debug("Wake-up comment event suppressed by debounce cooldown.")
+            return
+
+        self.last_viewer_join_welcome_time = now
+        self.last_activity_time = now
+        self.last_spontaneous_time = now
+        self.spontaneous_idle_count = 0
+        self.encouragement_idle_count = 0
+
+        # Transition engagement tier to ACTIVE
+        self.engagement_mode = "active"
+        self._update_engagement_state()
+        self.visualizer.set_mood("hyped")
+
+        should_greet = getattr(self.cfg, "greet_viewer_joins", False)
+        if should_greet:
+            host_name = self.cfg.host_streamer_name
+            chan_handle = self.cfg.youtube_channel_handle
+            prompt = (
+                f"[VIEWER_JOINED] A new viewer just joined the live broadcast! (Concurrent viewers: {viewers}). "
+                f"Give a fast, warm, energetic, and witty welcome to the new viewer tuning in to {chan_handle} with {host_name}! "
+                f"Invite them to say hello in chat and ignite the room!"
+            )
+        else:
+            prompt = "[SPONTANEOUS_REFLECTION]"
+
+        logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
+        self._trigger_ai_turn(prompt_trigger=prompt, force=False)
+
     def _on_viewer_count_update(self, new_viewers: int, new_chat_velocity: int = 0):
         """Processes viewer count updates and manages active vs eco engagement transitions."""
         prev_viewers = self.concurrent_viewers
@@ -487,45 +524,24 @@ class LocalCoHostApp:
 
         if not self.initial_viewer_sync_done:
             self.initial_viewer_sync_done = True
-            self.last_viewer_join_welcome_time = now if new_viewers >= min_viewers else 0.0
-            self.last_chat_encouragement_time = now
             logger.info(
                 f"📊 [Initial Viewer Sync] Baseline established at {new_viewers} viewers "
                 f"(Active threshold: >={min_viewers})."
             )
             self._update_engagement_state()
+            if new_viewers >= min_viewers:
+                logger.info(f"⚡ [Wake Up on Boot] Room established with {new_viewers} active viewer(s). Performing opening comment event...")
+                self._wake_up_and_trigger_comment(new_viewers)
             return
 
-        should_greet = getattr(self.cfg, "greet_viewer_joins", False)
         is_empty_to_active = (prev_viewers == 0 and new_viewers >= min_viewers)
 
         if is_empty_to_active:
-            self.last_activity_time = now
-            self.last_chat_time = now
-            self.spontaneous_idle_count = 0
-            self.last_spontaneous_time = now
-
-            if should_greet:
-                self.last_chat_encouragement_time = now
-                self.last_viewer_join_welcome_time = now
-                logger.info(
-                    f"👋 [Viewer Joined Stream] Concurrent viewers rose from 0 to {new_viewers}! "
-                    "Triggering AI welcome greeting..."
-                )
-                self.visualizer.set_mood("hyped")
-                host_name = self.cfg.host_streamer_name
-                chan_handle = self.cfg.youtube_channel_handle
-                prompt = (
-                    f"[VIEWER_JOINED] A new viewer just joined the live broadcast! (Concurrent viewers went from 0 to {new_viewers}). "
-                    f"Give a fast, warm, energetic, and witty welcome to the new viewer tuning in to the {chan_handle} stream with {host_name}! "
-                    f"Invite them to say hello in chat and ignite the room!"
-                )
-                self._trigger_ai_turn(prompt_trigger=prompt, force=True)
-            else:
-                logger.info(
-                    f"👥 [Active Viewers Connected] Concurrent viewers rose from 0 to {new_viewers}. "
-                    "Transitioning to ACTIVE mode."
-                )
+            logger.info(
+                f"⚡ [Wake Up] Viewer entered empty room! (Viewers rose from 0 to {new_viewers}). "
+                "Performing next scripted comment event and resuming active cadence..."
+            )
+            self._wake_up_and_trigger_comment(new_viewers)
 
         elif prev_viewers >= min_viewers and new_viewers < min_viewers:
             logger.info(
@@ -585,7 +601,14 @@ class LocalCoHostApp:
         if force:
             if self.active_ai_task and not self.active_ai_task.done():
                 self.active_ai_task.cancel()
-            self.active_ai_task = asyncio.create_task(self._ai_turn_worker(prompt_trigger))
+            try:
+                loop = asyncio.get_running_loop()
+                self.active_ai_task = loop.create_task(self._ai_turn_worker(prompt_trigger))
+            except RuntimeError:
+                if self.loop and self.loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self._ai_turn_worker(prompt_trigger), self.loop)
+                else:
+                    self.pending_triggers.append(prompt_trigger)
             return
 
         # If already generating or speaking, queue the request so it is never dropped
@@ -595,7 +618,14 @@ class LocalCoHostApp:
                 logger.info(f"📥 [Queued Turn] Co-Host busy. Queued request ({len(self.pending_triggers)} in queue): '{prompt_trigger[:60]}...'")
             return
 
-        self.active_ai_task = asyncio.create_task(self._ai_turn_worker(prompt_trigger))
+        try:
+            loop = asyncio.get_running_loop()
+            self.active_ai_task = loop.create_task(self._ai_turn_worker(prompt_trigger))
+        except RuntimeError:
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._ai_turn_worker(prompt_trigger), self.loop)
+            else:
+                self.pending_triggers.append(prompt_trigger)
 
     async def _ai_turn_worker(self, prompt_trigger: Optional[str]):
         """Worker streaming LLM response and synthesizing full cohesive speech."""
@@ -1006,8 +1036,7 @@ class LocalCoHostApp:
                             logger.info(f"📂 [Live Chat Sync] Restored {restored_api} YouTube live chat messages into visualizer without re-triggering.")
 
                 init_viewers = await loop.run_in_executor(None, fetch_youtube_live_viewers, video_id, api_key)
-                self.concurrent_viewers = init_viewers if init_viewers is not None else 0
-                self._update_engagement_state()
+                self._on_viewer_count_update(init_viewers if init_viewers is not None else 0)
 
                 first_chat_sync = True
                 while self.running and chat.is_alive():

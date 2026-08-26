@@ -144,29 +144,34 @@ class AppConfig:
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()
         if ar in ("9:16", "vertical", "portrait", "shorts"):
-            # Ensure vertical dimensions (1080x1920) even if .env contains template 1920x1080 values
-            if self.visualizer_width >= self.visualizer_height:
-                self.visualizer_width = 1080
-                self.visualizer_height = 1920
+            self.visualizer_aspect_ratio = "9:16"
+            self.visualizer_width = 1080
+            self.visualizer_height = 1920
             if self.visualizer_native_window:
-                self.visualizer_window_width = self.visualizer_width
-                self.visualizer_window_height = self.visualizer_height
+                self.visualizer_window_width = 1080
+                self.visualizer_window_height = 1920
             else:
-                if not self.visualizer_window_width:
+                if (
+                    not self.visualizer_window_width
+                    or not self.visualizer_window_height
+                    or self.visualizer_window_width >= self.visualizer_window_height
+                ):
                     self.visualizer_window_width = 540
-                if not self.visualizer_window_height:
                     self.visualizer_window_height = 960
         else:
-            if self.visualizer_width <= self.visualizer_height:
-                self.visualizer_width = 1920
-                self.visualizer_height = 1080
+            self.visualizer_aspect_ratio = "16:9"
+            self.visualizer_width = 1920
+            self.visualizer_height = 1080
             if self.visualizer_native_window:
-                self.visualizer_window_width = self.visualizer_width
-                self.visualizer_window_height = self.visualizer_height
+                self.visualizer_window_width = 1920
+                self.visualizer_window_height = 1080
             else:
-                if not self.visualizer_window_width:
+                if (
+                    not self.visualizer_window_width
+                    or not self.visualizer_window_height
+                    or self.visualizer_window_height >= self.visualizer_window_width
+                ):
                     self.visualizer_window_width = 960
-                if not self.visualizer_window_height:
                     self.visualizer_window_height = 540
 
     # Promotional Graphic Overlays ("Ask God", "Like & Subscribe")

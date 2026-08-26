@@ -255,10 +255,12 @@ class Visualizer:
                 default_win_h = 960 if self.is_vertical else 540
                 cfg_w = getattr(self.cfg, "visualizer_window_width", None)
                 cfg_h = getattr(self.cfg, "visualizer_window_height", None)
-                if cfg_w and cfg_h and ((cfg_h > cfg_w) != self.is_vertical):
-                    cfg_w, cfg_h = None, None
-                win_w = window_width or cfg_w or int(os.getenv("VISUALIZER_WINDOW_WIDTH", str(default_win_w)))
-                win_h = window_height or cfg_h or int(os.getenv("VISUALIZER_WINDOW_HEIGHT", str(default_win_h)))
+                if cfg_w and cfg_h and ((cfg_h > cfg_w) == self.is_vertical):
+                    win_w = window_width or cfg_w
+                    win_h = window_height or cfg_h
+                else:
+                    win_w = window_width or default_win_w
+                    win_h = window_height or default_win_h
             self.window_size = (win_w, win_h)
             flags = pygame.DOUBLEBUF | pygame.RESIZABLE
             if getattr(self.cfg, "visualizer_borderless", False):

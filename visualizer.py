@@ -357,8 +357,8 @@ class Visualizer:
         self.particles = [Particle(self.width, self.height) for _ in range(self.num_particles)]
 
         # Celestial Sparkle System around the central Point of Light
-        self.core_cx = self.width // 2
-        self.core_cy = 440 if self.is_vertical else 340
+        self.core_cx = (self.width - 460) // 2 if not self.is_vertical else (self.width // 2)
+        self.core_cy = 440 if self.is_vertical else 370
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -442,7 +442,7 @@ class Visualizer:
         # Adaptive card dimensions
         host_w, host_h = (1000, 140) if self.is_vertical else (500, 150)
         chat_w, chat_h = (1000, 700) if self.is_vertical else (420, 640)
-        sub_w, sub_h = (1000, 328) if self.is_vertical else (1040, 270)
+        sub_w, sub_h = (1000, 328) if self.is_vertical else (1000, 270)
         promo_w, promo_h = (860, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
@@ -887,7 +887,7 @@ class Visualizer:
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
         badge_w, badge_h = (220, 48) if self.is_vertical else (220, 42)
-        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 205)
+        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 265)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)
@@ -1114,8 +1114,9 @@ class Visualizer:
             card_w, card_h = 1000, 328
             card_x, card_y = (self.width - card_w) // 2, 796
         else:
-            card_w, card_h = 1040, 270
-            card_x, card_y = (self.width - card_w) // 2, 605
+            card_w, card_h = 1000, 270
+            card_x = self.core_cx - (card_w // 2)
+            card_y = self.core_cy + 265 + 68
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
         # High-contrast glassmorphism card frame
@@ -1243,7 +1244,7 @@ class Visualizer:
                 cur_y += int(math.sin(self.time_elapsed * 2.8) * 4.0)
         else:
             card_w, card_h = 760, 146
-            target_x = (self.width - card_w) // 2
+            target_x = self.core_cx - (card_w // 2)
             target_y = self.core_cy - (card_h // 2)
             start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)

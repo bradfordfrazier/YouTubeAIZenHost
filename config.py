@@ -136,6 +136,8 @@ class AppConfig:
     visualizer_height: int = int(os.getenv("VISUALIZER_HEIGHT", "1920" if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else "1080"))
     visualizer_window_width: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_WIDTH")) if os.getenv("VISUALIZER_WINDOW_WIDTH") else None
     visualizer_window_height: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_HEIGHT")) if os.getenv("VISUALIZER_WINDOW_HEIGHT") else None
+    visualizer_window_x: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_X")) if os.getenv("VISUALIZER_WINDOW_X") else None
+    visualizer_window_y: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_Y")) if os.getenv("VISUALIZER_WINDOW_Y") else None
     visualizer_native_window: bool = os.getenv("VISUALIZER_NATIVE_WINDOW", "false").lower() in ("true", "1", "yes")
     visualizer_fps: int = int(os.getenv("VISUALIZER_FPS", "60"))
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
@@ -151,11 +153,12 @@ class AppConfig:
                 self.visualizer_window_width = 1080
                 self.visualizer_window_height = 1920
             else:
-                if (
-                    not self.visualizer_window_width
-                    or not self.visualizer_window_height
-                    or self.visualizer_window_width >= self.visualizer_window_height
-                ):
+                raw_w = self.visualizer_window_width
+                raw_h = self.visualizer_window_height
+                if raw_w and raw_h and raw_h > raw_w and raw_h <= 1080:
+                    self.visualizer_window_width = raw_w
+                    self.visualizer_window_height = raw_h
+                else:
                     self.visualizer_window_width = 540
                     self.visualizer_window_height = 960
         else:
@@ -166,11 +169,12 @@ class AppConfig:
                 self.visualizer_window_width = 1920
                 self.visualizer_window_height = 1080
             else:
-                if (
-                    not self.visualizer_window_width
-                    or not self.visualizer_window_height
-                    or self.visualizer_window_height >= self.visualizer_window_width
-                ):
+                raw_w = self.visualizer_window_width
+                raw_h = self.visualizer_window_height
+                if raw_w and raw_h and raw_w > raw_h and raw_w <= 960:
+                    self.visualizer_window_width = raw_w
+                    self.visualizer_window_height = raw_h
+                else:
                     self.visualizer_window_width = 320
                     self.visualizer_window_height = 180
 

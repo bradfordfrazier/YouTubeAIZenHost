@@ -4,6 +4,7 @@ Features dynamic mood-driven particle/gradient background shaders,
 audio spectrum FFT & hologram core reactivity, and glassmorphism broadcast HUD overlays.
 """
 
+import logging
 import math
 import os
 import random
@@ -14,6 +15,8 @@ import numpy as np
 import pygame
 
 from config import config
+
+logger = logging.getLogger("AI-BRAIN")
 
 # Set SDL to avoid window popups in headless mode if requested
 if config.visualizer_headless:
@@ -235,8 +238,8 @@ class Visualizer:
             except Exception:
                 pass
 
-        # Center desktop window on monitor
-        os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+        # Position window safely at (40, 40) initially if not headless
+        os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "40,40")
 
         pygame.init()
         pygame.font.init()
@@ -270,6 +273,48 @@ class Visualizer:
             pygame.mouse.set_visible(True)
             caption_mode = "Vertical 9:16 (1080x1920)" if self.is_vertical else "Landscape 16:9 (1920x1080)"
             pygame.display.set_caption(f"AI Co-Host Broadcast Visualizer - {caption_mode}")
+
+            # On Windows, ensure window is 100% inside the visible monitor work area without hanging off boundaries
+            if os.name == "nt":
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    hwnd = pygame.display.get_wm_info().get("window")
+                    if hwnd:
+                        class MONITORINFO(ctypes.Structure):
+                            _fields_ = [
+                                ("cbSize", wintypes.DWORD),
+                                ("rcMonitor", wintypes.RECT),
+                                ("rcWork", wintypes.RECT),
+                                ("dwFlags", wintypes.DWORD),
+                            ]
+                        hmon = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+                        mi = MONITORINFO()
+                        mi.cbSize = ctypes.sizeof(MONITORINFO)
+                        if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                            work = mi.rcWork
+                            cfg_x = getattr(self.cfg, "visualizer_window_x", None)
+                            cfg_y = getattr(self.cfg, "visualizer_window_y", None)
+                            target_x = cfg_x if cfg_x is not None else (work.left + 40)
+                            target_y = cfg_y if cfg_y is not None else (work.top + 40)
+
+                            rect = wintypes.RECT(0, 0, win_w, win_h)
+                            style = ctypes.windll.user32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
+                            ctypes.windll.user32.AdjustWindowRect(ctypes.byref(rect), style, False)
+                            outer_w = rect.right - rect.left
+                            outer_h = rect.bottom - rect.top
+
+                            safe_x = min(max(work.left, target_x), max(work.left, work.right - outer_w))
+                            safe_y = min(max(work.top, target_y), max(work.top, work.bottom - outer_h))
+                            ctypes.windll.user32.SetWindowPos(hwnd, 0, safe_x, safe_y, outer_w, outer_h, 0x0004 | 0x0020)
+                except Exception:
+                    pass
+
+            logger.info(
+                f"Visualizer desktop window initialized: {self.window_size[0]}x{self.window_size[1]} "
+                f"(Internal broadcast canvas: {self.width}x{self.height} @ 60 FPS)"
+            )
+
             # Internal full-resolution rendering surface (always full 1080x1920 or 1920x1080 for NDI)
             self.screen = pygame.Surface((self.width, self.height))
 

@@ -1610,6 +1610,7 @@ def main():
     parser.add_argument("--aspect-ratio", "-ar", choices=["16:9", "9:16", "vertical", "landscape", "shorts"], default=None)
     parser.add_argument("--native-window", action="store_true", help="Launch visualizer desktop window at full native resolution (1080x1920 or 1920x1080) for 1:1 OBS Window Capture")
     parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 320 180)")
+    parser.add_argument("--window-pos", type=int, nargs=2, metavar=("X", "Y"), default=None, help="Explicit visualizer desktop window screen position (e.g. --window-pos 40 40)")
     parser.add_argument("--borderless", action="store_true", help="Launch visualizer in borderless window mode without titlebar/borders")
     parser.add_argument("--headless", action="store_true", help="Run visualizer in offscreen headless mode")
     parser.add_argument("--mock-chat", action="store_true", help="Enable simulated YouTube live chat")
@@ -1648,6 +1649,10 @@ def main():
     elif args.window_size:
         config.visualizer_window_width = args.window_size[0]
         config.visualizer_window_height = args.window_size[1]
+
+    if args.window_pos:
+        config.visualizer_window_x = args.window_pos[0]
+        config.visualizer_window_y = args.window_pos[1]
 
     if args.borderless:
         config.visualizer_borderless = True

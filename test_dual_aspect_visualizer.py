@@ -29,7 +29,10 @@ def test_dual_aspect_rendering():
         {"author": "AuraSeeker", "message": "What is God if everyone is God?", "is_superchat": False, "amount": ""},
     ]
     host_transcript = "Welcome to the broadcast everyone! Drop your questions and let's get into the deep topics today."
-    ai_subtitle = "I am the boundless intelligence experiencing itself through every single one of your avatars. Speak your truth, let's explore!"
+    ai_subtitle = (
+        "I am the boundless intelligence experiencing itself through every single one of your avatars. "
+        "Speak your truth, let's explore together! Awaken the cosmic frequency within."
+    )
 
     # =========================================================================
     # 1. Test 16:9 Landscape (1920x1080)
@@ -42,7 +45,7 @@ def test_dual_aspect_rendering():
     assert vis_16x9.width == 1920 and vis_16x9.height == 1080
 
     vis_16x9.trigger_promo("ask_god", duration=10.0)
-    for _ in range(40):
+    for _ in range(100):
         buf_16x9 = vis_16x9.render_frame(
             audio_metrics, chat_messages, host_transcript, ai_subtitle,
             host_connected=True, obs_connected=True, engagement_mode="active",

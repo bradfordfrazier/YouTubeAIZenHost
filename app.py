@@ -904,20 +904,41 @@ class LocalCoHostApp:
                         msg_lower = msg.lower().strip()
 
                         author_clean = author_name.lower().strip().lstrip("@")
-                        host_identifiers = [
-                            self.cfg.host_streamer_handle.lower().lstrip("@"),
-                            self.cfg.youtube_channel_handle.lower().lstrip("@"),
-                            self.cfg.host_streamer_name.lower().lstrip("@"),
-                            (self.discovered_channel_handle or "").lower().lstrip("@"),
+                        author_compact = author_clean.replace(" ", "").replace("_", "").replace("-", "")
+
+                        # Comprehensive set of channel, host, and AI cohost handles to prevent self-triggering
+                        own_identifiers = {
                             "massivegodcomplex",
                             "host",
-                        ]
+                            "owner",
+                            "broadcaster",
+                        }
+                        for val in [
+                            self.cfg.host_streamer_handle,
+                            self.cfg.youtube_channel_handle,
+                            self.cfg.host_streamer_name,
+                            getattr(self.cfg, "ai_cohost_name", ""),
+                            self.discovered_channel_handle,
+                        ]:
+                            if val:
+                                v_clean = val.lower().strip().lstrip("@")
+                                own_identifiers.add(v_clean)
+                                own_identifiers.add(v_clean.replace(" ", "").replace("_", "").replace("-", ""))
+
+                        for ch in getattr(self.cfg, "channel_handles", []):
+                            if ch:
+                                ch_clean = ch.lower().strip().lstrip("@")
+                                own_identifiers.add(ch_clean)
+                                own_identifiers.add(ch_clean.replace(" ", "").replace("_", "").replace("-", ""))
+
                         is_channel_owner = (
                             getattr(item.author, "isChatOwner", False)
                             or getattr(item.author, "isChatBroadcaster", False)
                             or author_type in ("owner", "broadcaster")
-                            or any(h and author_clean == h for h in host_identifiers if h)
+                            or author_clean in own_identifiers
+                            or author_compact in own_identifiers
                         )
+                        is_own_handle = is_channel_owner or (author_clean in own_identifiers) or (author_compact in own_identifiers)
                         if is_channel_owner:
                             author_type = "owner"
 
@@ -991,9 +1012,9 @@ class LocalCoHostApp:
 
                         self._update_engagement_state()
 
-                        # First-time chatter tracking
+                        # First-time chatter tracking (never greet own handle / channel as a new chatter)
                         is_new_chatter = False
-                        if not is_channel_owner and author_clean:
+                        if not is_own_handle and author_clean:
                             if author_clean not in self.seen_chat_handles:
                                 self.seen_chat_handles.add(author_clean)
                                 is_new_chatter = True
@@ -1003,6 +1024,9 @@ class LocalCoHostApp:
 
                         if is_celebrate_cmd:
                             pass
+                        elif is_own_handle:
+                            # The AI co-host recognizes its own handle (@MassiveGodComplex / channel owner) and skips responding to itself
+                            logger.info(f"🛡️ [Own Handle Recognized] Chat message from own channel/host handle @{author_name}: '{msg}'. Skipping AI self-response.")
                         elif self.cfg.chat_reader_mode:
                             spoken_text = f"Superchat from @{author_name} for {item.amountString}! {msg}" if is_superchat else f"@{author_name} says, {msg}"
                             mood = "hyped" if is_superchat else "energetic"
@@ -1019,9 +1043,9 @@ class LocalCoHostApp:
                                 )
                                 self._trigger_ai_turn(prompt_trigger=prompt)
                         else:
-                            should_trigger, reason = self.brain.should_trigger_response(msg, is_host=is_channel_owner)
+                            should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
-                                prefix = f"Host @{author_name} in chat" if is_channel_owner else f"Chat message from @{author_name}"
+                                prefix = f"Chat message from @{author_name}"
                                 self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'")
                             else:
                                 if "member_reply_entanglement" in reason:

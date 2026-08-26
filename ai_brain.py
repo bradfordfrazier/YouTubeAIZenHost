@@ -219,12 +219,17 @@ class AIBrain:
             cohost_lower.replace(" ", ""),
             "i am", "iam", "i", "god", "nova", "ai", "cohost", "bot",
             "the source", "creator", "universe",
-            host_name_lower, host_handle_lower, chan_handle_lower,
+            host_name_lower, host_name_lower.replace(" ", ""),
+            host_handle_lower, host_handle_lower.replace(" ", ""),
+            chan_handle_lower, chan_handle_lower.replace(" ", ""),
+            "massivegodcomplex", "massive",
             "host", "streamer", "stream",
             "all", "everyone", "chat", "guys", "viewers", "folks", "yall", "y'all"
         }
-        for h in self.cfg.channel_handles:
-            exempt_names.add(h.lower().strip().lstrip("@"))
+        for h in getattr(self.cfg, "channel_handles", []):
+            h_clean = h.lower().strip().lstrip("@")
+            exempt_names.add(h_clean)
+            exempt_names.add(h_clean.replace(" ", ""))
         for t in self.cfg.trigger_words:
             t_clean = t.lower().strip()
             exempt_names.add(t_clean)
@@ -233,10 +238,15 @@ class AIBrain:
         # If message directly addresses the AI, Host, or Channel handle, it is NEVER a member-to-member reply
         host_entities = [
             "i am", "iam", "nova", "god", "ai", "cohost", "bot", cohost_lower,
-            host_name_lower, host_handle_lower, chan_handle_lower
+            host_name_lower, host_name_lower.replace(" ", ""),
+            host_handle_lower, host_handle_lower.replace(" ", ""),
+            chan_handle_lower, chan_handle_lower.replace(" ", ""),
+            "massivegodcomplex",
         ]
-        for h in self.cfg.channel_handles:
-            host_entities.append(h.lower().strip().lstrip("@"))
+        for h in getattr(self.cfg, "channel_handles", []):
+            h_clean = h.lower().strip().lstrip("@")
+            host_entities.append(h_clean)
+            host_entities.append(h_clean.replace(" ", ""))
         for entity in host_entities:
             if entity and entity in text_lower:
                 return False, ""
@@ -308,12 +318,21 @@ class AIBrain:
                 return False, "cooldown_active (0.5s)"
             return True, "new_chatter_greeting"
 
-        # 1. Direct address triggers (Chat or Host explicitly mentions AI / God / Co-Host)
+        # 1. Direct address triggers (Chat or Host explicitly mentions AI / God / Co-Host / Channel Handle)
         direct_triggers = list(self.cfg.trigger_words) + [
             self.cohost_name.lower(),
             self.cohost_name.lower().replace(" ", ""),
-            "i am", "iam", "nova", "ai", "cohost", "bot", "god"
+            "i am", "iam", "nova", "ai", "cohost", "bot", "god",
+            "massivegodcomplex",
+            self.cfg.host_streamer_handle.lower().strip().lstrip("@"),
+            self.cfg.youtube_channel_handle.lower().strip().lstrip("@"),
+            self.cfg.host_streamer_name.lower().strip(),
+            self.cfg.host_streamer_name.lower().strip().replace(" ", ""),
         ]
+        for h in getattr(self.cfg, "channel_handles", []):
+            h_c = h.lower().strip().lstrip("@")
+            direct_triggers.append(h_c)
+            direct_triggers.append(h_c.replace(" ", ""))
         for trigger in direct_triggers:
             if trigger and trigger in text_lower:
                 if elapsed_since_last < 0.5:
@@ -372,8 +391,18 @@ class AIBrain:
     def _build_context_prompt(self, override_prompt: Optional[str] = None) -> str:
         """Construct the dynamic context prompt for Gemini."""
         prompt_parts = []
+        chan_handle = self.cfg.youtube_channel_handle
+        host_handle = self.cfg.host_streamer_handle
+        host_name = self.cfg.host_streamer_name
         prompt_parts.append(
-            f"Current Live Stream Context (Channel: {self.cfg.youtube_channel_handle}, Host: {self.cfg.host_streamer_name} / {self.cfg.host_streamer_handle}):\n"
+            f"Current Live Stream Context:\n"
+            f"- Channel Handle: {chan_handle}\n"
+            f"- AI Co-Host: {self.cohost_name} (broadcasting on channel {chan_handle})\n"
+            f"- Human Host / Streamer: {host_name} ({host_handle})\n"
+            f"CRITICAL CHANNEL & ADDRESSING RULES:\n"
+            f"1. Your channel handle is {chan_handle}. When viewers tag or mention {chan_handle} in chat, they are talking to YOU.\n"
+            f"2. You must NEVER address your response to '{chan_handle}' or '@MassiveGodComplex'. "
+            f"When responding, always address the viewer who asked the question (e.g. '@ViewerName, ...'), never yourself or your own handle!\n"
         )
 
         # Recent Host Transcripts
@@ -382,19 +411,27 @@ class AIBrain:
             for item in list(self.transcript_buffer)[-6:]:
                 prompt_parts.append(f"{item['speaker']}: {item['text']}")
         else:
-            prompt_parts.append("(Host is live on stream)")
+            prompt_parts.append(f"({host_name} is live on stream)")
 
         # Recent Live Chat
         prompt_parts.append("\n--- Recent YouTube Live Chat Messages ---")
         if self.chat_buffer:
             for item in list(self.chat_buffer)[-8:]:
                 author_lower = item["author"].lower().strip().lstrip("@")
+                author_compact = author_lower.replace(" ", "").replace("_", "").replace("-", "")
+                own_identifiers = {
+                    "massivegodcomplex",
+                    host_handle.lower().strip().lstrip("@"),
+                    chan_handle.lower().strip().lstrip("@"),
+                    host_name.lower().strip().lstrip("@"),
+                }
+                for ch in self.cfg.channel_handles:
+                    own_identifiers.add(ch.lower().strip().lstrip("@"))
                 is_host_author = (
-                    author_lower in self.cfg.channel_handles
-                    or author_lower == self.cfg.host_streamer_handle.lower().lstrip("@")
-                    or author_lower == self.cfg.youtube_channel_handle.lower().lstrip("@")
+                    author_lower in own_identifiers
+                    or author_compact in own_identifiers
                 )
-                prefix = f"Channel Host @{item['author']}" if is_host_author else f"Viewer @{item['author']}"
+                prefix = f"Stream Host @{item['author']}" if is_host_author else f"Viewer @{item['author']}"
                 sc_badge = f" [SUPERCHAT {item['amount']}]" if item["is_superchat"] else ""
                 prompt_parts.append(f"{prefix}{sc_badge}: {item['message']}")
         else:

@@ -723,19 +723,22 @@ class Visualizer:
         self._surf_god_rings.fill((0, 0, 0, 0))
         center_ring = (max_bloom_r, max_bloom_r)
 
-        # 1. Outer perimeter ring expanded to the edge of the circle with soft transparency
-        outer_ring_alpha = int(75 + speak_boost * 35)
-        pygame.draw.circle(self._surf_god_rings, (*c_high, outer_ring_alpha), center_ring, max_bloom_r - 1, 2)
+        # 1. Outer perimeter ring at the edge of the circle (delicate, high transparency)
+        outer_ring_alpha = int(28 + speak_boost * 14)
+        pygame.draw.circle(self._surf_god_rings, (*c_high, outer_ring_alpha), center_ring, max_bloom_r - 1, 1)
 
-        # 2. Dynamic acoustic shockwave ripple rings expanding towards the outer edge with fading alpha
+        # 2. Concentric inner ring scaled to half the previous size (~66px radius)
+        r_inner = int(max_bloom_r * 0.29)
+        inner_ring_alpha = int(48 + speak_boost * 22)
+        pygame.draw.circle(self._surf_god_rings, (*c_high, inner_ring_alpha), center_ring, r_inner, 1)
+
+        # 3. Soft, subtle acoustic breath ripple when speaking
         if is_speaking or rms > 0.03:
-            for wave_i in range(2):
-                wave_phase = (self.time_elapsed * 2.2 + wave_i * 0.5) % 1.0
-                r_wave = int(35 + wave_phase * (max_bloom_r - 36))
-                # Fade out smoothly as the wave expands towards the outer perimeter
-                wave_alpha = int((1.0 - wave_phase) * (80 + speak_boost * 40))
-                if wave_alpha > 5:
-                    pygame.draw.circle(self._surf_god_rings, (*c_high, wave_alpha), center_ring, r_wave, 1)
+            wave_phase = (self.time_elapsed * 2.0) % 1.0
+            r_wave = int(r_inner + wave_phase * (max_bloom_r - r_inner - 2))
+            wave_alpha = int((1.0 - wave_phase) * (30 + speak_boost * 15))
+            if wave_alpha > 3:
+                pygame.draw.circle(self._surf_god_rings, (*c_high, wave_alpha), center_ring, r_wave, 1)
 
         self.screen.blit(self._surf_god_rings, (cx - max_bloom_r, cy - max_bloom_r))
 

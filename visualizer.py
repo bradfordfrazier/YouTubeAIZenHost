@@ -643,21 +643,7 @@ class Visualizer:
         # Base background fill
         self.screen.fill(c_top)
 
-        # Ambient radial glow drawn into localized bloom surface for maximum FPS
-        center_x, center_y = self.core_cx, self.core_cy
-        glow_r = int(220 + rms * 160)
-        c_prim = tuple(int(c) for c in self.c_primary)
-        glow_box = glow_r * 2
-        if not hasattr(self, "_surf_ambient_glow") or self._surf_ambient_glow.get_width() != glow_box:
-            self._surf_ambient_glow = pygame.Surface((glow_box, glow_box), pygame.SRCALPHA)
-        self._surf_ambient_glow.fill((0, 0, 0, 0))
-        pygame.draw.circle(
-            self._surf_ambient_glow,
-            (*c_prim, int(25 + rms * 40)),
-            (glow_r, glow_r),
-            glow_r,
-        )
-        self.screen.blit(self._surf_ambient_glow, (center_x - glow_r, center_y - glow_r), special_flags=pygame.BLEND_ADD)
+
 
         # Flowing sine wave ribbons in lower half (drawn directly on canvas)
         c_sec = tuple(int(c) for c in self.c_secondary)
@@ -713,40 +699,31 @@ class Visualizer:
         speak_boost = (rms * 2.5 + 0.3) if is_speaking else (rms * 1.0)
 
         # ----------------------------------------------------------------------
-        # 1. Pre-Rendered High-Speed Stellar Corona & Atmospheric Glow
+        # 1. Concentric Celestial God Circles (Complete Circle & Inner Circle)
         # ----------------------------------------------------------------------
-        bloom_spr = self._bloom_sprites.get(self.current_mood, list(self._bloom_sprites.values())[0])
         idle_breathe = 2.5 * math.sin(self.time_elapsed * 0.9)
-        max_bloom_r = int(190 + speak_boost * 95 + idle_breathe)
-        spr_dim = max_bloom_r * 2
-        scaled_bloom = pygame.transform.scale(bloom_spr, (spr_dim, spr_dim))
-        self.screen.blit(scaled_bloom, (cx - max_bloom_r, cy - max_bloom_r), special_flags=pygame.BLEND_ADD)
+        r_outer = int(210 + speak_boost * 35 + idle_breathe)
+        r_inner = r_outer // 2  # About half the size of the complete circle
 
-        # Outer Boundary Ring and Acoustic Shockwaves (Translucent Glass Rings)
-        ring_box = max_bloom_r * 2
-        if not hasattr(self, "_surf_god_rings") or self._surf_god_rings.get_width() != ring_box:
-            self._surf_god_rings = pygame.Surface((ring_box, ring_box), pygame.SRCALPHA)
-        self._surf_god_rings.fill((0, 0, 0, 0))
-        center_ring = (max_bloom_r, max_bloom_r)
+        circle_box = r_outer * 2
+        if not hasattr(self, "_surf_god_circles") or self._surf_god_circles.get_width() != circle_box:
+            self._surf_god_circles = pygame.Surface((circle_box, circle_box), pygame.SRCALPHA)
+        self._surf_god_circles.fill((0, 0, 0, 0))
+        center_circle = (r_outer, r_outer)
 
-        # 1. Outer perimeter ring at the edge of the circle (delicate, high transparency)
-        outer_ring_alpha = int(28 + speak_boost * 14)
-        pygame.draw.circle(self._surf_god_rings, (*c_high, outer_ring_alpha), center_ring, max_bloom_r - 1, 1)
+        # A. The Complete Circle: Very transparent but still clearly visible
+        alpha_outer = int(38 + rms * 20)
+        pygame.draw.circle(self._surf_god_circles, (*c_prim, alpha_outer), center_circle, r_outer)
+        pygame.draw.circle(self._surf_god_circles, (*c_high, min(255, alpha_outer + 25)), center_circle, r_outer, 1)
 
-        # 2. Concentric inner ring aligned to edge of inside circle (~86px radius)
-        r_inner = int(max_bloom_r * 0.38)
-        inner_ring_alpha = int(48 + speak_boost * 22)
-        pygame.draw.circle(self._surf_god_rings, (*c_high, inner_ring_alpha), center_ring, r_inner, 1)
+        # B. The Inner Circle: About half the size and more solid
+        alpha_inner = int(145 + speak_boost * 35)
+        pygame.draw.circle(self._surf_god_circles, (*c_prim, alpha_inner), center_circle, r_inner)
+        pygame.draw.circle(self._surf_god_circles, (*c_high, min(255, alpha_inner + 40)), center_circle, int(r_inner * 0.72))
+        pygame.draw.circle(self._surf_god_circles, (*c_high, min(255, alpha_inner + 50)), center_circle, r_inner, 1)
 
-        # 3. Soft, subtle acoustic breath ripple when speaking
-        if is_speaking or rms > 0.03:
-            wave_phase = (self.time_elapsed * 2.0) % 1.0
-            r_wave = int(r_inner + wave_phase * (max_bloom_r - r_inner - 2))
-            wave_alpha = int((1.0 - wave_phase) * (30 + speak_boost * 15))
-            if wave_alpha > 3:
-                pygame.draw.circle(self._surf_god_rings, (*c_high, wave_alpha), center_ring, r_wave, 1)
-
-        self.screen.blit(self._surf_god_rings, (cx - max_bloom_r, cy - max_bloom_r))
+        # Both circles sit directly behind the gleaming point of light
+        self.screen.blit(self._surf_god_circles, (cx - r_outer, cy - r_outer))
 
         # ----------------------------------------------------------------------
         # 2. 16-Point Deep-Space Starburst Diffraction Spikes & Scintillation

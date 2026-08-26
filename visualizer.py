@@ -716,12 +716,28 @@ class Visualizer:
         scaled_bloom = pygame.transform.scale(bloom_spr, (spr_dim, spr_dim))
         self.screen.blit(scaled_bloom, (cx - max_bloom_r, cy - max_bloom_r), special_flags=pygame.BLEND_ADD)
 
-        # Acoustic Shockwave Ripple Rings (Active When Speaking)
+        # Outer Boundary Ring and Acoustic Shockwaves (Translucent Glass Rings)
+        ring_box = max_bloom_r * 2
+        if not hasattr(self, "_surf_god_rings") or self._surf_god_rings.get_width() != ring_box:
+            self._surf_god_rings = pygame.Surface((ring_box, ring_box), pygame.SRCALPHA)
+        self._surf_god_rings.fill((0, 0, 0, 0))
+        center_ring = (max_bloom_r, max_bloom_r)
+
+        # 1. Outer perimeter ring expanded to the edge of the circle with soft transparency
+        outer_ring_alpha = int(75 + speak_boost * 35)
+        pygame.draw.circle(self._surf_god_rings, (*c_high, outer_ring_alpha), center_ring, max_bloom_r - 1, 2)
+
+        # 2. Dynamic acoustic shockwave ripple rings expanding towards the outer edge with fading alpha
         if is_speaking or rms > 0.03:
             for wave_i in range(2):
                 wave_phase = (self.time_elapsed * 2.2 + wave_i * 0.5) % 1.0
-                r_wave = int(35 + wave_phase * (max_bloom_r * 0.90))
-                pygame.draw.circle(self.screen, c_high, (cx, cy), r_wave, 2)
+                r_wave = int(35 + wave_phase * (max_bloom_r - 36))
+                # Fade out smoothly as the wave expands towards the outer perimeter
+                wave_alpha = int((1.0 - wave_phase) * (80 + speak_boost * 40))
+                if wave_alpha > 5:
+                    pygame.draw.circle(self._surf_god_rings, (*c_high, wave_alpha), center_ring, r_wave, 1)
+
+        self.screen.blit(self._surf_god_rings, (cx - max_bloom_r, cy - max_bloom_r))
 
         # ----------------------------------------------------------------------
         # 2. 16-Point Deep-Space Starburst Diffraction Spikes & Scintillation

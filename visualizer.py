@@ -251,8 +251,8 @@ class Visualizer:
                 win_w = window_width or self.width
                 win_h = window_height or self.height
             else:
-                default_win_w = 540 if self.is_vertical else 960
-                default_win_h = 960 if self.is_vertical else 540
+                default_win_w = 540 if self.is_vertical else 640
+                default_win_h = 960 if self.is_vertical else 360
                 cfg_w = getattr(self.cfg, "visualizer_window_width", None)
                 cfg_h = getattr(self.cfg, "visualizer_window_height", None)
                 if cfg_w and cfg_h and ((cfg_h > cfg_w) == self.is_vertical):

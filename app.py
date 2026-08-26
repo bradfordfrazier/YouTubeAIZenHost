@@ -1638,8 +1638,8 @@ def main():
         config.visualizer_width = 1920
         config.visualizer_height = 1080
         if not args.window_size and not args.native_window:
-            config.visualizer_window_width = 960
-            config.visualizer_window_height = 540
+            config.visualizer_window_width = 640
+            config.visualizer_window_height = 360
 
     if args.native_window:
         config.visualizer_native_window = True

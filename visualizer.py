@@ -413,25 +413,31 @@ class Visualizer:
         self.typewriter_index = 0
 
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
-        # Replaces CPU-heavy per-frame concentric circle rasterization with instant GPU/CPU blits
+        # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
         self._bloom_sprites = {}
         sprite_sz = 256
         half_sz = sprite_sz // 2
+        core_sz = int(half_sz * 0.38)
         for mood_key, p_val in ColorPalette.PALETTES.items():
             spr = pygame.Surface((sprite_sz, sprite_sz), pygame.SRCALPHA)
             c_p = p_val["primary"]
             c_h = p_val["highlight"]
             for r in range(half_sz, 0, -2):
-                t = (half_sz - r) / half_sz  # 0.0 at outer edge, 1.0 at center
-                alpha = int((t ** 3.0) * 230)
-                if alpha < 2:
-                    continue
-                col = (
-                    int(c_p[0] * (1.0 - t) + c_h[0] * t),
-                    int(c_p[1] * (1.0 - t) + c_h[1] * t),
-                    int(c_p[2] * (1.0 - t) + c_h[2] * t),
-                    alpha,
-                )
+                if r > core_sz:
+                    # Outer disc falloff
+                    t_out = (half_sz - r) / (half_sz - core_sz)
+                    alpha = int((t_out ** 2.0) * 30)
+                    col = (*c_p, alpha)
+                else:
+                    # Inside circle: bright light-cyan highlight core scaled to half size
+                    t_in = (core_sz - r) / core_sz
+                    alpha = int(30 + (t_in ** 2.0) * 200)
+                    col = (
+                        int(c_p[0] * (1.0 - t_in) + c_h[0] * t_in),
+                        int(c_p[1] * (1.0 - t_in) + c_h[1] * t_in),
+                        int(c_p[2] * (1.0 - t_in) + c_h[2] * t_in),
+                        alpha,
+                    )
                 pygame.draw.circle(spr, col, (half_sz, half_sz), r)
             self._bloom_sprites[mood_key] = spr
 
@@ -727,8 +733,8 @@ class Visualizer:
         outer_ring_alpha = int(28 + speak_boost * 14)
         pygame.draw.circle(self._surf_god_rings, (*c_high, outer_ring_alpha), center_ring, max_bloom_r - 1, 1)
 
-        # 2. Concentric inner ring scaled to half the previous size (~66px radius)
-        r_inner = int(max_bloom_r * 0.29)
+        # 2. Concentric inner ring aligned to edge of inside circle (~86px radius)
+        r_inner = int(max_bloom_r * 0.38)
         inner_ring_alpha = int(48 + speak_boost * 22)
         pygame.draw.circle(self._surf_god_rings, (*c_high, inner_ring_alpha), center_ring, r_inner, 1)
 

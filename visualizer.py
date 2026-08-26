@@ -464,7 +464,7 @@ class Visualizer:
 
     def _load_cached_chat(self):
         """Restores recent chat history from disk so visualizer resumes seamlessly on restart."""
-        cache_file = Path("chat_cache.json")
+        cache_file = Path(__file__).resolve().parent / "chat_cache.json"
         if not cache_file.exists():
             return
         try:

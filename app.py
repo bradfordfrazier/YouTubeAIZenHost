@@ -318,8 +318,66 @@ def fetch_youtube_live_viewers(video_id_or_url: str, api_key: str = "") -> Optio
         return None
 
 
+def fetch_youtube_live_chat_backlog(video_id: str, api_key: str) -> List[Dict]:
+    """
+    Fetches recent historical messages from YouTube Live Chat via YouTube Data API v3.
+    Enables instant chat restoration on startup/restart when pytchat has no backlog.
+    """
+    if not video_id or not api_key:
+        return []
+    try:
+        vid_url = f"https://www.googleapis.com/youtube/v3/videos?id={video_id}&key={api_key}&part=liveStreamingDetails"
+        req = urllib.request.Request(vid_url, headers={"User-Agent": "YouTubeAIHost/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("items", [])
+        if not items:
+            return []
+        live_details = items[0].get("liveStreamingDetails", {})
+        active_chat_id = live_details.get("activeLiveChatId")
+        if not active_chat_id:
+            return []
+
+        chat_url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId={active_chat_id}&key={api_key}&part=id,snippet,authorDetails&maxResults=50"
+        req = urllib.request.Request(chat_url, headers={"User-Agent": "YouTubeAIHost/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            chat_data = json.loads(resp.read().decode("utf-8"))
+
+        messages = []
+        for item in chat_data.get("items", []):
+            author_details = item.get("authorDetails", {})
+            snippet = item.get("snippet", {})
+            author_name = author_details.get("displayName", "Viewer")
+            msg_text = snippet.get("displayMessage", "")
+            is_sc = snippet.get("type") == "superChatEvent"
+            sc_amount = snippet.get("superChatDetails", {}).get("amountDisplayString", "") if is_sc else ""
+
+            author_type = "viewer"
+            if author_details.get("isChatOwner") or author_details.get("isChatBroadcaster"):
+                author_type = "owner"
+            elif author_details.get("isChatModerator"):
+                author_type = "moderator"
+            elif author_details.get("isChatSponsor"):
+                author_type = "member"
+
+            messages.append({
+                "author": author_name,
+                "author_type": author_type,
+                "message": msg_text,
+                "is_superchat": is_sc,
+                "amount": sc_amount,
+                "timestamp": time.time(),
+            })
+        return messages
+    except Exception as e:
+        logger.debug(f"[YouTube Live Chat Backlog] Could not fetch live chat messages: {e}")
+        return []
+
+
 class LocalCoHostApp:
     """Consolidated All-Local AI Co-Host Pipeline running on the OBS Host machine."""
+
+    CHAT_CACHE_FILE = Path(__file__).resolve().parent / "chat_cache.json"
 
     def __init__(self):
         self.cfg = config
@@ -375,7 +433,6 @@ class LocalCoHostApp:
         self.ndi_audio_thread: Optional[threading.Thread] = None
         self.ndi_audio_running: bool = False
 
-    CHAT_CACHE_FILE = Path("chat_cache.json")
 
     def _load_cached_chat(self):
         """Restores recent chat history from disk so visualizer resumes seamlessly on restart without commenting."""
@@ -928,6 +985,26 @@ class LocalCoHostApp:
                 logger.info(f"🎉 Connected to YouTube Live Chat for Video '{video_id}'!")
 
                 api_key = self.cfg.youtube_api_key
+
+                # Restore live stream chat backlog via YouTube Data API v3 (silent restore into visualizer)
+                if api_key:
+                    backlog_msgs = await loop.run_in_executor(None, fetch_youtube_live_chat_backlog, video_id, api_key)
+                    if backlog_msgs:
+                        restored_api = 0
+                        for bm in backlog_msgs:
+                            a_name = bm.get("author", "Viewer")
+                            m_text = bm.get("message", "")
+                            if not any(e.get("author") == a_name and e.get("message") == m_text for e in self.chat_history):
+                                self.chat_history.append(bm)
+                                restored_api += 1
+                            a_clean = a_name.lower().strip().lstrip("@")
+                            if a_clean:
+                                self.seen_chat_handles.add(a_clean)
+                            self.brain.add_chat_message(a_name, m_text, bm.get("is_superchat", False), bm.get("amount", ""))
+                        if restored_api > 0:
+                            self._save_cached_chat()
+                            logger.info(f"📂 [Live Chat Sync] Restored {restored_api} YouTube live chat messages into visualizer without re-triggering.")
+
                 init_viewers = await loop.run_in_executor(None, fetch_youtube_live_viewers, video_id, api_key)
                 self.concurrent_viewers = init_viewers if init_viewers is not None else 0
                 self._update_engagement_state()

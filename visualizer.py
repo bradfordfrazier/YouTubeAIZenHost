@@ -220,6 +220,24 @@ class Visualizer:
         self.cohost_name = self.cfg.ai_cohost_name
         self.is_vertical = (self.height > self.width)
 
+        # Enable Windows Per-Monitor DPI Awareness so the desktop window matches physical pixels
+        # without Windows DWM scaling/blurring it past monitor boundaries
+        if os.name == "nt":
+            try:
+                import ctypes
+                try:
+                    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+                except Exception:
+                    try:
+                        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+                    except Exception:
+                        ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+        # Center desktop window on monitor
+        os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+
         pygame.init()
         pygame.font.init()
 
@@ -230,15 +248,22 @@ class Visualizer:
             self.window_size = (self.width, self.height)
         else:
             if getattr(self.cfg, "visualizer_native_window", False):
-                default_win_w = self.width
-                default_win_h = self.height
+                win_w = window_width or self.width
+                win_h = window_height or self.height
             else:
-                default_win_w = 540 if self.is_vertical else 1280
-                default_win_h = 960 if self.is_vertical else 720
-            win_w = window_width or int(os.getenv("VISUALIZER_WINDOW_WIDTH", str(default_win_w)))
-            win_h = window_height or int(os.getenv("VISUALIZER_WINDOW_HEIGHT", str(default_win_h)))
+                default_win_w = 540 if self.is_vertical else 960
+                default_win_h = 960 if self.is_vertical else 540
+                cfg_w = getattr(self.cfg, "visualizer_window_width", None)
+                cfg_h = getattr(self.cfg, "visualizer_window_height", None)
+                if cfg_w and cfg_h and ((cfg_h > cfg_w) != self.is_vertical):
+                    cfg_w, cfg_h = None, None
+                win_w = window_width or cfg_w or int(os.getenv("VISUALIZER_WINDOW_WIDTH", str(default_win_w)))
+                win_h = window_height or cfg_h or int(os.getenv("VISUALIZER_WINDOW_HEIGHT", str(default_win_h)))
             self.window_size = (win_w, win_h)
-            self.window_surf = pygame.display.set_mode(self.window_size, pygame.DOUBLEBUF | pygame.RESIZABLE)
+            flags = pygame.DOUBLEBUF | pygame.RESIZABLE
+            if getattr(self.cfg, "visualizer_borderless", False):
+                flags = pygame.DOUBLEBUF | pygame.NOFRAME
+            self.window_surf = pygame.display.set_mode(self.window_size, flags)
             pygame.event.set_grab(False)
             pygame.mouse.set_visible(True)
             caption_mode = "Vertical 9:16 (1080x1920)" if self.is_vertical else "Landscape 16:9 (1920x1080)"
@@ -489,7 +514,10 @@ class Visualizer:
             for event in pygame.event.get():
                 if event.type == pygame.VIDEORESIZE:
                     self.window_size = (max(180, event.w), max(180, event.h))
-                    self.window_surf = pygame.display.set_mode(self.window_size, pygame.DOUBLEBUF | pygame.RESIZABLE)
+                    flags = pygame.DOUBLEBUF | pygame.RESIZABLE
+                    if getattr(self.cfg, "visualizer_borderless", False):
+                        flags = pygame.DOUBLEBUF | pygame.NOFRAME
+                    self.window_surf = pygame.display.set_mode(self.window_size, flags)
                     pygame.event.set_grab(False)
                     pygame.mouse.set_visible(True)
                 elif event.type == pygame.QUIT:

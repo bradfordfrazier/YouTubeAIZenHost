@@ -139,6 +139,7 @@ class AppConfig:
     visualizer_native_window: bool = os.getenv("VISUALIZER_NATIVE_WINDOW", "false").lower() in ("true", "1", "yes")
     visualizer_fps: int = int(os.getenv("VISUALIZER_FPS", "60"))
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
+    visualizer_borderless: bool = os.getenv("VISUALIZER_BORDERLESS", "false").lower() in ("true", "1", "yes")
 
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()
@@ -164,9 +165,9 @@ class AppConfig:
                 self.visualizer_window_height = self.visualizer_height
             else:
                 if not self.visualizer_window_width:
-                    self.visualizer_window_width = 1280
+                    self.visualizer_window_width = 960
                 if not self.visualizer_window_height:
-                    self.visualizer_window_height = 720
+                    self.visualizer_window_height = 540
 
     # Promotional Graphic Overlays ("Ask God", "Like & Subscribe")
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")

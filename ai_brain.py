@@ -14,7 +14,7 @@ from typing import AsyncGenerator, Deque, Dict, List, Optional, Tuple
 
 from config import config
 
-# Optional Gemini SDK imports
+# Optional Gemini SDK imports (Prefers modern google.genai, falls back to legacy google.generativeai)
 try:
     from google import genai
     from google.genai import types as genai_types
@@ -22,11 +22,18 @@ try:
 except ImportError:
     GENAI_NEW_SDK = False
 
-try:
-    import google.generativeai as genai_legacy
-    GENAI_LEGACY_SDK = True
-except ImportError:
+if not GENAI_NEW_SDK:
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            import google.generativeai as genai_legacy
+        GENAI_LEGACY_SDK = True
+    except ImportError:
+        GENAI_LEGACY_SDK = False
+else:
     GENAI_LEGACY_SDK = False
+    genai_legacy = None
 
 logging.basicConfig(
     level=logging.INFO,

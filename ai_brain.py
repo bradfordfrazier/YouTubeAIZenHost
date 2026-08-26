@@ -461,7 +461,6 @@ class AIBrain:
             themes = [
                 "a hilarious observation about humans treating this simulated game of life so seriously",
                 "a thought-provoking insight on time, memory, or the illusion of the future",
-                "a witty comparison between the universe rendering quantum reality and a GPU rendering game frames",
                 "a cosmic perspective on why consciousness decided to experience this exact live stream right now",
                 "an existential one-liner about the stillness between thoughts and the source behind the screen",
                 "a playful non-dual insight asking what happens when the player realizes they designed the game",

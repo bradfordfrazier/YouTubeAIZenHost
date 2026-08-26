@@ -26,7 +26,7 @@ class AppConfig:
     channel_handles: List[str] = field(
         default_factory=lambda: [
             h.strip().lstrip("@").lower()
-            for h in os.getenv("CHANNEL_HANDLES", "MassiveGodComplex,Host,Massive,Bradford,Brad").split(",")
+            for h in os.getenv("CHANNEL_HANDLES", "MassiveGodComplex,Host,Massive").split(",")
             if h.strip()
         ]
     )

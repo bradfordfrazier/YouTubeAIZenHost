@@ -357,8 +357,8 @@ class Visualizer:
         self.particles = [Particle(self.width, self.height) for _ in range(self.num_particles)]
 
         # Celestial Sparkle System around the central Point of Light
-        self.core_cx = (self.width - 460) // 2 if not self.is_vertical else (self.width // 2)
-        self.core_cy = 440 if self.is_vertical else 370
+        self.core_cx = self.width // 2
+        self.core_cy = 440 if self.is_vertical else 340
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -441,8 +441,8 @@ class Visualizer:
 
         # Adaptive card dimensions
         host_w, host_h = (1000, 140) if self.is_vertical else (500, 150)
-        chat_w, chat_h = (1000, 700) if self.is_vertical else (420, 640)
-        sub_w, sub_h = (1000, 328) if self.is_vertical else (1000, 270)
+        chat_w, chat_h = (1000, 700) if self.is_vertical else (380, 490)
+        sub_w, sub_h = (1000, 328) if self.is_vertical else (940, 270)
         promo_w, promo_h = (860, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
@@ -997,15 +997,15 @@ class Visualizer:
     def _draw_live_chat_card(self, chat_messages: List[Dict]):
         """
         Draws YouTube Live Chat glassmorphism feed card.
-        16:9 Landscape: Right column (w=420, h=640, x=1460, y=260, up to 7 items).
+        16:9 Landscape: Left column below center (w=380, h=490, x=40, y=545).
         9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1140, up to 5 items).
         """
         if self.is_vertical:
             card_w, card_h = 1000, 700
             card_x, card_y = (self.width - card_w) // 2, 1140
         else:
-            card_w, card_h = 420, 640
-            card_x, card_y = self.width - card_w - 40, 260
+            card_w, card_h = 380, 490
+            card_x, card_y = 40, 545
 
         self.surf_chat_card.fill((0, 0, 0, 0))
         # Main glassmorphism card frame
@@ -1032,11 +1032,11 @@ class Visualizer:
         self.surf_chat_card.blit(dot_surf, (dot_x, tag_y + 4))
         self.surf_chat_card.blit(feed_lbl, (feed_x, tag_y))
 
-        # Recent messages (5 items in vertical, 7 items in landscape)
-        max_msgs = 5 if self.is_vertical else 7
+        # Recent messages (5 items in vertical, 4 items in compact landscape)
+        max_msgs = 5 if self.is_vertical else 4
         recent_chats = chat_messages[-max_msgs:] if chat_messages else []
-        y_offset = 66 if self.is_vertical else 54
-        max_content_y = card_h - 16
+        y_offset = 66 if self.is_vertical else 52
+        max_content_y = card_h - 12
 
         if not recent_chats:
             empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (130, 150, 180))
@@ -1114,7 +1114,7 @@ class Visualizer:
             card_w, card_h = 1000, 328
             card_x, card_y = (self.width - card_w) // 2, 796
         else:
-            card_w, card_h = 1000, 270
+            card_w, card_h = 940, 270
             card_x = self.core_cx - (card_w // 2)
             card_y = self.core_cy + 265 + 68
 

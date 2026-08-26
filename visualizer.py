@@ -1243,11 +1243,11 @@ class Visualizer:
                 cur_y += int(math.sin(self.time_elapsed * 2.8) * 4.0)
         else:
             card_w, card_h = 760, 146
-            target_x = 40
-            target_y = 95
-            start_x = -card_w - 30
+            target_x = (self.width - card_w) // 2
+            target_y = self.core_cy - (card_h // 2)
+            start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
-            hover_offset = int(math.sin(self.time_elapsed * 2.8) * 3.0) if self.promo_state == "display" else 0
+            hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0
             cur_y = target_y + hover_offset
 
         self.surf_promo_card.fill((0, 0, 0, 0))

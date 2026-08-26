@@ -277,13 +277,9 @@ class AIBrain:
         Returns (should_trigger, reason).
         """
         now = time.time()
-        # Enforce busy check
-        if self.is_generating:
-            return False, "ai_is_currently_speaking"
 
-        # Hard Standby Check (Stream Offline)
+        # Hard Standby Check (Stream Offline - only when explicitly configured to require stream active)
         if self.engagement_mode == "standby" and self.cfg.obs_require_stream_active and not self.is_stream_live:
-            # Allow only if host directly addresses AI by name while testing
             text_lower = text.lower().strip()
             direct_triggers = list(self.cfg.trigger_words) + [self.cohost_name.lower(), "i am", "iam", "nova"]
             if is_host and any(t in text_lower for t in direct_triggers):
@@ -301,8 +297,8 @@ class AIBrain:
 
         # 0. New chatter greetings have immediate high priority
         if is_new_chatter and getattr(self.cfg, "greet_new_chatters", True):
-            if elapsed_since_last < 1.0:
-                return False, "cooldown_active (1.0s)"
+            if elapsed_since_last < 0.5:
+                return False, "cooldown_active (0.5s)"
             return True, "new_chatter_greeting"
 
         # 1. Direct address triggers (Chat or Host explicitly mentions AI / God / Co-Host)
@@ -313,15 +309,15 @@ class AIBrain:
         ]
         for trigger in direct_triggers:
             if trigger and trigger in text_lower:
-                if elapsed_since_last < 1.0:
-                    return False, "cooldown_active (1.0s)"
+                if elapsed_since_last < 0.5:
+                    return False, "cooldown_active (0.5s)"
                 return True, f"direct_mention: '{trigger}'"
 
         # 2. Host asks a direct question or prompt
         if is_host:
             if text_lower.endswith("?") or any(w in text_lower for w in ["what do you think", "your thoughts", "right nova", "right i am", "tell them", "roast"]):
-                if elapsed_since_last < 1.5:
-                    return False, "cooldown_active (1.5s)"
+                if elapsed_since_last < 1.0:
+                    return False, "cooldown_active (1.0s)"
                 return True, "host_question"
 
         # 3. Check for member-to-member direct replies to preserve viewer entanglement
@@ -330,15 +326,16 @@ class AIBrain:
             if is_peer:
                 return False, peer_reason
 
-        # 4. Eco Mode Gating: In Eco/Throttled mode (quiet chat / low viewers), require direct mention
+        # 4. Eco Mode Gating: In Eco/Throttled mode (quiet chat / low viewers), allow direct mentions & questions
         is_eco = (self.engagement_mode == "eco") and self.cfg.eco_mode_enabled
         if is_eco and not is_host:
-            return False, "eco_mode_suppressed (quiet chat or low viewers - direct mention required)"
+            if "?" not in text_lower and not any(t in text_lower for t in direct_triggers):
+                return False, "eco_mode_suppressed (quiet chat - direct mention or question required)"
 
         # 5. Chat direct questions (contains '?')
         if not is_host and "?" in text_lower:
-            if elapsed_since_last < 2.0:
-                rem = 2.0 - elapsed_since_last
+            if elapsed_since_last < 1.0:
+                rem = 1.0 - elapsed_since_last
                 return False, f"cooldown_active ({rem:.1f}s remaining)"
             return True, "chat_question"
 
@@ -526,12 +523,13 @@ class AIBrain:
 
         try:
             if GENAI_NEW_SDK:
-                # google-genai 1.0+ streaming with zero thinking budget for sub-second delivery
+                # google-genai 1.0+ streaming with zero thinking budget and AFC disabled for sub-second delivery
                 cfg = genai_types.GenerateContentConfig(
                     system_instruction=self.cfg.ai_system_prompt,
                     temperature=0.9,
                     max_output_tokens=500,
                     thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                    automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
                 )
                 response = await asyncio.to_thread(
                     self.client.models.generate_content_stream,

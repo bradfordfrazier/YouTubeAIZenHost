@@ -151,6 +151,7 @@ async def test_ai_brain():
 
     # 8. Test Eco Mode Gating (Throttles generic keywords, allows direct mentions)
     print("-> Testing Eco Mode Gating (Low viewers / quiet chat)...")
+    brain.cfg.eco_mode_enabled = True
     brain.set_engagement_mode("eco", is_stream_live=True, concurrent_viewers=0, is_chat_active=False)
     brain.last_response_time = 0.0
 
@@ -166,6 +167,7 @@ async def test_ai_brain():
 
     # 9. Test Standby Mode (0 tokens when OBS is offline)
     print("-> Testing Standby Mode (Stream offline)...")
+    brain.cfg.obs_require_stream_active = True
     brain.set_engagement_mode("standby", is_stream_live=False, concurrent_viewers=0, is_chat_active=False)
     standby_trig, standby_reason = brain.should_trigger_response("Who is the best player?", is_host=False)
     print(f"   [Standby Mode Chat]: should_trigger={standby_trig}, reason={standby_reason}")

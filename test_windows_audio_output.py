@@ -55,25 +55,25 @@ async def test_dual_audio_output():
     await tts.queue_speech(test_phrase)
 
     # 5. Pump audio packets to NDI while PortAudio callback simultaneously drains local buffer
-    print("-> Streaming audio packets to NDI & WASAPI for 3.5 seconds...")
-    samples_per_packet = 960
+    print("-> Streaming frame-locked audio packets to NDI & WASAPI for 3.5 seconds...")
+    samples_per_packet = 800  # 800 samples @ 60 FPS = 16.666 ms
     packets_sent = 0
     t0 = time.perf_counter()
 
-    for _ in range(175):  # 175 packets * 20ms = 3.5 seconds
+    for _ in range(210):  # 210 frames * 16.666ms = 3.5 seconds
         audio_for_ndi, _ = tts.pop_audio_packet(samples_per_packet)
         ndi.send_audio(audio_for_ndi)
         packets_sent += 1
-        await asyncio.sleep(0.019)
+        await asyncio.sleep(0.015)
 
     t1 = time.perf_counter()
-    print(f"-> Pumped {packets_sent} audio packets ({packets_sent*20/1000:.2f}s) in {t1-t0:.3f}s")
+    print(f"-> Pumped {packets_sent} audio frames ({packets_sent/60:.2f}s) in {t1-t0:.3f}s")
 
     sd_stream.stop()
     sd_stream.close()
     ndi.close()
 
-    assert packets_sent == 175, f"Expected 175 packets, got {packets_sent}"
+    assert packets_sent == 210, f"Expected 210 frames, got {packets_sent}"
     print("\n" + "=" * 65)
     print("DUAL WINDOWS WASAPI & NDI AUDIO OUTPUT TEST PASSED PERFECTLY!")
     print("=" * 65)

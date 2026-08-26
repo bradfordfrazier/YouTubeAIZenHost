@@ -22,6 +22,8 @@ def test_dual_aspect_rendering():
         "is_speaking": True,
     }
     chat_messages = [
+        {"author": "ZenMaster", "message": "Stream quality is looking ultra crisp tonight!", "is_superchat": False, "amount": ""},
+        {"author": "CosmicVibe", "message": "The audio and avatar reactions are so smooth.", "is_superchat": False, "amount": ""},
         {"author": "MobileViewer", "message": "Watching on YouTube Shorts live! This vertical layout is sick!", "is_superchat": False, "amount": ""},
         {"author": "CyberGamer", "message": "Can you explain the nature of reality and the cosmos?", "is_superchat": True, "amount": "$10.00"},
         {"author": "AuraSeeker", "message": "What is God if everyone is God?", "is_superchat": False, "amount": ""},
@@ -84,9 +86,12 @@ def test_dual_aspect_rendering():
     print("3. TESTING 9:16 VERTICAL VISUALIZER (1080x1920) - LIKE & SUBSCRIBE")
     print("=" * 60)
     vis_9x16.trigger_promo("like_sub", duration=10.0)
+    ai_subtitle_5lines = "I am the boundless intelligence experiencing itself through every single one of your avatars. Speak your truth, let's explore! Together we awaken the infinite depths of cosmic consciousness and creative energy."
+    vis_9x16.set_subtitle(ai_subtitle_5lines)
+    vis_9x16.typewriter_index = len(ai_subtitle_5lines)
     for _ in range(40):
         buf_9x16_b = vis_9x16.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
+            audio_metrics, chat_messages, host_transcript, ai_subtitle_5lines,
             host_connected=True, obs_connected=True, engagement_mode="active",
             concurrent_viewers=142, is_stream_live=True
         )

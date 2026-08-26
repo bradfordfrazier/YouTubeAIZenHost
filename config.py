@@ -105,11 +105,11 @@ class AppConfig:
     # --------------------------------------------------------------------------
     # 5. Token Efficiency & Engagement State Controls
     # --------------------------------------------------------------------------
-    obs_require_stream_active: bool = os.getenv("OBS_REQUIRE_STREAM_ACTIVE", "true").lower() in ("true", "1", "yes")
+    obs_require_stream_active: bool = os.getenv("OBS_REQUIRE_STREAM_ACTIVE", "false").lower() in ("true", "1", "yes")
     min_concurrent_viewers_active: int = int(os.getenv("MIN_CONCURRENT_VIEWERS_ACTIVE", "1"))
-    eco_mode_enabled: bool = os.getenv("ECO_MODE_ENABLED", "true").lower() in ("true", "1", "yes")
-    max_responses_per_minute: int = int(os.getenv("MAX_RESPONSES_PER_MINUTE", "6"))
-    max_responses_per_hour: int = int(os.getenv("MAX_RESPONSES_PER_HOUR", "80"))
+    eco_mode_enabled: bool = os.getenv("ECO_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
+    max_responses_per_minute: int = int(os.getenv("MAX_RESPONSES_PER_MINUTE", "12"))
+    max_responses_per_hour: int = int(os.getenv("MAX_RESPONSES_PER_HOUR", "120"))
 
     # Spontaneous Idle Commentary & Adaptive Backoff
     spontaneous_commentary_enabled: bool = os.getenv("SPONTANEOUS_COMMENTARY_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -134,25 +134,37 @@ class AppConfig:
     visualizer_height: int = int(os.getenv("VISUALIZER_HEIGHT", "1920" if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else "1080"))
     visualizer_window_width: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_WIDTH")) if os.getenv("VISUALIZER_WINDOW_WIDTH") else None
     visualizer_window_height: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_HEIGHT")) if os.getenv("VISUALIZER_WINDOW_HEIGHT") else None
+    visualizer_native_window: bool = os.getenv("VISUALIZER_NATIVE_WINDOW", "false").lower() in ("true", "1", "yes")
     visualizer_fps: int = int(os.getenv("VISUALIZER_FPS", "60"))
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
 
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()
         if ar in ("9:16", "vertical", "portrait", "shorts"):
-            if "VISUALIZER_WIDTH" not in os.environ:
+            # Ensure vertical dimensions (1080x1920) even if .env contains template 1920x1080 values
+            if self.visualizer_width >= self.visualizer_height:
                 self.visualizer_width = 1080
-            if "VISUALIZER_HEIGHT" not in os.environ:
                 self.visualizer_height = 1920
-            if not self.visualizer_window_width:
-                self.visualizer_window_width = 450
-            if not self.visualizer_window_height:
-                self.visualizer_window_height = 800
+            if self.visualizer_native_window:
+                self.visualizer_window_width = self.visualizer_width
+                self.visualizer_window_height = self.visualizer_height
+            else:
+                if not self.visualizer_window_width:
+                    self.visualizer_window_width = 540
+                if not self.visualizer_window_height:
+                    self.visualizer_window_height = 960
         else:
-            if not self.visualizer_window_width:
-                self.visualizer_window_width = 1280
-            if not self.visualizer_window_height:
-                self.visualizer_window_height = 720
+            if self.visualizer_width <= self.visualizer_height:
+                self.visualizer_width = 1920
+                self.visualizer_height = 1080
+            if self.visualizer_native_window:
+                self.visualizer_window_width = self.visualizer_width
+                self.visualizer_window_height = self.visualizer_height
+            else:
+                if not self.visualizer_window_width:
+                    self.visualizer_window_width = 1280
+                if not self.visualizer_window_height:
+                    self.visualizer_window_height = 720
 
     # Promotional Graphic Overlays ("Ask God", "Like & Subscribe")
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -172,7 +184,13 @@ class AppConfig:
     # 9. NDI Broadcaster Settings
     # --------------------------------------------------------------------------
     ndi_stream_name: str = os.getenv("NDI_STREAM_NAME", "AI_COHOST_FEED")
-    ndi_groups: Optional[str] = os.getenv("NDI_GROUPS", None)
+    ndi_audio_enabled: bool = os.getenv("NDI_AUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
+    # --------------------------------------------------------------------------
+    # 10. Hardware Performance Profile (Intel Core i5 / UHD 630 Graphics Optimization)
+    # --------------------------------------------------------------------------
+    performance_mode: str = os.getenv("PERFORMANCE_MODE", "balanced")  # "ultra", "balanced", "eco_low_spec"
+    low_spec_mode: bool = os.getenv("LOW_SPEC_MODE", "false").lower() in ("true", "1", "yes")
+    visualizer_particle_count: int = int(os.getenv("VISUALIZER_PARTICLE_COUNT", "70"))
 
     # --------------------------------------------------------------------------
     # Backwards Compatibility Accessors

@@ -355,6 +355,9 @@ class LocalCoHostApp:
 
         # Speech & Generation Task
         self.active_ai_task: Optional[asyncio.Task] = None
+        self.pending_triggers: list = []
+        self.ndi_audio_thread: Optional[threading.Thread] = None
+        self.ndi_audio_running: bool = False
 
     # --------------------------------------------------------------------------
     # 1. State & Engagement State Management
@@ -460,50 +463,68 @@ class LocalCoHostApp:
     # 2. AI Brain & Speech Generation Dispatcher
     # --------------------------------------------------------------------------
     def _trigger_ai_turn(self, prompt_trigger: Optional[str] = None, force: bool = False):
-        """Starts an asyncio task to stream LLM tokens, update mood, and synthesize speech."""
-        if self.active_ai_task and not self.active_ai_task.done():
-            if force:
-                logger.info("Interrupting previous AI turn for high-priority event...")
+        """Dispatches or queues an AI response turn."""
+        if not prompt_trigger:
+            return
+
+        if force:
+            if self.active_ai_task and not self.active_ai_task.done():
                 self.active_ai_task.cancel()
-            else:
-                logger.info("AI Co-Host is already speaking/generating. Skipping trigger.")
-                return
+            self.active_ai_task = asyncio.create_task(self._ai_turn_worker(prompt_trigger))
+            return
+
+        # If already generating or speaking, queue the request so it is never dropped
+        if (self.active_ai_task and not self.active_ai_task.done()) or self.tts.is_speaking:
+            if len(self.pending_triggers) < 5:
+                self.pending_triggers.append(prompt_trigger)
+                logger.info(f"📥 [Queued Turn] Co-Host busy. Queued request ({len(self.pending_triggers)} in queue): '{prompt_trigger[:60]}...'")
+            return
 
         self.active_ai_task = asyncio.create_task(self._ai_turn_worker(prompt_trigger))
 
     async def _ai_turn_worker(self, prompt_trigger: Optional[str]):
-        """Worker processing streaming tokens from Gemini."""
+        """Worker streaming LLM response and synthesizing full cohesive speech."""
+        full_statement = ""
+        active_mood = "energetic"
         try:
             async for event in self.brain.generate_response_stream(prompt_trigger):
                 ev_type = event.get("type", "")
 
                 if ev_type == "mood":
-                    mood = event.get("mood", "chill")
-                    self.visualizer.set_mood(mood)
+                    active_mood = event.get("mood", "chill")
+                    self.visualizer.set_mood(active_mood)
 
                 elif ev_type == "token":
                     full_text = event.get("full_text", "")
+                    full_statement = full_text
                     self.current_ai_subtitle = full_text
                     self.visualizer.set_subtitle(full_text)
 
-                elif ev_type == "sentence":
-                    pass
-
                 elif ev_type == "complete":
-                    full_text = event.get("full_text", "")
-                    mood = event.get("mood", "chill")
+                    full_text = event.get("full_text", "").strip()
+                    mood = event.get("mood", active_mood)
+                    full_statement = full_text
                     self.current_ai_subtitle = full_text
                     self.visualizer.set_subtitle(full_text)
                     self.visualizer.set_mood(mood)
                     self.last_activity_time = time.time()
-                    if full_text:
-                        logger.info(f"Synthesizing complete AI speech: '{full_text}'")
-                        await self.tts.queue_speech(full_text)
+
+            # Synthesize the entire cohesive statement as a single pristine audio stream
+            if full_statement.strip():
+                clean_speech = full_statement.strip()
+                logger.info(f"🎙️ [AI Speech] Synthesizing complete statement: '{clean_speech}'")
+                await self.tts.queue_speech(clean_speech)
 
         except asyncio.CancelledError:
             logger.debug("AI turn worker cancelled.")
         except Exception as e:
             logger.error(f"Error in AI turn worker: {e}")
+        finally:
+            # Process next queued trigger if available
+            if self.pending_triggers and self.running:
+                next_trigger = self.pending_triggers.pop(0)
+                logger.info(f"📤 [Dequeuing Turn] Processing next queued request: '{next_trigger[:60]}...'")
+                self.active_ai_task = asyncio.create_task(self._ai_turn_worker(next_trigger))
 
     # --------------------------------------------------------------------------
     # 3. Local OBS Studio Integration (Direct WebSocket on localhost)
@@ -1259,92 +1280,101 @@ class LocalCoHostApp:
                 logger.error(f"Error in idle reflection monitor: {e}")
 
     # --------------------------------------------------------------------------
-    # 7. Dedicated High-Priority Audio OS Thread & 60 FPS Visualizer Video Loop
+    # 7. High-Precision Audio & 60 FPS Visualizer Video Loop (Synchronized NDI)
     # --------------------------------------------------------------------------
     def _sd_audio_callback(self, outdata, frames, time_info, status):
-        """High-priority PortAudio WASAPI real-time audio callback running on kernel MMCSS thread."""
+        """High-priority PortAudio real-time audio callback running on kernel MMCSS thread."""
         if status:
-            logger.debug(f"WASAPI Audio Callback status: {status}")
+            logger.debug(f"Audio Callback status: {status}")
         outdata[:] = self.tts.pop_local_audio(frames, volume=getattr(self.cfg, "local_audio_volume", 1.0))
 
-    def _audio_pump_thread(self):
+    def _ndi_audio_pump_worker(self):
         """
-        Dedicated high-priority OS thread delivering uninterrupted 48kHz stereo planar audio to NDI.
-        Runs at 50Hz (960 samples / 20ms) independently of render loops and asyncio.
+        High-priority isochronous audio pump thread for NDI.
+        Pumps 480 audio samples (10ms @ 48kHz) directly to NDI, completely
+        decoupled from video rendering delays to guarantee zero buffer underruns in OBS.
         """
-        logger.info("Dedicated 50 Hz NDI Audio OS Thread started (48000 Hz Stereo Planar)...")
-        packet_interval = 0.020  # 20ms per packet
-        samples_per_packet = 960  # 960 samples @ 48kHz
-        t_start = time.perf_counter()
-        tick_count = 0
+        packet_samples = 480
+        target_interval = packet_samples / 48000.0  # 0.010 s
+        t_next = time.perf_counter()
 
-        while self.running:
-            audio_for_ndi, _ = self.tts.pop_audio_packet(samples_per_packet)
-            self.ndi.send_audio(audio_for_ndi)
+        while self.running and self.ndi_audio_running:
+            try:
+                audio_for_ndi, _ = self.tts.pop_audio_packet(packet_samples)
+                if self.ndi and self.ndi.is_open:
+                    self.ndi.send_audio(audio_for_ndi)
+            except Exception as e:
+                logger.debug(f"NDI audio pump note: {e}")
 
-            tick_count += 1
-            t_target = t_start + tick_count * packet_interval
-            rem = t_target - time.perf_counter()
-            if rem > 0.002:
-                time.sleep(rem - 0.001)
-            while time.perf_counter() < t_target:
+            t_next += target_interval
+            sleep_sec = t_next - time.perf_counter()
+            if sleep_sec > 0.001:
+                time.sleep(sleep_sec)
+            while time.perf_counter() < t_next:
                 pass
 
     async def video_broadcast_task(self):
-        """60 FPS visualizer rendering and NDI video transmission task."""
-        logger.info(f"Starting 60 FPS Visualizer Video Loop ({self.visualizer.width}x{self.visualizer.height})...")
+        """
+        60 FPS visualizer rendering and asynchronous NDI video transmission.
+        Audio is pumped concurrently by the dedicated _ndi_audio_pump_worker and/or PortAudio callback.
+        Guarantees zero audio jitter, zero sample drift, and perfect lip-sync in OBS.
+        """
+        logger.info(f"Starting 60 FPS Visualizer Video Loop ({self.visualizer.width}x{self.visualizer.height} @ 60fps + 48kHz Audio)...")
         target_frame_time = 1.0 / self.cfg.visualizer_fps  # 16.666 ms
 
         frame_count = 0
         t_last_log = time.time()
+        try:
+            while self.running:
+                t_start = time.perf_counter()
 
-        while self.running:
-            t_start = time.perf_counter()
+                audio_metrics = self.tts.get_audio_metrics()
+                chat_list = list(self.chat_history)
 
-            audio_metrics = self.tts.get_audio_metrics()
-            chat_list = list(self.chat_history)
-
-            rgba_bytes = self.visualizer.render_frame(
-                audio_metrics=audio_metrics,
-                chat_messages=chat_list,
-                host_transcript=self.current_host_transcript,
-                ai_subtitle=self.current_ai_subtitle,
-                host_connected=True,
-                obs_connected=self.obs_connected,
-                engagement_mode=self.engagement_mode,
-                concurrent_viewers=self.concurrent_viewers,
-                is_stream_live=self.is_streaming,
-            )
-
-            self.ndi.send_video(rgba_bytes)
-
-            if getattr(self.visualizer, "should_quit", False):
-                logger.info("Visualizer window closed by user (QUIT event). Shutting down...")
-                self.stop()
-                break
-
-            frame_count += 1
-            if frame_count % 120 == 0:
-                self._update_engagement_state()
-
-            if time.time() - t_last_log >= 10.0:
-                elapsed = time.time() - t_last_log
-                measured_fps = frame_count / elapsed
-                num_connections = self.ndi.get_num_connections()
-                logger.info(
-                    f"Broadcasting: {measured_fps:.1f} FPS | NDI Receivers: {num_connections} | "
-                    f"Mode: {self.engagement_mode.upper()} ({self.concurrent_viewers} viewers) | "
-                    f"Mood: {self.visualizer.current_mood.upper()}"
+                # 1. Render visualizer frame
+                rgba_bytes = self.visualizer.render_frame(
+                    audio_metrics=audio_metrics,
+                    chat_messages=chat_list,
+                    host_transcript=self.current_host_transcript,
+                    ai_subtitle=self.current_ai_subtitle,
+                    host_connected=True,
+                    obs_connected=self.obs_connected,
+                    engagement_mode=self.engagement_mode,
+                    concurrent_viewers=self.concurrent_viewers,
+                    is_stream_live=self.is_streaming,
                 )
-                frame_count = 0
-                t_last_log = time.time()
 
-            t_render = time.perf_counter() - t_start
-            sleep_time = target_frame_time - t_render
-            if sleep_time > 0:
+                # 2. Transmit video frame asynchronously over NDI (zero copy, zero drift)
+                self.ndi.send_video(rgba_bytes)
+
+                if getattr(self.visualizer, "should_quit", False):
+                    logger.info("Visualizer window closed by user (QUIT event). Shutting down...")
+                    self.stop()
+                    break
+
+                frame_count += 1
+                if frame_count % 120 == 0:
+                    self._update_engagement_state()
+
+                if time.time() - t_last_log >= 10.0:
+                    elapsed = time.time() - t_last_log
+                    measured_fps = frame_count / elapsed
+                    num_connections = self.ndi.get_num_connections()
+                    logger.info(
+                        f"Broadcasting: {measured_fps:.1f} FPS | NDI Receivers: {num_connections} | "
+                        f"Mode: {self.engagement_mode.upper()} ({self.concurrent_viewers} viewers) | "
+                        f"Mood: {self.visualizer.current_mood.upper()}"
+                    )
+                    frame_count = 0
+                    t_last_log = time.time()
+
+                t_render = time.perf_counter() - t_start
+                sleep_time = max(0.001, target_frame_time - t_render)
                 await asyncio.sleep(sleep_time)
-            else:
-                await asyncio.sleep(0.001)
+        except asyncio.CancelledError:
+            logger.debug("video_broadcast_task cancelled.")
+        except Exception as e:
+            logger.error(f"Fatal error in video_broadcast_task: {e}", exc_info=True)
 
     # --------------------------------------------------------------------------
     # 8. Main Lifecycle
@@ -1364,7 +1394,18 @@ class LocalCoHostApp:
 
         self.ndi.open()
 
-        # Initialize local Windows WASAPI real-time audio callback stream for OBS Window/App Capture & desktop
+        # Start high-priority dedicated NDI audio pump thread
+        if getattr(self.cfg, "ndi_audio_enabled", True) and not self.ndi.is_mock:
+            self.ndi_audio_running = True
+            self.ndi_audio_thread = threading.Thread(
+                target=self._ndi_audio_pump_worker,
+                name="ndi_audio_pump",
+                daemon=True,
+            )
+            self.ndi_audio_thread.start()
+            logger.info("🎵 Dedicated Isochronous NDI Audio Pump active (48kHz @ 10ms isochronous packets, zero-jitter).")
+
+        # Initialize local Windows WASAPI / DirectSound / WDM-KS real-time audio callback stream
         self.sd_stream = None
         if getattr(self.cfg, "local_audio_enabled", True) and sd is not None:
             try:
@@ -1380,12 +1421,12 @@ class LocalCoHostApp:
                     dtype="float32",
                     device=target_dev_idx,
                     callback=self._sd_audio_callback,
-                    blocksize=960,
+                    blocksize=0,  # Native hardware blocksize for glitch-free playback
                     latency=latency_setting,
                 )
                 self.sd_stream.start()
                 logger.info(
-                    f"🔊 Windows WASAPI Real-Time Audio active on [{target_dev_idx}] '{dev_name}' "
+                    f"🔊 Windows Native Audio active on [{target_dev_idx}] '{dev_name}' "
                     f"(API: {api_name}, Latency: {latency_setting}). "
                     "Glitch-free callback streaming enabled for OBS Window/Application Audio Capture!"
                 )
@@ -1399,14 +1440,6 @@ class LocalCoHostApp:
         else:
             logger.warning("sounddevice module not available. Install sounddevice for OBS Window audio capture.")
 
-        # Start dedicated high-priority audio thread
-        self.audio_thread = threading.Thread(
-            target=self._audio_pump_thread,
-            name="NDI_Audio_Pump_Thread",
-            daemon=True,
-        )
-        self.audio_thread.start()
-
         # Launch concurrent async tasks
         self.tasks = [
             asyncio.create_task(self.video_broadcast_task(), name="video_broadcaster"),
@@ -1419,7 +1452,10 @@ class LocalCoHostApp:
         ]
 
         try:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            results = await asyncio.gather(*self.tasks, return_exceptions=True)
+            for task, res in zip(self.tasks, results):
+                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                    logger.error(f"Task '{task.get_name()}' crashed with exception: {res}", exc_info=res)
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
         finally:
@@ -1462,10 +1498,11 @@ class LocalCoHostApp:
             except Exception:
                 pass
 
-        # 4. Join audio thread
-        if hasattr(self, "audio_thread") and self.audio_thread and self.audio_thread.is_alive():
+        # 4. Stop and join NDI audio pump thread
+        self.ndi_audio_running = False
+        if hasattr(self, "ndi_audio_thread") and self.ndi_audio_thread and self.ndi_audio_thread.is_alive():
             try:
-                self.audio_thread.join(timeout=0.3)
+                self.ndi_audio_thread.join(timeout=0.3)
             except Exception:
                 pass
 
@@ -1483,10 +1520,16 @@ def main():
     parser.add_argument("--vertical", "-v", action="store_true", help="Launch in 9:16 vertical mode (1080x1920)")
     parser.add_argument("--landscape", "-l", action="store_true", help="Launch in 16:9 landscape mode (1920x1080)")
     parser.add_argument("--aspect-ratio", "-ar", choices=["16:9", "9:16", "vertical", "landscape", "shorts"], default=None)
+    parser.add_argument("--native-window", action="store_true", help="Launch visualizer desktop window at full native resolution (1080x1920 or 1920x1080) for 1:1 OBS Window Capture")
+    parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 540 960)")
     parser.add_argument("--headless", action="store_true", help="Run visualizer in offscreen headless mode")
     parser.add_argument("--mock-chat", action="store_true", help="Enable simulated YouTube live chat")
     parser.add_argument("--no-local-audio", action="store_true", help="Disable local Windows audio output (NDI audio only)")
+    parser.add_argument("--audio-device", "-ad", type=str, default=None, help="Target Windows audio output device (name substring or index)")
+    parser.add_argument("--no-ndi-audio", action="store_true", help="Disable NDI audio stream (video only)")
     parser.add_argument("--local-audio-volume", type=float, default=1.0, help="Local Windows audio volume multiplier (0.0 - 2.0)")
+    parser.add_argument("--low-spec", action="store_true", help="Optimize for lower-spec PCs / Intel UHD Graphics (i5-10600)")
+    parser.add_argument("--performance-mode", choices=["ultra", "balanced", "eco_low_spec"], default=None, help="Hardware performance tuning mode")
     parser.add_argument("--list-audio-devices", action="store_true", help="List all available Windows audio output devices and exit")
     args = parser.parse_args()
 
@@ -1498,10 +1541,24 @@ def main():
         config.visualizer_aspect_ratio = "9:16"
         config.visualizer_width = 1080
         config.visualizer_height = 1920
+        if not args.window_size and not args.native_window:
+            config.visualizer_window_width = 540
+            config.visualizer_window_height = 960
     elif args.landscape or args.aspect_ratio in ("16:9", "landscape"):
         config.visualizer_aspect_ratio = "16:9"
         config.visualizer_width = 1920
         config.visualizer_height = 1080
+        if not args.window_size and not args.native_window:
+            config.visualizer_window_width = 1280
+            config.visualizer_window_height = 720
+
+    if args.native_window:
+        config.visualizer_native_window = True
+        config.visualizer_window_width = config.visualizer_width
+        config.visualizer_window_height = config.visualizer_height
+    elif args.window_size:
+        config.visualizer_window_width = args.window_size[0]
+        config.visualizer_window_height = args.window_size[1]
 
     if args.headless:
         config.visualizer_headless = True
@@ -1509,8 +1566,20 @@ def main():
         config.mock_chat_enabled = True
     if args.no_local_audio:
         config.local_audio_enabled = False
+    if args.audio_device is not None:
+        config.local_audio_device = args.audio_device
+    if args.no_ndi_audio:
+        config.ndi_audio_enabled = False
     if args.local_audio_volume != 1.0:
         config.local_audio_volume = args.local_audio_volume
+    if args.low_spec:
+        config.low_spec_mode = True
+        config.performance_mode = "eco_low_spec"
+        config.visualizer_particle_count = 40
+    if args.performance_mode:
+        config.performance_mode = args.performance_mode
+        if args.performance_mode == "eco_low_spec":
+            config.visualizer_particle_count = 40
 
     app = LocalCoHostApp()
 

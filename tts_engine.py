@@ -51,7 +51,7 @@ class TTSEngine:
         # Dual independent sample buffers for NDI and Local Windows Audio
         self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
         self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
-        self._buffer_lock = threading.Lock()
+        self._buffer_lock = threading.RLock()
 
         # FFT & Dynamics Analysis State
         self.num_spectrum_bands = 32
@@ -62,6 +62,57 @@ class TTSEngine:
 
         # Analysis window (sliding 1024-sample window for smooth FFT)
         self._analysis_window = np.zeros((1024, 2), dtype=np.float32)
+        self._hanning_window = np.hanning(1024).astype(np.float32)
+
+        # Precompute FFT frequency band slice indices (40Hz to 16kHz) for ultra-fast vectorization
+        fft_freqs = np.fft.rfftfreq(1024, 1.0 / self.sample_rate)
+        min_freq = 40.0
+        max_freq = 16000.0
+        freq_bins = np.logspace(
+            np.log10(min_freq), np.log10(max_freq), self.num_spectrum_bands + 1
+        )
+        self._band_slices = []
+        for i in range(self.num_spectrum_bands):
+            f_low = freq_bins[i]
+            f_high = freq_bins[i + 1]
+            indices = np.where((fft_freqs >= f_low) & (fft_freqs < f_high))[0]
+            if len(indices) > 0:
+                self._band_slices.append((int(indices[0]), int(indices[-1]) + 1))
+            else:
+                self._band_slices.append((0, 0))
+
+    def _decode_and_resample(self, audio_bytes: bytes) -> np.ndarray:
+        """Worker function executed in worker thread for zero-latency audio decoding."""
+        with io.BytesIO(audio_bytes) as bio:
+            data, src_sr = sf.read(bio, dtype="float32")
+
+        # Convert mono to stereo if necessary
+        if data.ndim == 1:
+            data = np.column_stack((data, data))
+        elif data.shape[1] == 1:
+            data = np.column_stack((data[:, 0], data[:, 0]))
+
+        # High-quality polyphase FIR resampling (e.g. 24kHz -> 48kHz is 2/1)
+        if src_sr != self.sample_rate:
+            gcd = np.gcd(int(self.sample_rate), int(src_sr))
+            up = int(self.sample_rate // gcd)
+            down = int(src_sr // gcd)
+            data = scipy.signal.resample_poly(data, up, down, axis=0).astype(np.float32)
+
+        # Prevent digital clipping: normalize peaks if exceeding 0.95
+        max_val = float(np.max(np.abs(data)))
+        if max_val > 0.95:
+            data = (data / max_val) * 0.90
+
+        # Apply subtle fade-in / fade-out (5ms = 240 samples) to eliminate click artifacts
+        fade_samples = min(240, len(data) // 4)
+        if fade_samples > 0:
+            fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
+            fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)[:, None]
+            data[:fade_samples] *= fade_in
+            data[-fade_samples:] *= fade_out
+
+        return data.astype(np.float32)
 
     async def synthesize(self, text: str) -> np.ndarray:
         """
@@ -99,35 +150,8 @@ class TTSEngine:
                 logger.warning("No audio bytes received from edge-tts")
                 return np.zeros((0, 2), dtype=np.float32)
 
-            # In-memory decoding via soundfile
-            with io.BytesIO(audio_bytes) as bio:
-                data, src_sr = sf.read(bio, dtype="float32")
-
-            # Convert mono to stereo if necessary
-            if data.ndim == 1:
-                data = np.column_stack((data, data))
-            elif data.shape[1] == 1:
-                data = np.column_stack((data[:, 0], data[:, 0]))
-
-            # Resample to 48kHz using high-quality polyphase FIR filter (e.g. 24kHz -> 48kHz is 2/1)
-            if src_sr != self.sample_rate:
-                gcd = np.gcd(int(self.sample_rate), int(src_sr))
-                up = int(self.sample_rate // gcd)
-                down = int(src_sr // gcd)
-                data = scipy.signal.resample_poly(data, up, down, axis=0).astype(np.float32)
-
-            # Prevent digital clipping: normalize peaks if exceeding 0.95
-            max_val = np.max(np.abs(data))
-            if max_val > 0.95:
-                data = (data / max_val) * 0.90
-
-            # Apply subtle fade-in / fade-out (5ms) to prevent audio clicks
-            fade_samples = min(240, len(data) // 4)
-            if fade_samples > 0:
-                fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
-                fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)[:, None]
-                data[:fade_samples] *= fade_in
-                data[-fade_samples:] *= fade_out
+            # Offload CPU-heavy decoding and polyphase FIR resampling to thread pool
+            data = await asyncio.to_thread(self._decode_and_resample, bytes(audio_bytes))
 
             logger.info(f"Synthesized {len(data)/self.sample_rate:.2f}s of 48kHz stereo audio")
             return data
@@ -148,14 +172,15 @@ class TTSEngine:
         audio = await self.synthesize(text)
         if len(audio) > 0:
             with self._buffer_lock:
+                # Seamless crossfade stitching if buffer already contains pending audio
                 self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
                 self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
             logger.debug(f"Queued audio buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s")
 
-    def pop_audio_packet(self, num_samples: int = 960) -> Tuple[np.ndarray, np.ndarray]:
+    def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Pops exactly `num_samples` (default 960 = 20.0ms at 48kHz) from the NDI audio buffer.
-        Thread-safe for call from dedicated high-priority audio OS thread.
+        Pops exactly `num_samples` (default 800 = 16.666ms at 48kHz / 60fps) from the NDI audio buffer.
+        Thread-safe for call from visualizer or audio OS thread.
         Returns:
             - audio_for_ndi: shape (2, num_samples) planar float32 for cyndilib
             - packet_audio: shape (num_samples, 2) interleaved float32
@@ -217,7 +242,7 @@ class TTSEngine:
         return self.pop_audio_packet(self.samples_per_frame)
 
     def _update_metrics(self):
-        """Computes RMS amplitude and multi-band FFT energy for the visualizer."""
+        """Vectorized computation of RMS amplitude and multi-band FFT energy for the visualizer."""
         mono = np.mean(self._analysis_window, axis=1)
 
         # RMS Amplitude
@@ -228,39 +253,26 @@ class TTSEngine:
             self.smoothed_spectrum *= 0.85
             return
 
-        # 1024-point FFT with Hanning window
-        windowed = mono * np.hanning(len(mono))
+        # 1024-point FFT with precomputed Hanning window
+        windowed = mono * self._hanning_window
         fft_vals = np.abs(np.fft.rfft(windowed))
-        fft_freqs = np.fft.rfftfreq(len(mono), 1.0 / self.sample_rate)
 
-        # Group into logarithmically spaced frequency bins (40Hz to 16kHz)
+        # Vectorized frequency band energy computation
         bands = np.zeros(self.num_spectrum_bands, dtype=np.float32)
-        min_freq = 40.0
-        max_freq = 16000.0
-        freq_bins = np.logspace(
-            np.log10(min_freq), np.log10(max_freq), self.num_spectrum_bands + 1
-        )
-
-        for i in range(self.num_spectrum_bands):
-            f_low = freq_bins[i]
-            f_high = freq_bins[i + 1]
-            mask = (fft_freqs >= f_low) & (fft_freqs < f_high)
-            if np.any(mask):
-                val = float(np.mean(fft_vals[mask]))
+        for i, (i_low, i_high) in enumerate(self._band_slices):
+            if i_high > i_low:
+                val = float(np.mean(fft_vals[i_low:i_high]))
                 bands[i] = min(1.0, val * 0.15)
 
-        # Exponential smoothing (fast attack, smooth decay)
+        # Vectorized exponential smoothing (fast attack, smooth decay)
         attack = 0.7
         decay = 0.25
-        for i in range(self.num_spectrum_bands):
-            if bands[i] > self.smoothed_spectrum[i]:
-                self.smoothed_spectrum[i] = (
-                    self.smoothed_spectrum[i] * (1.0 - attack) + bands[i] * attack
-                )
-            else:
-                self.smoothed_spectrum[i] = (
-                    self.smoothed_spectrum[i] * (1.0 - decay) + bands[i] * decay
-                )
+        mask = bands > self.smoothed_spectrum
+        self.smoothed_spectrum = np.where(
+            mask,
+            self.smoothed_spectrum * (1.0 - attack) + bands * attack,
+            self.smoothed_spectrum * (1.0 - decay) + bands * decay,
+        ).astype(np.float32)
 
     def get_audio_metrics(self) -> Dict:
         """Returns instantaneous audio metrics dictionary for the Visualizer."""

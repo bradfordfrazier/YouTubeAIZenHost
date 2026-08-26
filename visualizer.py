@@ -296,7 +296,7 @@ class Visualizer:
         self.celebration_particles: List[CelebrationParticle] = []
         self.celebration_timer: float = 0.0
 
-        # Promotional Callout Overlays ("Ask God Your Questions", "Like & Subscribe")
+        # Promotional Callout Overlays ("Ask Me Your Questions", "Like & Subscribe")
         self.promo_enabled = getattr(self.cfg, "promo_overlay_enabled", True)
         self.promo_interval = getattr(self.cfg, "promo_overlay_interval_sec", 40.0)
         self.promo_duration = getattr(self.cfg, "promo_overlay_duration_sec", 10.0)
@@ -1186,7 +1186,7 @@ class Visualizer:
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Ask God Your Questions Now!' celestial callout card:
+        Draws the 'Ask Your Questions Now!' celestial callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
         - Top centered 'DIVINE Q&A LIVE' badge tag
         - Centered title row with celestial sunbeam question glyph + massive bold title
@@ -1223,7 +1223,7 @@ class Visualizer:
         surf.blit(tag_txt, (tag_x + (26 if self.is_vertical else 22), tag_y + (3 if self.is_vertical else 2)))
 
         # 3. Middle Title Row: Celestial Question Badge + Title (Centered Lockup)
-        title_str = "Ask God Your Questions Now!"
+        title_str = "Ask Your Questions Now!"
         title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
         sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
 
@@ -1260,7 +1260,7 @@ class Visualizer:
         surf.blit(title_rend, (title_x, title_y))
 
         # 4. Bottom Subtitle Row (Centered)
-        sub_str = "Drop your questions in chat • Divine wisdom & roasts!"
+        sub_str = "Drop your questions in chat • Divine wisdom & occassional roasting"
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_x = (w - sub_rend.get_width()) // 2
         sub_y = 118 if self.is_vertical else 96

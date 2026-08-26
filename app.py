@@ -1554,6 +1554,22 @@ class LocalCoHostApp:
             except Exception:
                 pass
 
+        # Shut down default executor immediately to prevent thread hangs on exit
+        if hasattr(self, "loop") and self.loop:
+            try:
+                if hasattr(self.loop, "_default_executor") and self.loop._default_executor:
+                    self.loop._default_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+
+        # Disconnect OBS client if active
+        if hasattr(self, "obs_client") and self.obs_client is not None:
+            try:
+                self.obs_client.disconnect()
+                self.obs_client = None
+            except Exception:
+                pass
+
         # 2. Stop WASAPI audio output stream
         if hasattr(self, "sd_stream") and self.sd_stream is not None:
             try:
@@ -1593,7 +1609,8 @@ def main():
     parser.add_argument("--landscape", "-l", action="store_true", help="Launch in 16:9 landscape mode (1920x1080)")
     parser.add_argument("--aspect-ratio", "-ar", choices=["16:9", "9:16", "vertical", "landscape", "shorts"], default=None)
     parser.add_argument("--native-window", action="store_true", help="Launch visualizer desktop window at full native resolution (1080x1920 or 1920x1080) for 1:1 OBS Window Capture")
-    parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 540 960)")
+    parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 960 540)")
+    parser.add_argument("--borderless", action="store_true", help="Launch visualizer in borderless window mode without titlebar/borders")
     parser.add_argument("--headless", action="store_true", help="Run visualizer in offscreen headless mode")
     parser.add_argument("--mock-chat", action="store_true", help="Enable simulated YouTube live chat")
     parser.add_argument("--no-local-audio", action="store_true", help="Disable local Windows audio output (NDI audio only)")
@@ -1621,8 +1638,8 @@ def main():
         config.visualizer_width = 1920
         config.visualizer_height = 1080
         if not args.window_size and not args.native_window:
-            config.visualizer_window_width = 1280
-            config.visualizer_window_height = 720
+            config.visualizer_window_width = 960
+            config.visualizer_window_height = 540
 
     if args.native_window:
         config.visualizer_native_window = True
@@ -1632,6 +1649,8 @@ def main():
         config.visualizer_window_width = args.window_size[0]
         config.visualizer_window_height = args.window_size[1]
 
+    if args.borderless:
+        config.visualizer_borderless = True
     if args.headless:
         config.visualizer_headless = True
     if args.mock_chat:
@@ -1655,13 +1674,17 @@ def main():
 
     app = LocalCoHostApp()
 
-    # Clean signal handling for Ctrl+C and termination signals
+    # Clean signal handling for Ctrl+C, Ctrl+Break, and termination signals
     import signal
     def _sig_handler(sig, frame):
-        logger.info("Interrupt signal received (Ctrl+C). Shutting down AI Co-Host cleanly...")
-        app.stop()
-        import sys
-        sys.exit(0)
+        sig_name = "Ctrl+Break" if sig == getattr(signal, "SIGBREAK", -1) else "Ctrl+C"
+        logger.info(f"Interrupt signal received ({sig_name}). Shutting down AI Co-Host cleanly...")
+        try:
+            app.stop()
+        except Exception:
+            pass
+        import os
+        os._exit(0)
 
     try:
         signal.signal(signal.SIGINT, _sig_handler)
@@ -1675,7 +1698,13 @@ def main():
         asyncio.run(app.start())
     except (KeyboardInterrupt, SystemExit):
         logger.info("AI Co-Host stopped.")
-        app.stop()
+    finally:
+        try:
+            app.stop()
+        except Exception:
+            pass
+        import os
+        os._exit(0)
 
 
 if __name__ == "__main__":

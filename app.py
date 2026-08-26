@@ -7,16 +7,17 @@ neural 48kHz TTS synthesis, 1080p60 Pygame visualizer, and local NDI broadcastin
 
 import asyncio
 import collections
+import json
 import logging
 import os
 import random
 import re
+import socket
 import sys
 import threading
 import time
 import urllib.request
 import urllib.error
-import json
 from typing import Deque, Dict, List, Optional
 
 import numpy as np
@@ -141,6 +142,17 @@ if sys.platform == "win32":
         logger.info(f"Enabled Windows 1ms timer and {pri_str.upper()} process priority for smooth audio.")
     except Exception as e:
         logger.debug(f"Could not set Windows timer/priority: {e}")
+
+
+def probe_tcp_port(host: str, port: int, timeout: float = 0.15) -> bool:
+    """Quickly probes if a target TCP host and port are actively listening without hanging the event loop."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect((host, port))
+            return True
+    except Exception:
+        return False
 
 
 def extract_youtube_video_id(url_or_id: str) -> str:
@@ -546,69 +558,77 @@ class LocalCoHostApp:
             )
             return
 
+        loop = asyncio.get_running_loop()
+
+        def _do_obs_fx_sync():
+            try:
+                res_scene = self.obs_client.call(obs_requests.GetCurrentProgramScene())
+                scene_name = ""
+                if hasattr(res_scene, "getCurrentProgramSceneName"):
+                    scene_name = res_scene.getCurrentProgramSceneName()
+                elif hasattr(res_scene, "getSettings"):
+                    scene_name = res_scene.getSettings().get("currentProgramSceneName", "")
+
+                if not scene_name:
+                    scene_name = self.current_scene or "Main"
+
+                item_id = None
+                try:
+                    res_item = self.obs_client.call(obs_requests.GetSceneItemId(sceneName=scene_name, sourceName=src))
+                    if hasattr(res_item, "getSceneItemId"):
+                        item_id = res_item.getSceneItemId()
+                    elif hasattr(res_item, "getSettings"):
+                        item_id = res_item.getSettings().get("sceneItemId", None)
+                except Exception as e:
+                    logger.debug(f"Scene item query for '{src}' note: {e}")
+
+                if item_id is not None:
+                    self.obs_client.call(
+                        obs_requests.SetSceneItemEnabled(sceneName=scene_name, sceneItemId=item_id, sceneItemEnabled=True)
+                    )
+                    logger.info(f"🎉 [OBS FX] Enabled scene item '{src}' (ID {item_id}) in scene '{scene_name}'")
+
+                    try:
+                        self.obs_client.call(
+                            obs_requests.TriggerMediaInputAction(inputName=src, mediaAction="OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART")
+                        )
+                    except Exception:
+                        pass
+
+                if flt:
+                    try:
+                        self.obs_client.call(obs_requests.SetSourceFilterEnabled(sourceName=src, filterName=flt, filterEnabled=True))
+                    except Exception as e:
+                        logger.debug(f"Filter toggle note: {e}")
+
+                return scene_name, item_id
+            except Exception as e:
+                logger.warning(f"Error executing OBS FX sync calls: {e}")
+                return None, None
+
         try:
             logger.info(f"🎉 [OBS FX] Activating OBS celebration FX on source '{src}' for {dur}s...")
-            res_scene = self.obs_client.call(obs_requests.GetCurrentProgramScene())
-            scene_name = ""
-            if hasattr(res_scene, "getCurrentProgramSceneName"):
-                scene_name = res_scene.getCurrentProgramSceneName()
-            elif hasattr(res_scene, "getSettings"):
-                scene_name = res_scene.getSettings().get("currentProgramSceneName", "")
-
-            if not scene_name:
-                scene_name = self.current_scene or "Main"
-
-            item_id = None
-            try:
-                res_item = self.obs_client.call(obs_requests.GetSceneItemId(sceneName=scene_name, sourceName=src))
-                if hasattr(res_item, "getSceneItemId"):
-                    item_id = res_item.getSceneItemId()
-                elif hasattr(res_item, "getSettings"):
-                    item_id = res_item.getSettings().get("sceneItemId", None)
-            except Exception as e:
-                logger.debug(f"Scene item query for '{src}' note: {e}")
+            scene_name, item_id = await loop.run_in_executor(None, _do_obs_fx_sync)
 
             if item_id is not None:
-                self.obs_client.call(
-                    obs_requests.SetSceneItemEnabled(sceneName=scene_name, sceneItemId=item_id, sceneItemEnabled=True)
-                )
-                logger.info(f"🎉 [OBS FX] Enabled scene item '{src}' (ID {item_id}) in scene '{scene_name}'")
-
-                try:
-                    self.obs_client.call(
-                        obs_requests.TriggerMediaInputAction(inputName=src, mediaAction="OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART")
-                    )
-                except Exception:
-                    pass
-
                 async def _disable_later():
                     await asyncio.sleep(dur)
-                    try:
-                        if self.obs_client and self.obs_connected:
-                            self.obs_client.call(
-                                obs_requests.SetSceneItemEnabled(sceneName=scene_name, sceneItemId=item_id, sceneItemEnabled=False)
-                            )
-                            logger.info(f"🎉 [OBS FX] Disabled celebration scene item '{src}' after {dur}s")
-                    except Exception as e:
-                        logger.debug(f"Error disabling celebration source: {e}")
-
-                asyncio.create_task(_disable_later())
-            else:
-                logger.info(f"🎉 [OBS FX] Source '{src}' not found in active scene '{scene_name}'.")
-
-            if flt:
-                try:
-                    self.obs_client.call(obs_requests.SetSourceFilterEnabled(sourceName=src, filterName=flt, filterEnabled=True))
-                    async def _disable_filter_later():
-                        await asyncio.sleep(dur)
+                    def _disable_sync():
                         try:
                             if self.obs_client and self.obs_connected:
-                                self.obs_client.call(obs_requests.SetSourceFilterEnabled(sourceName=src, filterName=flt, filterEnabled=False))
-                        except Exception:
-                            pass
-                    asyncio.create_task(_disable_filter_later())
-                except Exception as e:
-                    logger.debug(f"Filter toggle note: {e}")
+                                self.obs_client.call(
+                                    obs_requests.SetSceneItemEnabled(sceneName=scene_name, sceneItemId=item_id, sceneItemEnabled=False)
+                                )
+                                if flt:
+                                    self.obs_client.call(obs_requests.SetSourceFilterEnabled(sourceName=src, filterName=flt, filterEnabled=False))
+                                logger.info(f"🎉 [OBS FX] Disabled celebration scene item '{src}' after {dur}s")
+                        except Exception as e:
+                            logger.debug(f"Error disabling celebration source: {e}")
+                    await loop.run_in_executor(None, _disable_sync)
+
+                asyncio.create_task(_disable_later())
+            elif scene_name:
+                logger.info(f"🎉 [OBS FX] Source '{src}' not found in active scene '{scene_name}'.")
 
         except Exception as e:
             logger.warning(f"Error triggering OBS FX for '{src}': {e}")
@@ -619,19 +639,51 @@ class LocalCoHostApp:
             logger.warning("obs-websocket-py not installed. OBS polling disabled.")
             return
 
-        logger.info(f"Connecting to OBS WebSocket on {self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}...")
+        loop = asyncio.get_running_loop()
         ws_client = None
+        notified_unavailable = False
 
         while self.running:
             try:
-                ws_client = obsws(
+                # 1. Fast pre-flight TCP probe (0.15s) in thread pool to prevent hanging the asyncio event loop
+                is_open = await loop.run_in_executor(
+                    None,
+                    probe_tcp_port,
                     self.cfg.obs_ws_host,
                     self.cfg.obs_ws_port,
-                    self.cfg.obs_ws_password,
+                    getattr(self.cfg, "obs_connect_timeout", 0.2),
                 )
-                ws_client.connect()
+
+                if not is_open:
+                    if self.obs_connected:
+                        self.obs_connected = False
+                        self.obs_client = None
+                        logger.info("OBS Studio disconnected or closed.")
+                    elif not notified_unavailable:
+                        notified_unavailable = True
+                        logger.info(
+                            f"OBS Studio WebSocket ({self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}) not listening. "
+                            "Visualizer running standalone (will auto-connect when OBS starts)."
+                        )
+                    await asyncio.sleep(getattr(self.cfg, "obs_retry_interval_sec", 5.0))
+                    continue
+
+                # 2. Port is open: execute connection in thread pool
+                logger.info(f"Connecting to OBS WebSocket on {self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}...")
+
+                def _connect_client_sync():
+                    client = obsws(
+                        self.cfg.obs_ws_host,
+                        self.cfg.obs_ws_port,
+                        self.cfg.obs_ws_password,
+                    )
+                    client.connect()
+                    return client
+
+                ws_client = await loop.run_in_executor(None, _connect_client_sync)
                 self.obs_client = ws_client
                 self.obs_connected = True
+                notified_unavailable = False
                 logger.info("Connected to OBS Studio WebSocket locally!")
 
                 def on_event(event):
@@ -654,77 +706,87 @@ class LocalCoHostApp:
 
                 while self.running:
                     now = time.time()
-
-                    # 1. Periodically check stream live status & scene
-                    if now - last_stream_check >= stream_poll_interval:
+                    check_stream = (now - last_stream_check >= stream_poll_interval)
+                    if check_stream:
                         last_stream_check = now
-                        try:
-                            res_stream = ws_client.call(obs_requests.GetStreamStatus())
-                            active = (
-                                res_stream.getOutputActive()
-                                if hasattr(res_stream, "getOutputActive")
-                                else res_stream.getSettings().get("outputActive", False)
-                                if hasattr(res_stream, "getSettings")
-                                else getattr(res_stream, "outputActive", False)
-                            )
-                            is_streaming_now = bool(active)
 
-                            res_scene = ws_client.call(obs_requests.GetCurrentProgramScene())
-                            scene_now = ""
+                    source_name = self.cfg.obs_transcript_source_name
+
+                    # 3. Offload all synchronous OBS request-responses to thread pool
+                    def _poll_obs_sync():
+                        res_st = ws_client.call(obs_requests.GetStreamStatus()) if check_stream else None
+                        res_sc = ws_client.call(obs_requests.GetCurrentProgramScene()) if check_stream else None
+                        res_tr = ws_client.call(obs_requests.GetInputSettings(inputName=source_name))
+                        return res_st, res_sc, res_tr
+
+                    try:
+                        res_stream, res_scene, res_transcript = await loop.run_in_executor(None, _poll_obs_sync)
+                    except Exception as e:
+                        logger.warning(f"OBS WebSocket connection lost: {e}. Reconnecting...")
+                        break
+
+                    # Process stream status
+                    if res_stream is not None:
+                        active = (
+                            res_stream.getOutputActive()
+                            if hasattr(res_stream, "getOutputActive")
+                            else res_stream.getSettings().get("outputActive", False)
+                            if hasattr(res_stream, "getSettings")
+                            else getattr(res_stream, "outputActive", False)
+                        )
+                        is_streaming_now = bool(active)
+
+                        scene_now = ""
+                        if res_scene is not None:
                             if hasattr(res_scene, "getCurrentProgramSceneName"):
                                 scene_now = res_scene.getCurrentProgramSceneName()
                             elif hasattr(res_scene, "getSettings"):
                                 scene_now = res_scene.getSettings().get("currentProgramSceneName", "")
-                            if not scene_now:
-                                scene_now = self.current_scene
+                        if not scene_now:
+                            scene_now = self.current_scene
 
-                            state_changed = (is_streaming_now != self.is_streaming) or (scene_now != self.current_scene)
-                            self.is_streaming = is_streaming_now
-                            self.current_scene = scene_now
+                        state_changed = (is_streaming_now != self.is_streaming) or (scene_now != self.current_scene)
+                        self.is_streaming = is_streaming_now
+                        self.current_scene = scene_now
 
-                            if state_changed:
-                                logger.info(
-                                    f"🎬 [OBS State Changed] Live Stream: {'🔴 ON AIR' if self.is_streaming else '⚪ OFFLINE'} | "
-                                    f"Active Scene: '{self.current_scene}'"
-                                )
-                                self._update_engagement_state()
-                        except Exception as e:
-                            logger.debug(f"OBS stream status check note: {e}")
+                        if state_changed:
+                            logger.info(
+                                f"🎬 [OBS State Changed] Live Stream: {'🔴 ON AIR' if self.is_streaming else '⚪ OFFLINE'} | "
+                                f"Active Scene: '{self.current_scene}'"
+                            )
+                            self._update_engagement_state()
 
-                    # 2. Poll speech transcript source
-                    try:
-                        source_name = self.cfg.obs_transcript_source_name
-                        res = ws_client.call(obs_requests.GetInputSettings(inputName=source_name))
-                        if res.status:
-                            settings = res.getSettings()
-                            text = settings.get("text", "").strip()
-                            if text and text != self.last_transcript_text:
-                                self.last_transcript_text = text
-                                logger.info(f"🎙️ [OBS Transcript] {text}")
-                                self.current_host_transcript = text
-                                self.brain.add_transcript("Host", text)
-                                self.last_activity_time = time.time()
+                    # Process transcript
+                    if res_transcript and getattr(res_transcript, "status", False):
+                        settings = res_transcript.getSettings()
+                        text = settings.get("text", "").strip()
+                        if text and text != self.last_transcript_text:
+                            self.last_transcript_text = text
+                            logger.info(f"🎙️ [OBS Transcript] {text}")
+                            self.current_host_transcript = text
+                            self.brain.add_transcript("Host", text)
+                            self.last_activity_time = time.time()
 
-                                if not self.cfg.chat_reader_mode:
-                                    should_trigger, reason = self.brain.should_trigger_response(text, is_host=True)
-                                    if should_trigger:
-                                        logger.info(f"Triggering AI response for host transcript: {reason}")
-                                        self._trigger_ai_turn(prompt_trigger=f"Host said: '{text}'")
-                    except Exception as e:
-                        logger.debug(f"OBS transcript poll cycle note: {e}")
+                            if not self.cfg.chat_reader_mode:
+                                should_trigger, reason = self.brain.should_trigger_response(text, is_host=True)
+                                if should_trigger:
+                                    logger.info(f"Triggering AI response for host transcript: {reason}")
+                                    self._trigger_ai_turn(prompt_trigger=f"Host said: '{text}'")
 
                     await asyncio.sleep(0.4)
 
             except Exception as e:
                 self.obs_connected = False
                 self.obs_client = None
-                logger.warning(f"OBS WebSocket disconnected or unavailable: {e}. Retrying in 5s...")
+                if not notified_unavailable:
+                    logger.warning(f"OBS WebSocket notice: {e}. Retrying in 5s...")
+                    notified_unavailable = True
                 if ws_client:
                     try:
-                        ws_client.disconnect()
+                        await loop.run_in_executor(None, ws_client.disconnect)
                     except Exception:
                         pass
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(getattr(self.cfg, "obs_retry_interval_sec", 5.0))
 
     # --------------------------------------------------------------------------
     # 4. Local Transcript File Watcher (LocalVocal / Whisper fallback)
@@ -792,31 +854,33 @@ class LocalCoHostApp:
                 await asyncio.sleep(5.0)
             return
 
+        loop = asyncio.get_running_loop()
         is_channel_mode = ("@" in raw_input or "youtube.com/" in raw_input) and not any(
             x in raw_input for x in ("watch?v=", "/live/", "youtu.be/", "embed/")
         )
 
         while self.running:
-            video_id = extract_youtube_video_id(raw_input)
+            video_id = await loop.run_in_executor(None, extract_youtube_video_id, raw_input)
 
             if not video_id:
                 if is_channel_mode:
                     logger.info(
                         f"[YT Chat] Channel '{raw_input}' is currently offline. "
-                        "Waiting for live broadcast to start (checking every 10s)..."
+                        "Waiting for live broadcast to start (checking every 15s)..."
                     )
                 else:
-                    logger.warning(f"[YT Chat] Could not resolve live stream for '{raw_input}'. Checking in 10s...")
-                await asyncio.sleep(10.0)
+                    logger.warning(f"[YT Chat] Could not resolve live stream for '{raw_input}'. Checking in 15s...")
+                await asyncio.sleep(15.0)
                 continue
 
             logger.info(f"Connecting to YouTube Live Chat for Video ID: '{video_id}'...")
+            chat = None
             try:
+                loop = asyncio.get_running_loop()
                 chat = pytchat.create(video_id=video_id)
                 self.active_video_id = video_id
                 logger.info(f"🎉 Connected to YouTube Live Chat for Video '{video_id}'!")
 
-                loop = asyncio.get_running_loop()
                 api_key = self.cfg.youtube_api_key
                 init_viewers = await loop.run_in_executor(None, fetch_youtube_live_viewers, video_id, api_key)
                 self.concurrent_viewers = init_viewers if init_viewers is not None else 0
@@ -824,7 +888,8 @@ class LocalCoHostApp:
 
                 first_chat_sync = True
                 while self.running and chat.is_alive():
-                    sync_items = list(chat.get().sync_items())
+                    sync_items = await loop.run_in_executor(None, lambda: list(chat.get().sync_items()))
+
                     if first_chat_sync:
                         first_chat_sync = False
                         if sync_items:
@@ -966,13 +1031,19 @@ class LocalCoHostApp:
 
                     await asyncio.sleep(self.cfg.chat_poll_interval)
 
-                if not chat.is_alive():
-                    logger.warning(f"YouTube live stream '{video_id}' ended or went offline. Re-checking channel in 10s...")
-                    await asyncio.sleep(10.0)
+                if chat and not chat.is_alive():
+                    logger.warning(f"YouTube live stream '{video_id}' ended or went offline. Re-checking channel in 15s...")
+                    await asyncio.sleep(15.0)
 
             except Exception as e:
                 logger.warning(f"YouTube chat connection note for '{video_id}': {e}. Reconnecting in 5s...")
                 await asyncio.sleep(5.0)
+            finally:
+                if chat and hasattr(chat, "terminate"):
+                    try:
+                        chat.terminate()
+                    except Exception:
+                        pass
 
     async def youtube_viewer_poller_task(self):
         """Periodically polls active YouTube concurrent viewer count and calculates chat velocity."""
@@ -991,8 +1062,6 @@ class LocalCoHostApp:
                 target_vid = (
                     self.active_video_id
                     or self.cfg.youtube_video_id.strip()
-                    or self.cfg.youtube_channel_handle.strip()
-                    or self.cfg.host_streamer_handle.strip()
                 )
 
                 if target_vid:
@@ -1324,10 +1393,9 @@ class LocalCoHostApp:
 
         frame_count = 0
         t_last_log = time.time()
+        next_frame_time = time.perf_counter() + target_frame_time
         try:
             while self.running:
-                t_start = time.perf_counter()
-
                 audio_metrics = self.tts.get_audio_metrics()
                 chat_list = list(self.chat_history)
 
@@ -1368,9 +1436,13 @@ class LocalCoHostApp:
                     frame_count = 0
                     t_last_log = time.time()
 
-                t_render = time.perf_counter() - t_start
-                sleep_time = max(0.001, target_frame_time - t_render)
+                now = time.perf_counter()
+                sleep_time = max(0.0005, next_frame_time - now)
                 await asyncio.sleep(sleep_time)
+                next_frame_time += target_frame_time
+                if now - next_frame_time > target_frame_time * 2:
+                    next_frame_time = now + target_frame_time
+
         except asyncio.CancelledError:
             logger.debug("video_broadcast_task cancelled.")
         except Exception as e:

@@ -812,7 +812,7 @@ class Visualizer:
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
         badge_w, badge_h = (220, 48) if self.is_vertical else (200, 36)
-        bx, by = cx - badge_w // 2, cy + (185 if self.is_vertical else 200)
+        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 265)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)
@@ -1033,11 +1033,11 @@ class Visualizer:
         """
         Draws AI Co-Host streaming response typewriter banner.
         16:9 Landscape: Bottom-center (w=1000, h=276, y=764).
-        9:16 Vertical: Mid tier above chat (w=1000, h=328, y=782).
+        9:16 Vertical: Mid tier above chat (w=1000, h=328, y=796).
         """
         if self.is_vertical:
             card_w, card_h = 1000, 328
-            card_x, card_y = (self.width - card_w) // 2, 782
+            card_x, card_y = (self.width - card_w) // 2, 796
         else:
             card_w, card_h = 1000, 276
             card_x, card_y = (self.width - card_w) // 2, self.height - card_h - 40

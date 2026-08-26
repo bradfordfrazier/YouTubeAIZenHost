@@ -39,6 +39,8 @@ class AppConfig:
     obs_ws_password: str = os.getenv("OBS_WS_PASSWORD", "")
     obs_transcript_source_name: str = os.getenv("OBS_TRANSCRIPT_SOURCE", "Guest Transcript")
     obs_stream_status_poll_interval: float = float(os.getenv("OBS_STREAM_POLL_INTERVAL", "2.0"))
+    obs_connect_timeout: float = float(os.getenv("OBS_CONNECT_TIMEOUT", "0.2"))
+    obs_retry_interval_sec: float = float(os.getenv("OBS_RETRY_INTERVAL", "5.0"))
 
     # OBS FX & Celebration
     obs_celebrate_source_name: str = os.getenv("OBS_CELEBRATE_SOURCE", "Celebration FX")
@@ -55,7 +57,7 @@ class AppConfig:
     youtube_video_id: str = os.getenv("YOUTUBE_VIDEO_ID", "")
     mock_chat_enabled: bool = os.getenv("MOCK_CHAT_ENABLED", "false").lower() in ("true", "1", "yes")
     chat_poll_interval: float = float(os.getenv("CHAT_POLL_INTERVAL", "0.5"))
-    viewer_count_poll_interval: float = float(os.getenv("VIEWER_POLL_INTERVAL", "5.0"))
+    viewer_count_poll_interval: float = float(os.getenv("VIEWER_POLL_INTERVAL", "20.0"))
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
     chat_idle_timeout_sec: float = float(os.getenv("CHAT_IDLE_TIMEOUT_SEC", "120.0"))
 

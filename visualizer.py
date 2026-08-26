@@ -338,19 +338,19 @@ class Visualizer:
             self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 20, bold=True)
             self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
         else:
-            self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
-            self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 20)
-            self.font_ai_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26)
-            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22)
-            self.font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 15)
-            self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 14, bold=True)
-            self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 19, bold=True)
-            self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18)
-            self.font_god_badge = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18, bold=True)
-            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 32, bold=True)
-            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 20)
-            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 15, bold=True)
-            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
+            self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
+            self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22)
+            self.font_ai_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
+            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
+            self.font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 16)
+            self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 18, bold=True)
+            self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
+            self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22, bold=True)
+            self.font_god_badge = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
+            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 36, bold=True)
+            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22, bold=True)
+            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18, bold=True)
+            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 32, bold=True)
 
         # Ambient Particle System (optimally tuned for 60+ FPS on Intel Core i5 / UHD 630 Graphics)
         self.num_particles = getattr(self.cfg, "visualizer_particle_count", 70)
@@ -440,9 +440,9 @@ class Visualizer:
         self.surf_flare = pygame.Surface((self.box_size, self.box_size), pygame.SRCALPHA)
 
         # Adaptive card dimensions
-        host_w, host_h = (1000, 140) if self.is_vertical else (560, 140)
-        chat_w, chat_h = (1000, 700) if self.is_vertical else (400, 640)
-        sub_w, sub_h = (1000, 328) if self.is_vertical else (1000, 276)
+        host_w, host_h = (1000, 140) if self.is_vertical else (580, 150)
+        chat_w, chat_h = (1000, 700) if self.is_vertical else (420, 640)
+        sub_w, sub_h = (1000, 328) if self.is_vertical else (1040, 280)
         promo_w, promo_h = (860, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
@@ -886,7 +886,7 @@ class Visualizer:
         # ----------------------------------------------------------------------
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
-        badge_w, badge_h = (220, 48) if self.is_vertical else (200, 36)
+        badge_w, badge_h = (220, 48) if self.is_vertical else (220, 42)
         bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 265)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
@@ -947,23 +947,23 @@ class Visualizer:
             self.screen.blit(host_txt, (340, txt_y))
             obs_color = (0, 240, 150) if obs_connected else (220, 180, 50)
             obs_txt = self.font_badge.render(f"OBS WS: {'ACTIVE' if obs_connected else 'WAITING'}", True, obs_color)
-            self.screen.blit(obs_txt, (590, txt_y))
-            self.screen.blit(mood_txt, (780, txt_y))
+            self.screen.blit(obs_txt, (570, txt_y))
+            self.screen.blit(mood_txt, (820, txt_y))
             ndi_txt = self.font_badge.render(f"NDI: {self.cfg.ndi_stream_name} (1080p60)", True, (160, 200, 255))
-            self.screen.blit(ndi_txt, (self.width - 340, txt_y))
+            self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
 
     def _draw_host_transcript_card(self, transcript: str):
         """Draws live host transcript snippet card (Top Right in 16:9, hidden in 9:16)."""
         if self.is_vertical:
             return  # Hidden in vertical 9:16 layout
 
-        card_w, card_h = 560, 140
-        card_x, card_y = self.width - card_w - 40, 85
+        card_w, card_h = 580, 150
+        card_x, card_y = self.width - card_w - 40, 80
 
         self.surf_host_card.fill((0, 0, 0, 0))
-        # Glassmorphism container
-        pygame.draw.rect(self.surf_host_card, (15, 22, 38, 210), (0, 0, card_w, card_h), border_radius=12)
-        pygame.draw.rect(self.surf_host_card, (60, 90, 140, 180), (0, 0, card_w, card_h), width=1, border_radius=12)
+        # High-contrast glassmorphism container
+        pygame.draw.rect(self.surf_host_card, (12, 18, 34, 245), (0, 0, card_w, card_h), border_radius=12)
+        pygame.draw.rect(self.surf_host_card, (60, 100, 165, 200), (0, 0, card_w, card_h), width=1, border_radius=12)
 
         # Header tag
         tag_txt = self.font_badge.render("🎙️ HOST / GUEST SPEECH", True, (0, 210, 255))
@@ -985,10 +985,12 @@ class Visualizer:
         if cur_line:
             lines.append(cur_line)
 
-        # Render top 2-3 lines
+        # Render top 2-3 lines with high-contrast drop shadow
         for i, line in enumerate(lines[-3:]):
-            txt_rend = self.font_host_transcript.render(line, True, (230, 240, 255))
-            self.surf_host_card.blit(txt_rend, (18, 48 + i * 30))
+            sh = self.font_host_transcript.render(line, True, (0, 0, 0))
+            self.surf_host_card.blit(sh, (19, 49 + i * 32))
+            txt_rend = self.font_host_transcript.render(line, True, (245, 250, 255))
+            self.surf_host_card.blit(txt_rend, (18, 48 + i * 32))
 
         self.screen.blit(self.surf_host_card, (card_x, card_y))
 
@@ -1002,22 +1004,22 @@ class Visualizer:
             card_w, card_h = 1000, 700
             card_x, card_y = (self.width - card_w) // 2, 1140
         else:
-            card_w, card_h = 400, 640
-            card_x, card_y = 40, self.height - card_h - 40
+            card_w, card_h = 420, 640
+            card_x, card_y = 35, self.height - card_h - 40
 
         self.surf_chat_card.fill((0, 0, 0, 0))
         # Main glassmorphism card frame
-        pygame.draw.rect(self.surf_chat_card, (12, 18, 32, 220), (0, 0, card_w, card_h), border_radius=14)
-        pygame.draw.rect(self.surf_chat_card, (50, 80, 130, 190), (0, 0, card_w, card_h), width=1, border_radius=14)
+        pygame.draw.rect(self.surf_chat_card, (12, 18, 32, 235), (0, 0, card_w, card_h), border_radius=14)
+        pygame.draw.rect(self.surf_chat_card, (50, 85, 140, 190), (0, 0, card_w, card_h), width=1, border_radius=14)
 
         # Top Header Strip
         strip_h = 52 if self.is_vertical else 42
-        pygame.draw.rect(self.surf_chat_card, (16, 24, 42, 200), (0, 0, card_w, strip_h), border_top_left_radius=14, border_top_right_radius=14)
+        pygame.draw.rect(self.surf_chat_card, (16, 24, 44, 220), (0, 0, card_w, strip_h), border_top_left_radius=14, border_top_right_radius=14)
         pygame.draw.line(self.surf_chat_card, (60, 90, 140, 150), (0, strip_h), (card_w, strip_h), 1)
 
         tag_txt = self.font_badge.render("💬 LIVE CHAT", True, (255, 195, 60))
-        tag_y = 14 if self.is_vertical else 12
-        self.surf_chat_card.blit(tag_txt, (20 if self.is_vertical else 18, tag_y))
+        tag_y = 14 if self.is_vertical else 11
+        self.surf_chat_card.blit(tag_txt, (20 if self.is_vertical else 16, tag_y))
 
         # Live feed indicator dot
         pulse_alpha = int(140 + 115 * math.sin(self.time_elapsed * 6.0))
@@ -1048,7 +1050,7 @@ class Visualizer:
                 amount = item.get("amount", "")
 
                 # Text wrapping
-                max_text_w = card_w - (56 if self.is_vertical else 44)
+                max_text_w = card_w - (56 if self.is_vertical else 42)
                 words = msg.split(" ")
                 wrapped_lines = []
                 cur_l = ""
@@ -1064,8 +1066,8 @@ class Visualizer:
                     wrapped_lines.append(cur_l)
 
                 display_lines = wrapped_lines[:2] if self.is_vertical else (wrapped_lines[:2] if wrapped_lines else [""])
-                line_h = 34 if self.is_vertical else 26
-                auth_h = 38 if self.is_vertical else 28
+                line_h = 34 if self.is_vertical else 28
+                auth_h = 38 if self.is_vertical else 32
                 item_h = auth_h + len(display_lines) * line_h + (8 if is_sc else 4)
 
                 if y_offset + item_h > max_content_y:
@@ -1074,28 +1076,26 @@ class Visualizer:
                 # Glass message bubble container
                 item_surf = pygame.Surface((card_w - 24, item_h), pygame.SRCALPHA)
                 if is_sc:
-                    pygame.draw.rect(item_surf, (255, 185, 0, 45), (0, 0, card_w - 24, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (255, 215, 0, 220), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
+                    pygame.draw.rect(item_surf, (255, 185, 0, 50), (0, 0, card_w - 24, item_h), border_radius=10)
+                    pygame.draw.rect(item_surf, (255, 215, 0, 230), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
                 else:
-                    pygame.draw.rect(item_surf, (18, 26, 46, 175), (0, 0, card_w - 24, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (55, 85, 135, 130), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
+                    pygame.draw.rect(item_surf, (18, 26, 46, 205), (0, 0, card_w - 24, item_h), border_radius=10)
+                    pygame.draw.rect(item_surf, (60, 95, 150, 160), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
 
-                author_color = (255, 220, 60) if is_sc else (0, 225, 255)
+                author_color = (255, 220, 60) if is_sc else (0, 235, 255)
                 sc_badge_str = f" [{amount}]" if is_sc else ""
-                auth_pad_x = 14 if self.is_vertical else 10
-                auth_pad_y = 6 if self.is_vertical else 6
-                if self.is_vertical:
-                    auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                    item_surf.blit(auth_sh, (auth_pad_x + 1, auth_pad_y + 1))
+                auth_pad_x = 14 if self.is_vertical else 12
+                auth_pad_y = 6 if self.is_vertical else 5
+                auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                item_surf.blit(auth_sh, (auth_pad_x + 1, auth_pad_y + 1))
                 auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
                 item_surf.blit(auth_rend, (auth_pad_x, auth_pad_y))
 
-                msg_color = (255, 250, 240) if is_sc else (235, 242, 255)
-                msg_start_y = 38 if self.is_vertical else 30
+                msg_color = (255, 250, 240) if is_sc else (245, 250, 255)
+                msg_start_y = 38 if self.is_vertical else 32
                 for line_idx, line_text in enumerate(display_lines):
-                    if self.is_vertical:
-                        line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                        item_surf.blit(line_sh, (auth_pad_x + 1, msg_start_y + line_idx * line_h + 1))
+                    line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
+                    item_surf.blit(line_sh, (auth_pad_x + 1, msg_start_y + line_idx * line_h + 1))
                     line_rend = self.font_chat_msg.render(line_text, True, msg_color)
                     item_surf.blit(line_rend, (auth_pad_x, msg_start_y + line_idx * line_h))
 
@@ -1114,14 +1114,15 @@ class Visualizer:
             card_w, card_h = 1000, 328
             card_x, card_y = (self.width - card_w) // 2, 796
         else:
-            card_w, card_h = 1000, 276
-            card_x, card_y = (self.width - card_w) // 2, self.height - card_h - 40
+            card_w, card_h = 1040, 280
+            card_x, card_y = (self.width - card_w) // 2, self.height - card_h - 35
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
-        pygame.draw.rect(self.surf_subtitle_card, (15, 20, 36, 230), (0, 0, card_w, card_h), border_radius=14)
+        # High-contrast glassmorphism card frame
+        pygame.draw.rect(self.surf_subtitle_card, (12, 16, 32, 245), (0, 0, card_w, card_h), border_radius=14)
 
         c_prim = tuple(int(c) for c in self.c_primary)
-        pygame.draw.rect(self.surf_subtitle_card, (*c_prim, 200), (0, 0, card_w, card_h), width=2, border_radius=14)
+        pygame.draw.rect(self.surf_subtitle_card, (*c_prim, 220), (0, 0, card_w, card_h), width=2, border_radius=14)
 
         header_title = f"{self.cohost_name.upper()} (HOST)"
         title_rend = self.font_title.render(header_title, True, c_prim)
@@ -1164,13 +1165,12 @@ class Visualizer:
             lines.append(cur_line)
 
         max_lines = 5
-        line_h = 48 if self.is_vertical else 36
-        y_start = 74 if self.is_vertical else 64
+        line_h = 48 if self.is_vertical else 42
+        y_start = 74 if self.is_vertical else 66
         for i, line in enumerate(lines[:max_lines]):
-            if self.is_vertical:
-                line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
-                self.surf_subtitle_card.blit(line_sh, (26, y_start + i * line_h + 2))
-            line_rend = self.font_ai_subtitle.render(line, True, (245, 250, 255))
+            line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
+            self.surf_subtitle_card.blit(line_sh, (26, y_start + i * line_h + 2))
+            line_rend = self.font_ai_subtitle.render(line, True, (255, 255, 255))
             self.surf_subtitle_card.blit(line_rend, (24, y_start + i * line_h))
 
         self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
@@ -1339,9 +1339,8 @@ class Visualizer:
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_x = (w - sub_rend.get_width()) // 2
         sub_y = 118 if self.is_vertical else 96
-        if self.is_vertical:
-            sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
-            surf.blit(sh_sub, (sub_x + 2, sub_y + 2))
+        sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
+        surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 
         # 5. Specular Rim Sheen Light Sweep
@@ -1470,9 +1469,8 @@ class Visualizer:
         sub_rend = self.font_callout_sub.render(sub_str, True, (255, 220, 205))
         sub_x = (w - sub_rend.get_width()) // 2
         sub_y = 118 if self.is_vertical else 96
-        if self.is_vertical:
-            sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
-            surf.blit(sh_sub, (sub_x + 2, sub_y + 2))
+        sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
+        surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 
         # 5. Specular Rim Sheen Light Sweep

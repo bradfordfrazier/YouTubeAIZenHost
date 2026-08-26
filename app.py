@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+from pathlib import Path
 from typing import Deque, Dict, List, Optional
 
 import numpy as np
@@ -365,11 +366,56 @@ class LocalCoHostApp:
         self.seen_chat_handles: set = set()
         self.discovered_channel_handle: Optional[str] = None
 
+        # Restore previous chat messages into visualizer without re-triggering AI commentary
+        self._load_cached_chat()
+
         # Speech & Generation Task
         self.active_ai_task: Optional[asyncio.Task] = None
         self.pending_triggers: list = []
         self.ndi_audio_thread: Optional[threading.Thread] = None
         self.ndi_audio_running: bool = False
+
+    CHAT_CACHE_FILE = Path("chat_cache.json")
+
+    def _load_cached_chat(self):
+        """Restores recent chat history from disk so visualizer resumes seamlessly on restart without commenting."""
+        if not self.CHAT_CACHE_FILE.exists():
+            return
+        try:
+            with open(self.CHAT_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                restored_count = 0
+                for item in data[-50:]:
+                    if isinstance(item, dict) and "author" in item and "message" in item:
+                        self.chat_history.append(item)
+                        # Pre-seed author into seen_chat_handles so returning chatters aren't greeted as brand new
+                        author_clean = str(item.get("author", "")).strip().lstrip("@").lower()
+                        if author_clean:
+                            self.seen_chat_handles.add(author_clean)
+                        # Seed AI brain memory for conversational context without generating any speech
+                        self.brain.add_chat_message(
+                            item.get("author", "Viewer"),
+                            item.get("message", ""),
+                            item.get("is_superchat", False),
+                            item.get("amount", ""),
+                        )
+                        restored_count += 1
+                if restored_count > 0:
+                    logger.info(f"📂 [Chat Restore] Restored {restored_count} chat messages from cache into visualizer (silent resume).")
+        except Exception as e:
+            logger.debug(f"Failed to load chat cache: {e}")
+
+    def _save_cached_chat(self):
+        """Persists recent chat history to disk for seamless recovery upon restart."""
+        try:
+            items = list(self.chat_history)[-50:]
+            temp_file = self.CHAT_CACHE_FILE.with_suffix(".tmp")
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(items, f, indent=2)
+            temp_file.replace(self.CHAT_CACHE_FILE)
+        except Exception as e:
+            logger.debug(f"Failed to save chat cache: {e}")
 
     # --------------------------------------------------------------------------
     # 1. State & Engagement State Management
@@ -893,7 +939,31 @@ class LocalCoHostApp:
                     if first_chat_sync:
                         first_chat_sync = False
                         if sync_items:
-                            logger.info(f"Loaded {len(sync_items)} historical chat messages without re-triggering.")
+                            restored_count = 0
+                            for item in sync_items:
+                                a_name = getattr(item.author, "name", "Viewer")
+                                a_type = str(getattr(item.author, "type", "viewer")).lower()
+                                m_text = getattr(item, "message", "")
+                                is_sc = bool(getattr(item, "amountValue", 0) and item.amountValue > 0)
+                                sc_amt = getattr(item, "amountString", "") if is_sc else ""
+                                now_ts = time.time()
+                                if not any(e.get("author") == a_name and e.get("message") == m_text for e in self.chat_history):
+                                    chat_entry = {
+                                        "author": a_name,
+                                        "author_type": a_type,
+                                        "message": m_text,
+                                        "is_superchat": is_sc,
+                                        "amount": sc_amt,
+                                        "timestamp": now_ts,
+                                    }
+                                    self.chat_history.append(chat_entry)
+                                    restored_count += 1
+                                a_clean = a_name.lower().strip().lstrip("@")
+                                if a_clean:
+                                    self.seen_chat_handles.add(a_clean)
+                                self.brain.add_chat_message(a_name, m_text, is_sc, sc_amt)
+                            self._save_cached_chat()
+                            logger.info(f"📂 [Chat Restore] Loaded {len(sync_items)} historical YouTube chat messages into visualizer without re-triggering.")
                         continue
 
                     for item in sync_items:
@@ -1001,6 +1071,7 @@ class LocalCoHostApp:
                             "timestamp": now_ts,
                         }
                         self.chat_history.append(chat_entry)
+                        self._save_cached_chat()
                         self.brain.add_chat_message(author_name, msg, is_superchat, item.amountString if is_superchat else "")
                         self.last_activity_time = now_ts
                         self.last_chat_time = now_ts
@@ -1230,6 +1301,7 @@ class LocalCoHostApp:
                     "timestamp": time.time(),
                 }
                 self.chat_history.append(chat_entry)
+                self._save_cached_chat()
                 self.brain.add_chat_message(author, message, False, "")
                 self.last_activity_time = time.time()
                 self.last_chat_time = time.time()
@@ -1283,6 +1355,7 @@ class LocalCoHostApp:
                 "timestamp": now_ts,
             }
             self.chat_history.append(chat_entry)
+            self._save_cached_chat()
             self.brain.add_chat_message(author, message, is_sc, sc_amount)
             self.last_activity_time = now_ts
             self.last_chat_time = now_ts

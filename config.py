@@ -189,7 +189,7 @@ class AppConfig:
                 norm_handles.add(clean_v.replace(" ", ""))
         self.channel_handles = list(norm_handles)
 
-    # Promotional Graphic Overlays ("Ask God", "Like & Subscribe")
+    # Promotional Graphic Overlays ("Ask Me", "Like & Subscribe")
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")
     promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "75.0"))
     promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))

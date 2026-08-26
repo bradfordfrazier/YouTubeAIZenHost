@@ -11,3 +11,5 @@ __pycache__/
 !.env.example
 !.env.*.example
 test_output/
+chat_cache.json
+*.tmp

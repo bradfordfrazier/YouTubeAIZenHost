@@ -4,9 +4,11 @@ Features dynamic mood-driven particle/gradient background shaders,
 audio spectrum FFT & hologram core reactivity, and glassmorphism broadcast HUD overlays.
 """
 
+import json
 import logging
 import math
 import os
+from pathlib import Path
 import random
 import time
 from typing import Dict, List, Optional, Tuple
@@ -456,6 +458,28 @@ class Visualizer:
         self.surf_subtitle_card = pygame.Surface((sub_w, sub_h), pygame.SRCALPHA)
         self.surf_promo_card = pygame.Surface((promo_w, promo_h), pygame.SRCALPHA)
 
+        # Fallback chat history cache for instant restoration on visualizer startup
+        self._cached_chat_messages: List[Dict] = []
+        self._load_cached_chat()
+
+    def _load_cached_chat(self):
+        """Restores recent chat history from disk so visualizer resumes seamlessly on restart."""
+        cache_file = Path("chat_cache.json")
+        if not cache_file.exists():
+            return
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self._cached_chat_messages = [
+                    item for item in data[-50:]
+                    if isinstance(item, dict) and "author" in item and "message" in item
+                ]
+                if self._cached_chat_messages:
+                    logger.info(f"📂 [Visualizer] Restored {len(self._cached_chat_messages)} chat messages from cache into chat panel.")
+        except Exception as e:
+            logger.debug(f"Failed to load visualizer chat cache: {e}")
+
     def trigger_promo(self, promo_type: Optional[str] = None, duration: Optional[float] = None):
         """Triggers a fun promotional graphic overlay immediately ('ask_god' or 'like_sub')."""
         if promo_type in ("ask_god", "like_sub"):
@@ -466,6 +490,7 @@ class Visualizer:
         self.promo_state_timer = 0.0
         self.promo_slide_factor = 0.0
         self.promo_alpha = 0.0
+
 
     def trigger_celebration(self, duration: float = 5.0, count: int = 140):
         """Triggers a grand celestial fireworks and confetti shower across the stream."""
@@ -1035,8 +1060,11 @@ class Visualizer:
         self.surf_chat_card.blit(feed_lbl, (feed_x, tag_y))
 
         # Recent messages (5 items in vertical, 4 items in compact landscape)
+        if chat_messages:
+            self._cached_chat_messages = list(chat_messages)
+        display_msgs = chat_messages if chat_messages else self._cached_chat_messages
         max_msgs = 5 if self.is_vertical else 4
-        recent_chats = chat_messages[-max_msgs:] if chat_messages else []
+        recent_chats = display_msgs[-max_msgs:] if display_msgs else []
         y_offset = 66 if self.is_vertical else 52
         max_content_y = card_h - 12
 

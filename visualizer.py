@@ -358,7 +358,7 @@ class Visualizer:
 
         # Celestial Sparkle System around the central Point of Light
         self.core_cx = self.width // 2
-        self.core_cy = 440 if self.is_vertical else 430
+        self.core_cy = 440 if self.is_vertical else 340
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -440,9 +440,9 @@ class Visualizer:
         self.surf_flare = pygame.Surface((self.box_size, self.box_size), pygame.SRCALPHA)
 
         # Adaptive card dimensions
-        host_w, host_h = (1000, 140) if self.is_vertical else (580, 150)
+        host_w, host_h = (1000, 140) if self.is_vertical else (500, 150)
         chat_w, chat_h = (1000, 700) if self.is_vertical else (420, 640)
-        sub_w, sub_h = (1000, 328) if self.is_vertical else (1040, 280)
+        sub_w, sub_h = (1000, 328) if self.is_vertical else (1040, 270)
         promo_w, promo_h = (860, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
@@ -656,7 +656,7 @@ class Visualizer:
         # Flowing sine wave ribbons in lower half (drawn directly on canvas)
         c_sec = tuple(int(c) for c in self.c_secondary)
         num_waves = 3
-        base_y_start = 1450 if self.is_vertical else 650
+        base_y_start = 1450 if self.is_vertical else 580
         y_step = 80 if self.is_vertical else 60
         for w_idx in range(num_waves):
             pts = []
@@ -887,7 +887,7 @@ class Visualizer:
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
         badge_w, badge_h = (220, 48) if self.is_vertical else (220, 42)
-        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 265)
+        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 205)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)
@@ -953,12 +953,12 @@ class Visualizer:
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
 
     def _draw_host_transcript_card(self, transcript: str):
-        """Draws live host transcript snippet card (Top Right in 16:9, hidden in 9:16)."""
+        """Draws live host transcript snippet card (Top Left in 16:9, hidden in 9:16)."""
         if self.is_vertical:
             return  # Hidden in vertical 9:16 layout
 
-        card_w, card_h = 580, 150
-        card_x, card_y = self.width - card_w - 40, 80
+        card_w, card_h = 500, 150
+        card_x, card_y = 40, 75
 
         self.surf_host_card.fill((0, 0, 0, 0))
         # High-contrast glassmorphism container
@@ -997,7 +997,7 @@ class Visualizer:
     def _draw_live_chat_card(self, chat_messages: List[Dict]):
         """
         Draws YouTube Live Chat glassmorphism feed card.
-        16:9 Landscape: Left column (w=400, h=640, y=400, up to 7 items).
+        16:9 Landscape: Right column (w=420, h=640, x=1460, y=260, up to 7 items).
         9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1140, up to 5 items).
         """
         if self.is_vertical:
@@ -1005,7 +1005,7 @@ class Visualizer:
             card_x, card_y = (self.width - card_w) // 2, 1140
         else:
             card_w, card_h = 420, 640
-            card_x, card_y = 35, self.height - card_h - 40
+            card_x, card_y = self.width - card_w - 40, 260
 
         self.surf_chat_card.fill((0, 0, 0, 0))
         # Main glassmorphism card frame
@@ -1114,8 +1114,8 @@ class Visualizer:
             card_w, card_h = 1000, 328
             card_x, card_y = (self.width - card_w) // 2, 796
         else:
-            card_w, card_h = 1040, 280
-            card_x, card_y = (self.width - card_w) // 2, self.height - card_h - 35
+            card_w, card_h = 1040, 270
+            card_x, card_y = (self.width - card_w) // 2, 605
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
         # High-contrast glassmorphism card frame

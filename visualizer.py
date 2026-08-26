@@ -953,9 +953,9 @@ class Visualizer:
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
 
     def _draw_host_transcript_card(self, transcript: str):
-        """Draws live host transcript snippet card (Top Left in 16:9, hidden in 9:16)."""
-        if self.is_vertical:
-            return  # Hidden in vertical 9:16 layout
+        """Draws live host transcript snippet card (disabled by default)."""
+        if not getattr(self.cfg, "show_host_transcript_card", False) or self.is_vertical:
+            return  # Hidden by default in broadcast visualizer
 
         card_w, card_h = 500, 150
         card_x, card_y = 40, 75

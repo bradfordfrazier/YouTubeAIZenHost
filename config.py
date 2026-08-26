@@ -142,6 +142,7 @@ class AppConfig:
     visualizer_fps: int = int(os.getenv("VISUALIZER_FPS", "60"))
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
     visualizer_borderless: bool = os.getenv("VISUALIZER_BORDERLESS", "false").lower() in ("true", "1", "yes")
+    show_host_transcript_card: bool = os.getenv("SHOW_HOST_TRANSCRIPT_CARD", "false").lower() in ("true", "1", "yes")
 
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()

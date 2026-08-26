@@ -12,17 +12,17 @@ def test_resizable_window():
     config.visualizer_headless = False
 
     try:
-        # 1. Test 16:9 Landscape Mode (1920x1080 canvas, 640x360 scaled desktop window for portrait monitors)
+        # 1. Test 16:9 Landscape Mode (1920x1080 canvas, 320x180 scaled desktop window for portrait monitors)
         config.visualizer_aspect_ratio = "16:9"
         config.visualizer_native_window = False
         vis_16x9 = Visualizer(width=1920, height=1080)
-        assert vis_16x9.window_size == (640, 360), f"Expected 16:9 initial window size (640, 360), got {vis_16x9.window_size}"
+        assert vis_16x9.window_size == (320, 180), f"Expected 16:9 initial window size (320, 180), got {vis_16x9.window_size}"
         assert (vis_16x9.width, vis_16x9.height) == (1920, 1080), "Expected internal canvas (1920, 1080)"
 
         audio_metrics = {"rms": 0.15, "spectrum": np.zeros(32, dtype=np.float32), "is_speaking": False}
         buf_16x9 = vis_16x9.render_frame(audio_metrics, [], "", "")
         assert len(buf_16x9) == 1920 * 1080 * 4, f"Buffer size mismatch for 16:9: {len(buf_16x9)}"
-        print("-> 16:9 Landscape (640x360 desktop window -> 1920x1080 stream) test passed!")
+        print("-> 16:9 Landscape (320x180 desktop window -> 1920x1080 stream) test passed!")
 
         # 2. Test 9:16 Vertical Mode (1080x1920 canvas, 540x960 scaled desktop window)
         config.visualizer_aspect_ratio = "9:16"

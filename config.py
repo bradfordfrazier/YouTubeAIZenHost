@@ -171,8 +171,8 @@ class AppConfig:
                     or not self.visualizer_window_height
                     or self.visualizer_window_height >= self.visualizer_window_width
                 ):
-                    self.visualizer_window_width = 640
-                    self.visualizer_window_height = 360
+                    self.visualizer_window_width = 320
+                    self.visualizer_window_height = 180
 
     # Promotional Graphic Overlays ("Ask God", "Like & Subscribe")
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")

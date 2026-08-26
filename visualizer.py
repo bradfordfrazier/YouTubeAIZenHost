@@ -251,8 +251,8 @@ class Visualizer:
                 win_w = window_width or self.width
                 win_h = window_height or self.height
             else:
-                default_win_w = 540 if self.is_vertical else 640
-                default_win_h = 960 if self.is_vertical else 360
+                default_win_w = 540 if self.is_vertical else 320
+                default_win_h = 960 if self.is_vertical else 180
                 cfg_w = getattr(self.cfg, "visualizer_window_width", None)
                 cfg_h = getattr(self.cfg, "visualizer_window_height", None)
                 if cfg_w and cfg_h and ((cfg_h > cfg_w) == self.is_vertical):
@@ -515,7 +515,7 @@ class Visualizer:
             # Handle window events (resize, quit, etc.)
             for event in pygame.event.get():
                 if event.type == pygame.VIDEORESIZE:
-                    self.window_size = (max(180, event.w), max(180, event.h))
+                    self.window_size = (max(160, event.w), max(90, event.h))
                     flags = pygame.DOUBLEBUF | pygame.RESIZABLE
                     if getattr(self.cfg, "visualizer_borderless", False):
                         flags = pygame.DOUBLEBUF | pygame.NOFRAME

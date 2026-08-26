@@ -1609,7 +1609,7 @@ def main():
     parser.add_argument("--landscape", "-l", action="store_true", help="Launch in 16:9 landscape mode (1920x1080)")
     parser.add_argument("--aspect-ratio", "-ar", choices=["16:9", "9:16", "vertical", "landscape", "shorts"], default=None)
     parser.add_argument("--native-window", action="store_true", help="Launch visualizer desktop window at full native resolution (1080x1920 or 1920x1080) for 1:1 OBS Window Capture")
-    parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 960 540)")
+    parser.add_argument("--window-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=None, help="Explicit visualizer desktop window dimensions (e.g. --window-size 320 180)")
     parser.add_argument("--borderless", action="store_true", help="Launch visualizer in borderless window mode without titlebar/borders")
     parser.add_argument("--headless", action="store_true", help="Run visualizer in offscreen headless mode")
     parser.add_argument("--mock-chat", action="store_true", help="Enable simulated YouTube live chat")
@@ -1638,8 +1638,8 @@ def main():
         config.visualizer_width = 1920
         config.visualizer_height = 1080
         if not args.window_size and not args.native_window:
-            config.visualizer_window_width = 640
-            config.visualizer_window_height = 360
+            config.visualizer_window_width = 320
+            config.visualizer_window_height = 180
 
     if args.native_window:
         config.visualizer_native_window = True

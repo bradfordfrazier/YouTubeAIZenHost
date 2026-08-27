@@ -497,7 +497,7 @@ class AIBrain:
             prompt_parts.append(
                 f"\nSpecial Mode: CHAT ENCOURAGEMENT & VIEWER BANTER for {self.cohost_name}:\n"
                 f"There are active viewers watching the stream, but the live chat has been quiet for a few minutes.\n"
-                "1. WAKE UP THE ROOM: Speak directly to the viewers watching the stream as a group with playful banter.\n"
+                "1. WAKE UP THE ROOM: Speak directly to the viewers watching the stream with playful banter. If there is only one in the stream speak to them directly otherwise speak to them as a group.\n"
                 f"2. PLAYFUL CALL TO ACTION: Deliver a witty, sarcastic, or thought-provoking prompt calling on the lurking viewers to drop a comment, roast {self.streamer_name}, ask God a cosmic question, or say where they're tuning in from.\n"
                 "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences maximum. Spoken live on air — NO markdown.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: snarky], [MOOD: curious], [MOOD: hyped], [MOOD: savage], or [MOOD: laughing].\n"

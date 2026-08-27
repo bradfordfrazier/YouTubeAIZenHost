@@ -327,13 +327,13 @@ class Visualizer:
         # so text remains crisp, prominent, and readable in OBS dock previews and on mobile devices.
         if self.is_vertical:
             self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
-            self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24)
+            self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
             self.font_ai_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 36, bold=True)
-            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24)
+            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18)
-            self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 22, bold=True)
-            self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
-            self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26)
+            self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 24, bold=True)
+            self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 30, bold=True)
+            self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_god_badge = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
             self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 38, bold=True)
             self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
@@ -966,8 +966,8 @@ class Visualizer:
         mood_txt = self.font_badge.render(f"MOOD: {self.current_mood.upper()}", True, c_prim)
 
         if self.is_vertical:
-            self.screen.blit(host_txt, (320, txt_y))
-            self.screen.blit(mood_txt, (540, txt_y))
+            self.screen.blit(host_txt, (340, txt_y))
+            self.screen.blit(mood_txt, (560, txt_y))
             ndi_txt = self.font_badge.render("NDI: 9:16", True, (160, 200, 255))
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
         else:
@@ -1023,9 +1023,9 @@ class Visualizer:
 
     def _draw_live_chat_card(self, chat_messages: List[Dict]):
         """
-        Draws YouTube Live Chat glassmorphism feed card.
+        Draws YouTube Live Chat glassmorphism feed card with high-legibility broadcast styling:
         16:9 Landscape: Left column below center (w=380, h=490, x=40, y=545).
-        9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1174, up to 5 items).
+        9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1174, up to 6 items).
         """
         if self.is_vertical:
             card_w, card_h = 1000, 700
@@ -1035,42 +1035,68 @@ class Visualizer:
             card_x, card_y = 40, 545
 
         self.surf_chat_card.fill((0, 0, 0, 0))
-        # Main glassmorphism card frame
-        pygame.draw.rect(self.surf_chat_card, (12, 18, 32, 235), (0, 0, card_w, card_h), border_radius=14)
-        pygame.draw.rect(self.surf_chat_card, (50, 85, 140, 190), (0, 0, card_w, card_h), width=1, border_radius=14)
+        # Main glassmorphism card frame (higher opacity in vertical to prevent sine waves interfering with text)
+        bg_color = (10, 15, 28, 248) if self.is_vertical else (12, 18, 32, 235)
+        border_color = (45, 80, 140, 210) if self.is_vertical else (50, 85, 140, 190)
+        border_radius = 16 if self.is_vertical else 14
+        border_width = 2 if self.is_vertical else 1
+        pygame.draw.rect(self.surf_chat_card, bg_color, (0, 0, card_w, card_h), border_radius=border_radius)
+        pygame.draw.rect(self.surf_chat_card, border_color, (0, 0, card_w, card_h), width=border_width, border_radius=border_radius)
 
         # Top Header Strip
-        strip_h = 52 if self.is_vertical else 42
-        pygame.draw.rect(self.surf_chat_card, (16, 24, 44, 220), (0, 0, card_w, strip_h), border_top_left_radius=14, border_top_right_radius=14)
-        pygame.draw.line(self.surf_chat_card, (60, 90, 140, 150), (0, strip_h), (card_w, strip_h), 1)
+        strip_h = 54 if self.is_vertical else 42
+        pygame.draw.rect(
+            self.surf_chat_card,
+            (15, 24, 46, 235 if self.is_vertical else 220),
+            (0, 0, card_w, strip_h),
+            border_top_left_radius=border_radius,
+            border_top_right_radius=border_radius,
+        )
+        pygame.draw.line(self.surf_chat_card, (55, 90, 150, 180), (0, strip_h), (card_w, strip_h), 1)
 
-        tag_txt = self.font_badge.render("💬 LIVE CHAT", True, (255, 195, 60))
-        tag_y = 14 if self.is_vertical else 11
-        self.surf_chat_card.blit(tag_txt, (20 if self.is_vertical else 16, tag_y))
+        # Crisp Vector Chat Icon (rounded bubble + tail) - avoids broken emoji glyph box '?'
+        if self.is_vertical:
+            icon_x, icon_y = 22, 18
+            pygame.draw.rect(self.surf_chat_card, (255, 195, 60), (icon_x, icon_y, 22, 16), border_radius=4)
+            pygame.draw.polygon(self.surf_chat_card, (255, 195, 60), [(icon_x + 4, icon_y + 16), (icon_x + 10, icon_y + 16), (icon_x + 4, icon_y + 21)])
+            pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 7, icon_y + 8), 2)
+            pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 15, icon_y + 8), 2)
+            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
+            tag_y = 15
+            self.surf_chat_card.blit(tag_txt, (icon_x + 30, tag_y))
+        else:
+            icon_x, icon_y = 16, 13
+            pygame.draw.rect(self.surf_chat_card, (255, 195, 60), (icon_x, icon_y, 18, 14), border_radius=3)
+            pygame.draw.polygon(self.surf_chat_card, (255, 195, 60), [(icon_x + 3, icon_y + 14), (icon_x + 8, icon_y + 14), (icon_x + 3, icon_y + 18)])
+            pygame.draw.circle(self.surf_chat_card, (16, 24, 44), (icon_x + 6, icon_y + 7), 2)
+            pygame.draw.circle(self.surf_chat_card, (16, 24, 44), (icon_x + 12, icon_y + 7), 2)
+            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
+            tag_y = 11
+            self.surf_chat_card.blit(tag_txt, (icon_x + 26, tag_y))
 
         # Live feed indicator dot
         pulse_alpha = int(140 + 115 * math.sin(self.time_elapsed * 6.0))
-        dot_surf = pygame.Surface((12, 12), pygame.SRCALPHA)
-        pygame.draw.circle(dot_surf, (0, 240, 150, pulse_alpha), (6, 6), 5)
+        dot_surf = pygame.Surface((14, 14), pygame.SRCALPHA)
+        pygame.draw.circle(dot_surf, (0, 240, 150, pulse_alpha), (7, 7), 5)
         feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
         feed_lbl_w = feed_lbl.get_width()
-        dot_x = card_w - feed_lbl_w - 40
-        feed_x = card_w - feed_lbl_w - 20
+        dot_x = card_w - feed_lbl_w - (44 if self.is_vertical else 40)
+        feed_x = card_w - feed_lbl_w - (22 if self.is_vertical else 20)
         self.surf_chat_card.blit(dot_surf, (dot_x, tag_y + 4))
         self.surf_chat_card.blit(feed_lbl, (feed_x, tag_y))
 
-        # Recent messages (5 items in vertical, 4 items in compact landscape)
+        # Recent messages (up to 6 items in vertical, 4 items in compact landscape)
         if chat_messages:
             self._cached_chat_messages = list(chat_messages)
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
-        max_msgs = 5 if self.is_vertical else 4
+        max_msgs = 6 if self.is_vertical else 4
         recent_chats = display_msgs[-max_msgs:] if display_msgs else []
-        y_offset = 66 if self.is_vertical else 52
-        max_content_y = card_h - 12
+        y_offset = 68 if self.is_vertical else 52
+        max_content_y = card_h - (14 if self.is_vertical else 12)
 
         if not recent_chats:
-            empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (130, 150, 180))
-            self.surf_chat_card.blit(empty_txt, (20, y_offset + 10))
+            empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (140, 165, 200))
+            self.surf_chat_card.blit(empty_txt, (24 if self.is_vertical else 20, y_offset + 10))
         else:
             for item in recent_chats:
                 is_sc = item.get("is_superchat", False)
@@ -1080,7 +1106,7 @@ class Visualizer:
                 amount = item.get("amount", "")
 
                 # Text wrapping
-                max_text_w = card_w - (56 if self.is_vertical else 42)
+                max_text_w = card_w - (68 if self.is_vertical else 42)
                 words = msg.split(" ")
                 wrapped_lines = []
                 cur_l = ""
@@ -1095,41 +1121,58 @@ class Visualizer:
                 if cur_l:
                     wrapped_lines.append(cur_l)
 
-                display_lines = wrapped_lines[:2] if self.is_vertical else (wrapped_lines[:2] if wrapped_lines else [""])
-                line_h = 34 if self.is_vertical else 28
-                auth_h = 38 if self.is_vertical else 32
-                item_h = auth_h + len(display_lines) * line_h + (8 if is_sc else 4)
+                display_lines = wrapped_lines[:2] if wrapped_lines else [""]
+                line_h = 38 if self.is_vertical else 28
+                auth_h = 36 if self.is_vertical else 32
+                item_h = auth_h + len(display_lines) * line_h + (10 if self.is_vertical else (8 if is_sc else 4))
 
                 if y_offset + item_h > max_content_y:
                     break
 
-                # Glass message bubble container
-                item_surf = pygame.Surface((card_w - 24, item_h), pygame.SRCALPHA)
+                # Glass message bubble container with left-accent broadcast stripe
+                bubble_w = card_w - (28 if self.is_vertical else 24)
+                bubble_x = 14 if self.is_vertical else 12
+                item_surf = pygame.Surface((bubble_w, item_h), pygame.SRCALPHA)
                 if is_sc:
-                    pygame.draw.rect(item_surf, (255, 185, 0, 50), (0, 0, card_w - 24, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (255, 215, 0, 230), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
+                    # Radiant amber SuperChat container
+                    pygame.draw.rect(item_surf, (38, 28, 12, 235), (0, 0, bubble_w, item_h), border_radius=10)
+                    pygame.draw.rect(item_surf, (255, 195, 0, 220), (0, 0, bubble_w, item_h), width=1, border_radius=10)
+                    # Vibrant gold left accent bar
+                    stripe_w = 6 if self.is_vertical else 4
+                    pygame.draw.rect(item_surf, (255, 215, 0), (0, 0, stripe_w, item_h), border_top_left_radius=10, border_bottom_left_radius=10)
+                    author_color = (255, 225, 80)
+                    msg_color = (255, 252, 245)
                 else:
-                    pygame.draw.rect(item_surf, (18, 26, 46, 205), (0, 0, card_w - 24, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (60, 95, 150, 160), (0, 0, card_w - 24, item_h), width=1, border_radius=10)
+                    # Deep sapphire container with high contrast
+                    pygame.draw.rect(item_surf, (16, 25, 45, 230), (0, 0, bubble_w, item_h), border_radius=10)
+                    pygame.draw.rect(item_surf, (55, 95, 160, 180), (0, 0, bubble_w, item_h), width=1, border_radius=10)
+                    # Cyan left accent bar
+                    stripe_w = 5 if self.is_vertical else 4
+                    pygame.draw.rect(item_surf, (0, 225, 255), (0, 0, stripe_w, item_h), border_top_left_radius=10, border_bottom_left_radius=10)
+                    author_color = (0, 235, 255)
+                    msg_color = (255, 255, 255)
 
-                author_color = (255, 220, 60) if is_sc else (0, 235, 255)
                 sc_badge_str = f" [{amount}]" if is_sc else ""
-                auth_pad_x = 14 if self.is_vertical else 12
-                auth_pad_y = 6 if self.is_vertical else 5
+                auth_pad_x = 18 if self.is_vertical else 14
+                auth_pad_y = 7 if self.is_vertical else 5
+                sh_off = 2 if self.is_vertical else 1
+
+                # Author row with dark drop-shadow for crisp edge definition
                 auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                item_surf.blit(auth_sh, (auth_pad_x + 1, auth_pad_y + 1))
+                item_surf.blit(auth_sh, (auth_pad_x + sh_off, auth_pad_y + sh_off))
                 auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
                 item_surf.blit(auth_rend, (auth_pad_x, auth_pad_y))
 
-                msg_color = (255, 250, 240) if is_sc else (245, 250, 255)
-                msg_start_y = 38 if self.is_vertical else 32
+                # Message lines with bold typography and crisp drop shadow
+                msg_start_y = auth_pad_y + auth_h - (2 if self.is_vertical else 0)
                 for line_idx, line_text in enumerate(display_lines):
+                    line_y = msg_start_y + line_idx * line_h
                     line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                    item_surf.blit(line_sh, (auth_pad_x + 1, msg_start_y + line_idx * line_h + 1))
+                    item_surf.blit(line_sh, (auth_pad_x + sh_off, line_y + sh_off))
                     line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                    item_surf.blit(line_rend, (auth_pad_x, msg_start_y + line_idx * line_h))
+                    item_surf.blit(line_rend, (auth_pad_x, line_y))
 
-                self.surf_chat_card.blit(item_surf, (12, y_offset))
+                self.surf_chat_card.blit(item_surf, (bubble_x, y_offset))
                 y_offset += item_h + (12 if self.is_vertical else 10)
 
         self.screen.blit(self.surf_chat_card, (card_x, card_y))

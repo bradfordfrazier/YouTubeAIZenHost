@@ -1025,11 +1025,11 @@ class Visualizer:
         """
         Draws YouTube Live Chat glassmorphism feed card.
         16:9 Landscape: Left column below center (w=380, h=490, x=40, y=545).
-        9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1140, up to 5 items).
+        9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1174, up to 5 items).
         """
         if self.is_vertical:
             card_w, card_h = 1000, 700
-            card_x, card_y = (self.width - card_w) // 2, 1140
+            card_x, card_y = (self.width - card_w) // 2, 1174
         else:
             card_w, card_h = 380, 490
             card_x, card_y = 40, 545
@@ -1138,7 +1138,7 @@ class Visualizer:
         """
         Draws AI Co-Host streaming response typewriter banner.
         16:9 Landscape: Bottom-center (w=1000, h=276, y=764).
-        9:16 Vertical: Mid tier above chat (w=1000, h=328, y=796).
+        9:16 Vertical: Mid tier above chat (w=1000, h=350, y=796).
         """
         if self.is_vertical:
             card_w, card_h = 1000, 350

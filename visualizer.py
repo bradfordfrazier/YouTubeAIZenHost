@@ -360,7 +360,7 @@ class Visualizer:
 
         # Celestial Sparkle System around the central Point of Light
         self.core_cx = self.width // 2
-        self.core_cy = 370 if self.is_vertical else 290
+        self.core_cy = 400 if self.is_vertical else 300
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -451,7 +451,7 @@ class Visualizer:
         # Adaptive card dimensions with left and right margin padding
         host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
         chat_w, chat_h = (940, 700) if self.is_vertical else (380, 490)
-        sub_w, sub_h = (940, 410) if self.is_vertical else (880, 360)
+        sub_w, sub_h = (940, 380) if self.is_vertical else (880, 360)
         promo_w, promo_h = (840, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
@@ -1058,30 +1058,43 @@ class Visualizer:
         border_radius = 14
         pygame.draw.rect(self.surf_chat_card, bg_color, (0, 0, card_w, card_h), border_radius=border_radius)
 
-        # Header typography
+        # Header iconic graphic elements & typography
         pad_x = 24 if self.is_vertical else 18
-        if self.is_vertical:
-            tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
-            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
-            self.surf_chat_card.blit(tag_txt_sh, (pad_x + 1, 17))
-            self.surf_chat_card.blit(tag_txt, (pad_x, 16))
+        icon_x = pad_x
+        icon_y = 16 if self.is_vertical else 12
 
-            feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
-            feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
-            feed_w = feed_lbl.get_width()
-            self.surf_chat_card.blit(feed_lbl_sh, (card_w - feed_w - pad_x + 1, 17))
-            self.surf_chat_card.blit(feed_lbl, (card_w - feed_w - pad_x, 16))
-        else:
-            tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
-            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
-            self.surf_chat_card.blit(tag_txt_sh, (pad_x + 1, 13))
-            self.surf_chat_card.blit(tag_txt, (pad_x, 12))
+        # 1. Iconic Vector Chat Bubble Icon (Gold bubble with speech tail and 2 inner dots)
+        pygame.draw.rect(self.surf_chat_card, (255, 195, 60), (icon_x, icon_y + 1, 20, 15), border_radius=4)
+        pygame.draw.polygon(
+            self.surf_chat_card,
+            (255, 195, 60),
+            [(icon_x + 3, icon_y + 15), (icon_x + 9, icon_y + 15), (icon_x + 3, icon_y + 20)]
+        )
+        pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 6, icon_y + 8), 2)
+        pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 14, icon_y + 8), 2)
 
-            feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
-            feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
-            feed_w = feed_lbl.get_width()
-            self.surf_chat_card.blit(feed_lbl_sh, (card_w - feed_w - pad_x + 1, 13))
-            self.surf_chat_card.blit(feed_lbl, (card_w - feed_w - pad_x, 12))
+        # "LIVE CHAT" Text
+        text_x = icon_x + 28
+        tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
+        tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
+        self.surf_chat_card.blit(tag_txt_sh, (text_x + 1, icon_y + 1))
+        self.surf_chat_card.blit(tag_txt, (text_x, icon_y))
+
+        # 2. Iconic Pulsing Live Broadcast Glow Dot + "FEED" Label
+        feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
+        feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
+        feed_w = feed_lbl.get_width()
+        feed_x = card_w - feed_w - pad_x
+        feed_y = icon_y
+
+        pulse_alpha = int(140 + 115 * math.sin(self.time_elapsed * 6.0))
+        dot_surf = pygame.Surface((16, 16), pygame.SRCALPHA)
+        pygame.draw.circle(dot_surf, (0, 240, 150, pulse_alpha), (8, 8), 4)
+        pygame.draw.circle(dot_surf, (255, 255, 255, min(255, pulse_alpha + 40)), (8, 8), 2)
+        self.surf_chat_card.blit(dot_surf, (feed_x - 20, feed_y + 2))
+
+        self.surf_chat_card.blit(feed_lbl_sh, (feed_x + 1, feed_y + 1))
+        self.surf_chat_card.blit(feed_lbl, (feed_x, feed_y))
 
         # Recent messages (up to 6 items in vertical, 4 items in compact landscape)
         if chat_messages:
@@ -1162,15 +1175,15 @@ class Visualizer:
         """
         Draws AI Co-Host streaming response typewriter banner.
         16:9 Landscape: Bottom-center (w=880, h=360, y=633).
-        9:16 Vertical: Mid tier above chat (w=940, h=410, y=736).
+        9:16 Vertical: Mid tier above chat (w=940, h=380, y=766).
         """
         if self.is_vertical:
-            card_w, card_h = 940, 410
-            card_x, card_y = (self.width - card_w) // 2, 736
+            card_w, card_h = 940, 380
+            card_x, card_y = (self.width - card_w) // 2, 766
         else:
             card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)
-            card_y = self.core_cy + 265 + 68
+            card_y = self.core_cy + 252 + 58
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
         # High-contrast glassmorphism card frame

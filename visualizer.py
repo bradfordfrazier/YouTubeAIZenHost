@@ -927,7 +927,7 @@ class Visualizer:
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
         badge_w, badge_h = (220, 48) if self.is_vertical else (220, 42)
-        bx, by = cx - badge_w // 2, cy + (255 if self.is_vertical else 245)
+        bx, by = cx - badge_w // 2, cy + (266 if self.is_vertical else 252)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)

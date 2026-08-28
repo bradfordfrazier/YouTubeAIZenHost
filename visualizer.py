@@ -360,7 +360,7 @@ class Visualizer:
 
         # Celestial Sparkle System around the central Point of Light
         self.core_cx = self.width // 2
-        self.core_cy = 400 if self.is_vertical else 300
+        self.core_cy = 500 if self.is_vertical else 300
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -450,7 +450,7 @@ class Visualizer:
 
         # Adaptive card dimensions with left and right margin padding
         host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
-        chat_w, chat_h = (940, 700) if self.is_vertical else (380, 490)
+        chat_w, chat_h = (940, 580) if self.is_vertical else (380, 490)
         sub_w, sub_h = (940, 380) if self.is_vertical else (880, 360)
         promo_w, promo_h = (840, 175) if self.is_vertical else (760, 146)
 
@@ -686,7 +686,7 @@ class Visualizer:
         # Flowing sine wave ribbons in lower half (drawn directly on canvas)
         c_sec = tuple(int(c) for c in self.c_secondary)
         num_waves = 3
-        base_y_start = 1450 if self.is_vertical else 580
+        base_y_start = 1530 if self.is_vertical else 580
         y_step = 80 if self.is_vertical else 60
         for w_idx in range(num_waves):
             pts = []
@@ -1042,11 +1042,11 @@ class Visualizer:
         """
         Draws YouTube Live Chat contained glassmorphism panel (borderless container without border lines):
         16:9 Landscape: Left column below center (w=380, h=490, x=60, y=545).
-        9:16 Vertical: Bottom tier below AI Host (w=940, h=700, y=1174, up to 6 items).
+        9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1274, up to 5 items).
         """
         if self.is_vertical:
-            card_w, card_h = 940, 700
-            card_x, card_y = (self.width - card_w) // 2, 1174
+            card_w, card_h = 940, 580
+            card_x, card_y = (self.width - card_w) // 2, 1274
         else:
             card_w, card_h = 380, 490
             card_x, card_y = 60, 545
@@ -1096,11 +1096,11 @@ class Visualizer:
         self.surf_chat_card.blit(feed_lbl_sh, (feed_x + 1, feed_y + 1))
         self.surf_chat_card.blit(feed_lbl, (feed_x, feed_y))
 
-        # Recent messages (up to 6 items in vertical, 4 items in compact landscape)
+        # Recent messages (up to 5 items in vertical, 4 items in compact landscape)
         if chat_messages:
             self._cached_chat_messages = list(chat_messages)
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
-        max_msgs = 6 if self.is_vertical else 4
+        max_msgs = 5 if self.is_vertical else 4
         recent_chats = display_msgs[-max_msgs:] if display_msgs else []
         y_offset = 64 if self.is_vertical else 48
         max_content_y = card_h - (14 if self.is_vertical else 12)
@@ -1175,11 +1175,11 @@ class Visualizer:
         """
         Draws AI Co-Host streaming response typewriter banner.
         16:9 Landscape: Bottom-center (w=880, h=360, y=633).
-        9:16 Vertical: Mid tier above chat (w=940, h=380, y=766).
+        9:16 Vertical: Mid tier above chat (w=940, h=380, y=866).
         """
         if self.is_vertical:
             card_w, card_h = 940, 380
-            card_x, card_y = (self.width - card_w) // 2, 766
+            card_x, card_y = (self.width - card_w) // 2, 866
         else:
             card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)

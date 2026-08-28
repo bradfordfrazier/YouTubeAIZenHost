@@ -7,6 +7,7 @@ neural 48kHz TTS synthesis, 1080p60 Pygame visualizer, and local NDI broadcastin
 
 import asyncio
 import collections
+from dataclasses import dataclass, field
 import json
 import logging
 import os
@@ -374,6 +375,17 @@ def fetch_youtube_live_chat_backlog(video_id: str, api_key: str) -> List[Dict]:
         return []
 
 
+@dataclass
+class CommentEvent:
+    """Encapsulates an incoming comment trigger with priority and lifespan."""
+    prompt_trigger: str
+    event_type: str = "chat"  # "host", "superchat", "direct_mention", "greeting", "chat", "spontaneous"
+    priority: int = 5         # Lower number = higher priority (1: Host, 2: Superchat, 3: Direct Mention, 4: Greeting, 5: Chat, 10: Spontaneous)
+    created_at: float = field(default_factory=time.time)
+    max_age_sec: float = 35.0
+    force: bool = False
+
+
 class LocalCoHostApp:
     """Consolidated All-Local AI Co-Host Pipeline running on the OBS Host machine."""
 
@@ -427,9 +439,11 @@ class LocalCoHostApp:
         # Restore previous chat messages into visualizer without re-triggering AI commentary
         self._load_cached_chat()
 
-        # Speech & Generation Task
-        self.active_ai_task: Optional[asyncio.Task] = None
-        self.pending_triggers: list = []
+        # Comment Event Priority Queue & Serialized Scheduling
+        self.comment_queue: List[CommentEvent] = []
+        self.active_turn_event: Optional[CommentEvent] = None
+        self.active_turn_task: Optional[asyncio.Task] = None
+        self.new_comment_signal: Optional[asyncio.Event] = None
         self.ndi_audio_thread: Optional[threading.Thread] = None
         self.ndi_audio_running: bool = False
 
@@ -593,96 +607,188 @@ class LocalCoHostApp:
         )
 
     # --------------------------------------------------------------------------
-    # 2. AI Brain & Speech Generation Dispatcher
+    # 2. AI Brain & Speech Generation Dispatcher (Priority Queue & Serialized Scheduling)
     # --------------------------------------------------------------------------
-    def _trigger_ai_turn(self, prompt_trigger: Optional[str] = None, force: bool = False):
-        """Dispatches or queues an AI response turn."""
-        if not prompt_trigger:
+    def _trigger_ai_turn(
+        self,
+        prompt_trigger: Optional[str] = None,
+        event_type: str = "chat",
+        priority: Optional[int] = None,
+        max_age_sec: Optional[float] = None,
+        force: bool = False,
+    ):
+        """Thread-safe and async-safe enqueueing of AI comment turns with priority and backpressure."""
+        if not prompt_trigger or not self.running:
             return
 
-        # Immediately clear previous comment from panel upon triggering event
-        self.visualizer.clear_subtitle()
-        self.current_ai_subtitle = ""
+        # Default priorities & TTLs based on event type
+        priority_map = {
+            "host": (1, 60.0),
+            "superchat": (2, 60.0),
+            "direct_mention": (3, 40.0),
+            "greeting": (4, 30.0),
+            "chat": (5, 30.0),
+            "spontaneous": (10, 15.0),
+        }
+        def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 30.0))
+        prio = priority if priority is not None else def_pri
+        ttl = max_age_sec if max_age_sec is not None else def_ttl
+
+        # Spontaneous Gating: Never queue spontaneous reflections if AI is busy speaking, generating, or queue is active
+        if event_type == "spontaneous":
+            is_busy = (
+                self.brain.is_generating
+                or self.tts.is_speaking
+                or self.tts.remaining_speech_duration > 0.05
+                or self.active_turn_event is not None
+                or len(self.comment_queue) > 0
+            )
+            if is_busy:
+                logger.debug("Suppressing spontaneous commentary: stream or AI queue is active.")
+                return
+
+        event = CommentEvent(
+            prompt_trigger=prompt_trigger,
+            event_type=event_type,
+            priority=prio,
+            created_at=time.time(),
+            max_age_sec=ttl,
+            force=force,
+        )
 
         if force:
-            if self.active_ai_task and not self.active_ai_task.done():
-                self.active_ai_task.cancel()
-            try:
-                loop = asyncio.get_running_loop()
-                self.active_ai_task = loop.create_task(self._ai_turn_worker(prompt_trigger))
-            except RuntimeError:
-                if self.loop and self.loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self._ai_turn_worker(prompt_trigger), self.loop)
-                else:
-                    self.pending_triggers.append(prompt_trigger)
+            if self.active_turn_task and not self.active_turn_task.done():
+                self.active_turn_task.cancel()
+            self.tts.clear_audio_buffer()
+            self.comment_queue.insert(0, event)
+            if self.new_comment_signal:
+                self.new_comment_signal.set()
+            logger.info(f"⚡ [Forced AI Turn] Dispatched immediate interrupt for: '{prompt_trigger[:60]}...'")
             return
 
-        # If already generating or speaking, queue the request so it is never dropped
-        if (self.active_ai_task and not self.active_ai_task.done()) or self.tts.is_speaking:
-            if len(self.pending_triggers) < 5:
-                self.pending_triggers.append(prompt_trigger)
-                logger.info(f"📥 [Queued Turn] Co-Host busy. Queued request ({len(self.pending_triggers)} in queue): '{prompt_trigger[:60]}...'")
-            return
+        # Backpressure & Queue Overflow Management (Max 3 pending items)
+        max_queue = 3
+        if len(self.comment_queue) >= max_queue:
+            # Find lowest-priority (highest numerical value) item in queue
+            lowest_prio_idx = max(range(len(self.comment_queue)), key=lambda i: self.comment_queue[i].priority)
+            lowest_item = self.comment_queue[lowest_prio_idx]
 
-        try:
-            loop = asyncio.get_running_loop()
-            self.active_ai_task = loop.create_task(self._ai_turn_worker(prompt_trigger))
-        except RuntimeError:
-            if self.loop and self.loop.is_running():
-                asyncio.run_coroutine_threadsafe(self._ai_turn_worker(prompt_trigger), self.loop)
+            if prio < lowest_item.priority:
+                # Evict lower priority item to make room for this higher priority event
+                evicted = self.comment_queue.pop(lowest_prio_idx)
+                logger.info(f"⚠️ [Queue Eviction] Evicted lower-priority '{evicted.event_type}' request to prioritize incoming '{event_type}'.")
+                self.comment_queue.append(event)
             else:
-                self.pending_triggers.append(prompt_trigger)
+                logger.info(f"🛑 [Queue Full] Dropped '{event_type}' request ('{prompt_trigger[:45]}...') to prevent response latency backlog.")
+                return
+        else:
+            self.comment_queue.append(event)
 
-    async def _ai_turn_worker(self, prompt_trigger: Optional[str]):
-        """Worker streaming LLM response and synthesizing full cohesive speech."""
+        # Sort queue by priority first (1=highest), then arrival time (oldest first)
+        self.comment_queue.sort(key=lambda x: (x.priority, x.created_at))
+        if self.new_comment_signal:
+            self.new_comment_signal.set()
+        logger.info(f"📥 [Queued Comment] Added '{event_type}' (Pri: {prio}, Queue: {len(self.comment_queue)}): '{prompt_trigger[:60]}...'")
+
+    async def comment_queue_scheduler_task(self):
+        """
+        Dedicated sequential comment scheduler task.
+        Executes one AI speech turn at a time, strictly waiting for complete audio
+        playback before proceeding to the next event or clearing the screen.
+        """
+        logger.info("🧠 [Comment Scheduler] Serialized AI turn scheduler active.")
+        if self.new_comment_signal is None:
+            self.new_comment_signal = asyncio.Event()
+
+        while self.running:
+            try:
+                # Prune stale events from queue before taking the next one
+                now = time.time()
+                valid_queue = []
+                for ev in self.comment_queue:
+                    if now - ev.created_at <= ev.max_age_sec:
+                        valid_queue.append(ev)
+                    else:
+                        logger.info(f"⏱️ [Stale Request Pruned] Dropped '{ev.event_type}' request ({now - ev.created_at:.1f}s old) to keep co-host real-time.")
+                self.comment_queue = valid_queue
+
+                if not self.comment_queue:
+                    self.new_comment_signal.clear()
+                    try:
+                        await asyncio.wait_for(self.new_comment_signal.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
+                    continue
+
+                # Pop highest priority event
+                event = self.comment_queue.pop(0)
+                self.active_turn_event = event
+                self.active_turn_task = asyncio.current_task()
+
+                # Execute full sequential turn
+                await self._execute_ai_turn(event)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in comment queue scheduler: {e}", exc_info=True)
+                await asyncio.sleep(0.5)
+            finally:
+                self.active_turn_event = None
+
+    async def _execute_ai_turn(self, event: CommentEvent):
+        """Executes a single cohesive AI speech turn from start to full audio completion."""
         t_start = time.perf_counter()
+        logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
+
+        # 1. Clear previous subtitle card
         self.visualizer.clear_subtitle()
         self.current_ai_subtitle = ""
+
+        # 2. Pre-Speech Empty Hold Pause (e.g. 2.0s)
+        pause_sec = getattr(self.cfg, "ai_comment_pause_sec", 2.0)
+        if pause_sec > 0:
+            await asyncio.sleep(pause_sec)
+
         full_statement = ""
         active_mood = "energetic"
         try:
-            async for event in self.brain.generate_response_stream(prompt_trigger):
-                ev_type = event.get("type", "")
-
+            # 3. Stream from Gemini AI Brain
+            async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
+                ev_type = chunk_ev.get("type", "")
                 if ev_type == "mood":
-                    active_mood = event.get("mood", "chill")
+                    active_mood = chunk_ev.get("mood", "chill")
                     self.visualizer.set_mood(active_mood)
-
                 elif ev_type == "token":
-                    full_statement = event.get("full_text", "")
-
+                    full_statement = chunk_ev.get("full_text", "")
                 elif ev_type == "complete":
-                    full_text = event.get("full_text", "").strip()
-                    mood = event.get("mood", active_mood)
+                    full_text = chunk_ev.get("full_text", "").strip()
+                    mood = chunk_ev.get("mood", active_mood)
                     full_statement = full_text
                     self.visualizer.set_mood(mood)
-                    self.last_activity_time = time.time()
 
-            # Synthesize the entire cohesive statement as a single pristine audio stream
-            if full_statement.strip():
-                clean_speech = full_statement.strip()
-                logger.info(f"🎙️ [AI Speech] Synthesizing complete statement: '{clean_speech}'")
-
-                # Ensure configured empty pause duration (e.g. 2.0s) has elapsed before displaying/speaking
-                pause_sec = getattr(self.cfg, "ai_comment_pause_sec", 2.0)
-                elapsed = time.perf_counter() - t_start
-                if elapsed < pause_sec:
-                    await asyncio.sleep(pause_sec - elapsed)
-
+            # 4. Synthesize speech and begin typewriter display
+            clean_speech = full_statement.strip()
+            if clean_speech:
+                logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
                 await self.tts.queue_speech(clean_speech)
                 self.current_ai_subtitle = clean_speech
                 self.visualizer.set_subtitle(clean_speech)
 
+                # 5. CRITICAL: Wait until audio has completely finished broadcasting out
+                await self.tts.wait_until_speech_completed()
+                logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({time.perf_counter() - t_start:.2f}s total turn time).")
+            else:
+                logger.warning("Empty response generated by AI co-host.")
+
         except asyncio.CancelledError:
-            logger.debug("AI turn worker cancelled.")
+            logger.debug("Active AI turn was cancelled.")
+            self.tts.clear_audio_buffer()
         except Exception as e:
-            logger.error(f"Error in AI turn worker: {e}")
+            logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
-            # Process next queued trigger if available
-            if self.pending_triggers and self.running:
-                next_trigger = self.pending_triggers.pop(0)
-                logger.info(f"📤 [Dequeuing Turn] Processing next queued request: '{next_trigger[:60]}...'")
-                self.active_ai_task = asyncio.create_task(self._ai_turn_worker(next_trigger))
+            self.last_activity_time = time.time()
+            self.last_spontaneous_time = time.time()
 
     # --------------------------------------------------------------------------
     # 3. Local OBS Studio Integration (Direct WebSocket on localhost)
@@ -917,7 +1023,7 @@ class LocalCoHostApp:
                                 should_trigger, reason = self.brain.should_trigger_response(text, is_host=True)
                                 if should_trigger:
                                     logger.info(f"Triggering AI response for host transcript: {reason}")
-                                    self._trigger_ai_turn(prompt_trigger=f"Host said: '{text}'")
+                                    self._trigger_ai_turn(prompt_trigger=f"Host said: '{text}'", event_type="host", priority=1)
 
                     await asyncio.sleep(0.4)
 
@@ -963,7 +1069,7 @@ class LocalCoHostApp:
                                 if not self.cfg.chat_reader_mode:
                                     should_trigger, reason = self.brain.should_trigger_response(line_clean, is_host=True)
                                     if should_trigger:
-                                        self._trigger_ai_turn(prompt_trigger=f"Host said: '{line_clean}'")
+                                        self._trigger_ai_turn(prompt_trigger=f"Host said: '{line_clean}'", event_type="host", priority=1)
                 except Exception as e:
                     logger.debug(f"Error reading transcript file: {e}")
             await asyncio.sleep(0.3)
@@ -1157,7 +1263,7 @@ class LocalCoHostApp:
                                     if ev_kind == "membership"
                                     else f"[NEW_SUBSCRIBER] @{author_name} just subscribed!{msg_ctx} Shout out and thank @{author_name}!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
 
                         # 2. Celebration trigger in live chat
                         is_celebrate_cmd = (
@@ -1169,7 +1275,9 @@ class LocalCoHostApp:
                             self.visualizer.trigger_celebration(duration=5.0)
                             await self.trigger_obs_fx(duration_sec=5.0)
                             self._trigger_ai_turn(
-                                prompt_trigger=f"[CELEBRATION] Host @{author_name} called for a celebration: '{msg}'. Hyped celebration response!"
+                                prompt_trigger=f"[CELEBRATION] Host @{author_name} called for a celebration: '{msg}'. Hyped celebration response!",
+                                event_type="superchat",
+                                priority=2,
                             )
 
                         # Record chat entry
@@ -1230,12 +1338,14 @@ class LocalCoHostApp:
                                     f"[NEW_CHATTER_GREETING] @{author_name} just sent their very first message: '{msg}'. "
                                     f"Greet @{author_name} warmly and wittily by name while responding to their comment!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4)
                         else:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
                                 prefix = f"Chat message from @{author_name}"
-                                self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'")
+                                prio = 2 if is_superchat else (3 if "direct_mention" in reason else 5)
+                                ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
+                                self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio)
                             else:
                                 if "member_reply_entanglement" in reason:
                                     logger.info(f"⏸️ [Chat Filtered] Not triggering AI ({reason}). Preserving member entanglement.")
@@ -1382,7 +1492,7 @@ class LocalCoHostApp:
                             f"[NEW_SUBSCRIBER] @{message.lstrip('@')} just subscribed! "
                             f"Enthusiastically thank @{message.lstrip('@')} for subscribing to {self.cfg.youtube_channel_handle}!"
                         )
-                        self._trigger_ai_turn(prompt_trigger=prompt)
+                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
                     continue
                 elif author.lower() in ("member", "membership", "join"):
                     logger.info(f"🌟 [Console Event] Test Membership: @{message}")
@@ -1393,7 +1503,7 @@ class LocalCoHostApp:
                             f"[NEW_MEMBER] @{message.lstrip('@')} just joined as a channel member! "
                             f"Enthusiastically welcome @{message.lstrip('@')} into the cosmic family!"
                         )
-                        self._trigger_ai_turn(prompt_trigger=prompt)
+                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
                     continue
 
                 # Celebration command
@@ -1402,7 +1512,9 @@ class LocalCoHostApp:
                     self.visualizer.trigger_celebration(duration=5.0)
                     await self.trigger_obs_fx(duration_sec=5.0)
                     self._trigger_ai_turn(
-                        prompt_trigger=f"[CELEBRATION] Host @{author} called for a celebration: '{message}'. Hyped celebration response!"
+                        prompt_trigger=f"[CELEBRATION] Host @{author} called for a celebration: '{message}'. Hyped celebration response!",
+                        event_type="superchat",
+                        priority=2,
                     )
                     continue
 
@@ -1429,7 +1541,9 @@ class LocalCoHostApp:
                 should_trigger, reason = self.brain.should_trigger_response(message, is_host=is_host_author)
                 if should_trigger:
                     prefix = f"Host @{author} in chat" if is_host_author else f"Chat message from @{author}"
-                    self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'")
+                    prio = 1 if is_host_author else (3 if "direct_mention" in reason else 5)
+                    ev_type = "host" if is_host_author else ("direct_mention" if "direct_mention" in reason else "chat")
+                    self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'", event_type=ev_type, priority=prio)
 
             except (KeyboardInterrupt, asyncio.CancelledError):
                 self.stop()
@@ -1482,7 +1596,9 @@ class LocalCoHostApp:
 
             should_trigger, reason = self.brain.should_trigger_response(message, is_host=False)
             if is_sc or should_trigger:
-                self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'")
+                prio = 2 if is_sc else (3 if "direct_mention" in reason else 5)
+                ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
+                self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio)
 
     # --------------------------------------------------------------------------
     # 6. Idle Reflection & Chat Encouragement Monitor
@@ -1505,7 +1621,13 @@ class LocalCoHostApp:
                     continue
 
                 now = time.time()
-                if self.brain.is_generating or (self.active_ai_task and not self.active_ai_task.done()):
+                if (
+                    self.brain.is_generating
+                    or self.tts.is_speaking
+                    or self.tts.remaining_speech_duration > 0.05
+                    or self.active_turn_event is not None
+                    or len(self.comment_queue) > 0
+                ):
                     continue
 
                 silence_dur = now - self.last_activity_time
@@ -1539,7 +1661,7 @@ class LocalCoHostApp:
                         f"but chat has been quiet. "
                         f"Deliver a witty, engaging call-to-action to wake up the chat: tell them to drop comments or roast {host_name}!"
                     )
-                    self._trigger_ai_turn(prompt_trigger=prompt)
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="spontaneous", priority=10)
 
                 # 2. General Spontaneous Reflection with Adaptive Backoff
                 spontaneous_base = getattr(self.cfg, "spontaneous_min_interval_sec", 60.0)
@@ -1559,7 +1681,7 @@ class LocalCoHostApp:
                     self.last_spontaneous_time = now
                     self.last_activity_time = now
                     self.spontaneous_idle_count += 1
-                    self._trigger_ai_turn(prompt_trigger="[SPONTANEOUS_REFLECTION]")
+                    self._trigger_ai_turn(prompt_trigger="[SPONTANEOUS_REFLECTION]", event_type="spontaneous", priority=10)
 
             except asyncio.CancelledError:
                 break
@@ -1733,6 +1855,7 @@ class LocalCoHostApp:
         # Launch concurrent async tasks
         self.tasks = [
             asyncio.create_task(self.video_broadcast_task(), name="video_broadcaster"),
+            asyncio.create_task(self.comment_queue_scheduler_task(), name="comment_scheduler"),
             asyncio.create_task(self.obs_monitor_task(), name="obs_monitor"),
             asyncio.create_task(self.youtube_chat_task(), name="youtube_chat"),
             asyncio.create_task(self.youtube_viewer_poller_task(), name="viewer_poller"),

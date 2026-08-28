@@ -167,6 +167,33 @@ class TTSEngine:
         sine = sine.astype(np.float32)
         return np.column_stack((sine, sine))
 
+    @property
+    def remaining_speech_duration(self) -> float:
+        """Returns the duration in seconds of audio currently queued in the playback buffer."""
+        with self._buffer_lock:
+            return len(self._audio_buffer_ndi) / self.sample_rate
+
+    def clear_audio_buffer(self):
+        """Immediately flushes all queued speech samples and resets speaking state."""
+        with self._buffer_lock:
+            self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
+            self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
+            self.is_speaking = False
+
+    async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: float = 60.0):
+        """Asynchronously waits until all buffered speech audio has finished broadcasting out through NDI/audio."""
+        t0 = time.time()
+        # Brief initial sleep so the pop_audio_packet thread registers playback start
+        await asyncio.sleep(0.08)
+        while time.time() - t0 < timeout:
+            with self._buffer_lock:
+                buf_len = len(self._audio_buffer_ndi)
+            if buf_len == 0:
+                with self._buffer_lock:
+                    self.is_speaking = False
+                break
+            await asyncio.sleep(poll_interval)
+
     async def queue_speech(self, text: str):
         """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
         audio = await self.synthesize(text)

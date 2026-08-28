@@ -360,7 +360,7 @@ class Visualizer:
 
         # Celestial Sparkle System around the central Point of Light
         self.core_cx = self.width // 2
-        self.core_cy = 440 if self.is_vertical else 340
+        self.core_cy = 370 if self.is_vertical else 290
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -413,6 +413,7 @@ class Visualizer:
         self.subtitle_display_text = ""
         self.subtitle_target_text = ""
         self.typewriter_index = 0
+        self.is_empty_hold = False
 
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
         # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
@@ -447,11 +448,11 @@ class Visualizer:
         self.box_size = 560
         self.surf_flare = pygame.Surface((self.box_size, self.box_size), pygame.SRCALPHA)
 
-        # Adaptive card dimensions
-        host_w, host_h = (1000, 140) if self.is_vertical else (500, 150)
-        chat_w, chat_h = (1000, 700) if self.is_vertical else (380, 490)
-        sub_w, sub_h = (1000, 350) if self.is_vertical else (940, 315)
-        promo_w, promo_h = (860, 175) if self.is_vertical else (760, 146)
+        # Adaptive card dimensions with left and right margin padding
+        host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
+        chat_w, chat_h = (940, 700) if self.is_vertical else (380, 490)
+        sub_w, sub_h = (940, 410) if self.is_vertical else (880, 360)
+        promo_w, promo_h = (840, 175) if self.is_vertical else (760, 146)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
         self.surf_chat_card = pygame.Surface((chat_w, chat_h), pygame.SRCALPHA)
@@ -504,8 +505,20 @@ class Visualizer:
             self.target_mood = mood.lower()
             self.mood_lerp_factor = 0.0
 
+    def clear_subtitle(self):
+        """Immediately clears subtitle panel and puts it into empty hold mode."""
+        self.is_empty_hold = True
+        self.subtitle_target_text = ""
+        self.typewriter_index = 0
+
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text."""
+        if not text:
+            self.subtitle_target_text = ""
+            self.typewriter_index = 0
+            return
+
+        self.is_empty_hold = False
         if text != self.subtitle_target_text:
             self.subtitle_target_text = text
             self.typewriter_index = 0
@@ -581,7 +594,7 @@ class Visualizer:
         )
         self._draw_host_transcript_card(host_transcript)
         self._draw_live_chat_card(chat_messages)
-        self._draw_ai_subtitle_card(is_speaking)
+        self._draw_ai_subtitle_card(is_speaking, concurrent_viewers=concurrent_viewers)
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
         self._draw_promo_callout_overlay(dt)
@@ -914,7 +927,7 @@ class Visualizer:
         # 5. Lowered Celestial Monogram Badge (Direct on canvas)
         # ----------------------------------------------------------------------
         badge_w, badge_h = (220, 48) if self.is_vertical else (220, 42)
-        bx, by = cx - badge_w // 2, cy + (275 if self.is_vertical else 265)
+        bx, by = cx - badge_w // 2, cy + (255 if self.is_vertical else 245)
 
         pygame.draw.rect(self.screen, (14, 20, 36), (bx, by, badge_w, badge_h), border_radius=badge_h // 2)
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)
@@ -984,8 +997,12 @@ class Visualizer:
         if not getattr(self.cfg, "show_host_transcript_card", False) or self.is_vertical:
             return  # Hidden by default in broadcast visualizer
 
-        card_w, card_h = 500, 150
-        card_x, card_y = 40, 75
+        if self.is_vertical:
+            card_w, card_h = 940, 140
+            card_x, card_y = (self.width - card_w) // 2, 75
+        else:
+            card_w, card_h = 460, 150
+            card_x, card_y = 60, 75
 
         self.surf_host_card.fill((0, 0, 0, 0))
         # High-contrast glassmorphism container
@@ -1023,67 +1040,48 @@ class Visualizer:
 
     def _draw_live_chat_card(self, chat_messages: List[Dict]):
         """
-        Draws YouTube Live Chat glassmorphism feed card with high-legibility broadcast styling:
-        16:9 Landscape: Left column below center (w=380, h=490, x=40, y=545).
-        9:16 Vertical: Bottom tier below AI Host (w=1000, h=700, y=1174, up to 6 items).
+        Draws YouTube Live Chat contained glassmorphism panel (borderless container without border lines):
+        16:9 Landscape: Left column below center (w=380, h=490, x=60, y=545).
+        9:16 Vertical: Bottom tier below AI Host (w=940, h=700, y=1174, up to 6 items).
         """
         if self.is_vertical:
-            card_w, card_h = 1000, 700
+            card_w, card_h = 940, 700
             card_x, card_y = (self.width - card_w) // 2, 1174
         else:
             card_w, card_h = 380, 490
-            card_x, card_y = 40, 545
+            card_x, card_y = 60, 545
 
         self.surf_chat_card.fill((0, 0, 0, 0))
-        # Main glassmorphism card frame (higher opacity in vertical to prevent sine waves interfering with text)
-        bg_color = (10, 15, 28, 248) if self.is_vertical else (12, 18, 32, 235)
-        border_color = (45, 80, 140, 210) if self.is_vertical else (50, 85, 140, 190)
-        border_radius = 16 if self.is_vertical else 14
-        border_width = 2 if self.is_vertical else 1
+
+        # Contained glassmorphism background container (borderless - no outline stroke lines)
+        bg_color = (12, 16, 32, 245) if self.is_vertical else (12, 18, 32, 235)
+        border_radius = 14
         pygame.draw.rect(self.surf_chat_card, bg_color, (0, 0, card_w, card_h), border_radius=border_radius)
-        pygame.draw.rect(self.surf_chat_card, border_color, (0, 0, card_w, card_h), width=border_width, border_radius=border_radius)
 
-        # Top Header Strip
-        strip_h = 54 if self.is_vertical else 42
-        pygame.draw.rect(
-            self.surf_chat_card,
-            (15, 24, 46, 235 if self.is_vertical else 220),
-            (0, 0, card_w, strip_h),
-            border_top_left_radius=border_radius,
-            border_top_right_radius=border_radius,
-        )
-        pygame.draw.line(self.surf_chat_card, (55, 90, 150, 180), (0, strip_h), (card_w, strip_h), 1)
-
-        # Crisp Vector Chat Icon (rounded bubble + tail) - avoids broken emoji glyph box '?'
+        # Header typography
+        pad_x = 24 if self.is_vertical else 18
         if self.is_vertical:
-            icon_x, icon_y = 22, 18
-            pygame.draw.rect(self.surf_chat_card, (255, 195, 60), (icon_x, icon_y, 22, 16), border_radius=4)
-            pygame.draw.polygon(self.surf_chat_card, (255, 195, 60), [(icon_x + 4, icon_y + 16), (icon_x + 10, icon_y + 16), (icon_x + 4, icon_y + 21)])
-            pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 7, icon_y + 8), 2)
-            pygame.draw.circle(self.surf_chat_card, (15, 24, 46), (icon_x + 15, icon_y + 8), 2)
+            tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
             tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
-            tag_y = 15
-            self.surf_chat_card.blit(tag_txt, (icon_x + 30, tag_y))
-        else:
-            icon_x, icon_y = 16, 13
-            pygame.draw.rect(self.surf_chat_card, (255, 195, 60), (icon_x, icon_y, 18, 14), border_radius=3)
-            pygame.draw.polygon(self.surf_chat_card, (255, 195, 60), [(icon_x + 3, icon_y + 14), (icon_x + 8, icon_y + 14), (icon_x + 3, icon_y + 18)])
-            pygame.draw.circle(self.surf_chat_card, (16, 24, 44), (icon_x + 6, icon_y + 7), 2)
-            pygame.draw.circle(self.surf_chat_card, (16, 24, 44), (icon_x + 12, icon_y + 7), 2)
-            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
-            tag_y = 11
-            self.surf_chat_card.blit(tag_txt, (icon_x + 26, tag_y))
+            self.surf_chat_card.blit(tag_txt_sh, (pad_x + 1, 17))
+            self.surf_chat_card.blit(tag_txt, (pad_x, 16))
 
-        # Live feed indicator dot
-        pulse_alpha = int(140 + 115 * math.sin(self.time_elapsed * 6.0))
-        dot_surf = pygame.Surface((14, 14), pygame.SRCALPHA)
-        pygame.draw.circle(dot_surf, (0, 240, 150, pulse_alpha), (7, 7), 5)
-        feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
-        feed_lbl_w = feed_lbl.get_width()
-        dot_x = card_w - feed_lbl_w - (44 if self.is_vertical else 40)
-        feed_x = card_w - feed_lbl_w - (22 if self.is_vertical else 20)
-        self.surf_chat_card.blit(dot_surf, (dot_x, tag_y + 4))
-        self.surf_chat_card.blit(feed_lbl, (feed_x, tag_y))
+            feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
+            feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
+            feed_w = feed_lbl.get_width()
+            self.surf_chat_card.blit(feed_lbl_sh, (card_w - feed_w - pad_x + 1, 17))
+            self.surf_chat_card.blit(feed_lbl, (card_w - feed_w - pad_x, 16))
+        else:
+            tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
+            tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
+            self.surf_chat_card.blit(tag_txt_sh, (pad_x + 1, 13))
+            self.surf_chat_card.blit(tag_txt, (pad_x, 12))
+
+            feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
+            feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
+            feed_w = feed_lbl.get_width()
+            self.surf_chat_card.blit(feed_lbl_sh, (card_w - feed_w - pad_x + 1, 13))
+            self.surf_chat_card.blit(feed_lbl, (card_w - feed_w - pad_x, 12))
 
         # Recent messages (up to 6 items in vertical, 4 items in compact landscape)
         if chat_messages:
@@ -1091,12 +1089,14 @@ class Visualizer:
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
         max_msgs = 6 if self.is_vertical else 4
         recent_chats = display_msgs[-max_msgs:] if display_msgs else []
-        y_offset = 68 if self.is_vertical else 52
+        y_offset = 64 if self.is_vertical else 48
         max_content_y = card_h - (14 if self.is_vertical else 12)
 
         if not recent_chats:
+            empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
             empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (140, 165, 200))
-            self.surf_chat_card.blit(empty_txt, (24 if self.is_vertical else 20, y_offset + 10))
+            self.surf_chat_card.blit(empty_txt_sh, (pad_x + 1, y_offset + 1))
+            self.surf_chat_card.blit(empty_txt, (pad_x, y_offset))
         else:
             for item in recent_chats:
                 is_sc = item.get("is_superchat", False)
@@ -1106,7 +1106,7 @@ class Visualizer:
                 amount = item.get("amount", "")
 
                 # Text wrapping
-                max_text_w = card_w - (68 if self.is_vertical else 42)
+                max_text_w = card_w - (pad_x * 2 + 10)
                 words = msg.split(" ")
                 wrapped_lines = []
                 cur_l = ""
@@ -1124,70 +1124,51 @@ class Visualizer:
                 display_lines = wrapped_lines[:2] if wrapped_lines else [""]
                 line_h = 38 if self.is_vertical else 28
                 auth_h = 36 if self.is_vertical else 32
-                item_h = auth_h + len(display_lines) * line_h + (10 if self.is_vertical else (8 if is_sc else 4))
+                item_h = auth_h + len(display_lines) * line_h + (8 if self.is_vertical else 4)
 
                 if y_offset + item_h > max_content_y:
                     break
 
-                # Glass message bubble container with left-accent broadcast stripe
-                bubble_w = card_w - (28 if self.is_vertical else 24)
-                bubble_x = 14 if self.is_vertical else 12
-                item_surf = pygame.Surface((bubble_w, item_h), pygame.SRCALPHA)
                 if is_sc:
-                    # Radiant amber SuperChat container
-                    pygame.draw.rect(item_surf, (38, 28, 12, 235), (0, 0, bubble_w, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (255, 195, 0, 220), (0, 0, bubble_w, item_h), width=1, border_radius=10)
-                    # Vibrant gold left accent bar
-                    stripe_w = 6 if self.is_vertical else 4
-                    pygame.draw.rect(item_surf, (255, 215, 0), (0, 0, stripe_w, item_h), border_top_left_radius=10, border_bottom_left_radius=10)
-                    author_color = (255, 225, 80)
+                    author_color = (255, 215, 0)
                     msg_color = (255, 252, 245)
                 else:
-                    # Deep sapphire container with high contrast
-                    pygame.draw.rect(item_surf, (16, 25, 45, 230), (0, 0, bubble_w, item_h), border_radius=10)
-                    pygame.draw.rect(item_surf, (55, 95, 160, 180), (0, 0, bubble_w, item_h), width=1, border_radius=10)
-                    # Cyan left accent bar
-                    stripe_w = 5 if self.is_vertical else 4
-                    pygame.draw.rect(item_surf, (0, 225, 255), (0, 0, stripe_w, item_h), border_top_left_radius=10, border_bottom_left_radius=10)
                     author_color = (0, 235, 255)
                     msg_color = (255, 255, 255)
 
                 sc_badge_str = f" [{amount}]" if is_sc else ""
-                auth_pad_x = 18 if self.is_vertical else 14
-                auth_pad_y = 7 if self.is_vertical else 5
                 sh_off = 2 if self.is_vertical else 1
 
                 # Author row with dark drop-shadow for crisp edge definition
                 auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                item_surf.blit(auth_sh, (auth_pad_x + sh_off, auth_pad_y + sh_off))
+                self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
                 auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
-                item_surf.blit(auth_rend, (auth_pad_x, auth_pad_y))
+                self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
 
                 # Message lines with bold typography and crisp drop shadow
-                msg_start_y = auth_pad_y + auth_h - (2 if self.is_vertical else 0)
+                msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
                 for line_idx, line_text in enumerate(display_lines):
                     line_y = msg_start_y + line_idx * line_h
                     line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                    item_surf.blit(line_sh, (auth_pad_x + sh_off, line_y + sh_off))
+                    self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
                     line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                    item_surf.blit(line_rend, (auth_pad_x, line_y))
+                    self.surf_chat_card.blit(line_rend, (pad_x, line_y))
 
-                self.surf_chat_card.blit(item_surf, (bubble_x, y_offset))
                 y_offset += item_h + (12 if self.is_vertical else 10)
 
         self.screen.blit(self.surf_chat_card, (card_x, card_y))
 
-    def _draw_ai_subtitle_card(self, is_speaking: bool):
+    def _draw_ai_subtitle_card(self, is_speaking: bool, concurrent_viewers: int = 0):
         """
         Draws AI Co-Host streaming response typewriter banner.
-        16:9 Landscape: Bottom-center (w=1000, h=276, y=764).
-        9:16 Vertical: Mid tier above chat (w=1000, h=350, y=796).
+        16:9 Landscape: Bottom-center (w=880, h=360, y=633).
+        9:16 Vertical: Mid tier above chat (w=940, h=410, y=736).
         """
         if self.is_vertical:
-            card_w, card_h = 1000, 350
-            card_x, card_y = (self.width - card_w) // 2, 796
+            card_w, card_h = 940, 410
+            card_x, card_y = (self.width - card_w) // 2, 736
         else:
-            card_w, card_h = 940, 315
+            card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)
             card_y = self.core_cy + 265 + 68
 
@@ -1213,15 +1194,21 @@ class Visualizer:
             self.surf_subtitle_card.blit(dot_surf, (card_w - 36, 25 if not self.is_vertical else 26))
             self.surf_subtitle_card.blit(speaking_lbl, (card_w - spk_w - 46, 22 if not self.is_vertical else 20))
 
-        # Typewriter text progress
-        target_len = len(self.subtitle_target_text)
-        if self.typewriter_index < target_len:
-            self.typewriter_index = min(target_len, self.typewriter_index + 2)
+        # Determine text to render
+        if self.is_empty_hold:
+            text_to_render = ""
+        elif not self.subtitle_target_text or (concurrent_viewers <= 0 and not is_speaking):
+            text_to_render = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        else:
+            # Typewriter text progress
+            target_len = len(self.subtitle_target_text)
+            if self.typewriter_index < target_len:
+                self.typewriter_index = min(target_len, self.typewriter_index + 2)
+            text_to_render = self.subtitle_target_text[: self.typewriter_index]
 
-        text_to_render = self.subtitle_target_text[: self.typewriter_index]
         if not text_to_render:
-            host_name = getattr(self.cfg, "host_streamer_name", "Host")
-            text_to_render = f"Ready for the next topic! {host_name}, let's keep the energy flowing!"
+            self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
+            return
 
         words = text_to_render.split(" ")
         lines = []
@@ -1238,7 +1225,7 @@ class Visualizer:
         if cur_line:
             lines.append(cur_line)
 
-        max_lines = 5
+        max_lines = 6
         line_h = 48 if self.is_vertical else 42
         y_start = 74 if self.is_vertical else 66
         for i, line in enumerate(lines[:max_lines]):

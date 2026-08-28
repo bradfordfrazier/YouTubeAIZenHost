@@ -497,22 +497,25 @@ class LocalCoHostApp:
         # Transition engagement tier to ACTIVE
         self.engagement_mode = "active"
         self._update_engagement_state()
-        self.visualizer.set_mood("hyped")
-
         should_greet = getattr(self.cfg, "greet_viewer_joins", False)
         if should_greet:
-            host_name = self.cfg.host_streamer_name
             chan_handle = self.cfg.youtube_channel_handle
-            prompt = (
-                f"[VIEWER_JOINED] A new viewer just joined the live broadcast! (Concurrent viewers: {viewers}). "
-                f"Give a fast, warm, energetic, and witty welcome to the new viewer tuning in to {chan_handle} with {host_name}! "
-                f"Invite them to say hello in chat and ignite the room!"
-            )
+            if viewers == 1:
+                prompt = (
+                    f"[VIEWER_JOINED] A sole viewer has entered the stream. (Concurrent viewers: 1). "
+                    f"Acknowledge their presence directly ('you') with transcendent, charismatic presence on {chan_handle}. "
+                    f"Speak to them directly as the sole conscious mind present. Do not ask for chat comments."
+                )
+            else:
+                prompt = (
+                    f"[VIEWER_JOINED] New viewer(s) arrived. (Concurrent viewers: {viewers}). "
+                    f"Acknowledge the arrival on {chan_handle} with transcendent, charismatic presence. "
+                    f"Do not ask for chat comments or plead for engagement."
+                )
+            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
+            self._trigger_ai_turn(prompt_trigger=prompt, force=False)
         else:
-            prompt = "[SPONTANEOUS_REFLECTION]"
-
-        logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
-        self._trigger_ai_turn(prompt_trigger=prompt, force=False)
+            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Room transitioned to ACTIVE.")
 
     def _on_viewer_count_update(self, new_viewers: int, new_chat_velocity: int = 0):
         """Processes viewer count updates and manages active vs eco engagement transitions."""
@@ -529,9 +532,6 @@ class LocalCoHostApp:
                 f"(Active threshold: >={min_viewers})."
             )
             self._update_engagement_state()
-            if new_viewers >= min_viewers:
-                logger.info(f"⚡ [Wake Up on Boot] Room established with {new_viewers} active viewer(s). Performing opening comment event...")
-                self._wake_up_and_trigger_comment(new_viewers)
             return
 
         is_empty_to_active = (prev_viewers == 0 and new_viewers >= min_viewers)
@@ -539,7 +539,7 @@ class LocalCoHostApp:
         if is_empty_to_active:
             logger.info(
                 f"⚡ [Wake Up] Viewer entered empty room! (Viewers rose from 0 to {new_viewers}). "
-                "Performing next scripted comment event and resuming active cadence..."
+                "Resuming active cadence..."
             )
             self._wake_up_and_trigger_comment(new_viewers)
 
@@ -550,6 +550,8 @@ class LocalCoHostApp:
             )
             self.visualizer.set_mood("chill")
             self.spontaneous_idle_count = 0
+            self.current_ai_subtitle = ""
+            self.visualizer.set_subtitle("")
 
         self._update_engagement_state()
 
@@ -598,6 +600,10 @@ class LocalCoHostApp:
         if not prompt_trigger:
             return
 
+        # Immediately clear previous comment from panel upon triggering event
+        self.visualizer.clear_subtitle()
+        self.current_ai_subtitle = ""
+
         if force:
             if self.active_ai_task and not self.active_ai_task.done():
                 self.active_ai_task.cancel()
@@ -629,6 +635,9 @@ class LocalCoHostApp:
 
     async def _ai_turn_worker(self, prompt_trigger: Optional[str]):
         """Worker streaming LLM response and synthesizing full cohesive speech."""
+        t_start = time.perf_counter()
+        self.visualizer.clear_subtitle()
+        self.current_ai_subtitle = ""
         full_statement = ""
         active_mood = "energetic"
         try:
@@ -640,17 +649,12 @@ class LocalCoHostApp:
                     self.visualizer.set_mood(active_mood)
 
                 elif ev_type == "token":
-                    full_text = event.get("full_text", "")
-                    full_statement = full_text
-                    self.current_ai_subtitle = full_text
-                    self.visualizer.set_subtitle(full_text)
+                    full_statement = event.get("full_text", "")
 
                 elif ev_type == "complete":
                     full_text = event.get("full_text", "").strip()
                     mood = event.get("mood", active_mood)
                     full_statement = full_text
-                    self.current_ai_subtitle = full_text
-                    self.visualizer.set_subtitle(full_text)
                     self.visualizer.set_mood(mood)
                     self.last_activity_time = time.time()
 
@@ -658,7 +662,16 @@ class LocalCoHostApp:
             if full_statement.strip():
                 clean_speech = full_statement.strip()
                 logger.info(f"🎙️ [AI Speech] Synthesizing complete statement: '{clean_speech}'")
+
+                # Ensure configured empty pause duration (e.g. 2.0s) has elapsed before displaying/speaking
+                pause_sec = getattr(self.cfg, "ai_comment_pause_sec", 2.0)
+                elapsed = time.perf_counter() - t_start
+                if elapsed < pause_sec:
+                    await asyncio.sleep(pause_sec - elapsed)
+
                 await self.tts.queue_speech(clean_speech)
+                self.current_ai_subtitle = clean_speech
+                self.visualizer.set_subtitle(clean_speech)
 
         except asyncio.CancelledError:
             logger.debug("AI turn worker cancelled.")
@@ -1084,7 +1097,6 @@ class LocalCoHostApp:
 
                         # Comprehensive set of channel, host, and AI cohost handles to prevent self-triggering
                         own_identifiers = {
-                            "massivegodcomplex",
                             "host",
                             "owner",
                             "broadcaster",
@@ -1500,11 +1512,14 @@ class LocalCoHostApp:
                 time_since_last_spontaneous = now - self.last_spontaneous_time
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_encouragement = now - self.last_chat_encouragement_time
+                encouragement_enabled = getattr(self.cfg, "chat_encouragement_enabled", False)
                 encouragement_base_interval = getattr(self.cfg, "chat_encouragement_interval_sec", 300.0)
                 encouragement_backoff = min(600.0, encouragement_base_interval * (1.5 ** self.encouragement_idle_count))
 
-                # 1. Chat Encouragement: Viewers watching, but chat silent
-                if (time_since_last_chat >= encouragement_backoff and
+                # 1. Chat Encouragement: Viewers watching, but chat silent (only if enabled)
+                if (encouragement_enabled and
+                    encouragement_base_interval > 0 and
+                    time_since_last_chat >= encouragement_backoff and
                     time_since_last_encouragement >= encouragement_backoff and
                     silence_dur >= 30.0):
 

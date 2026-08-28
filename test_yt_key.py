@@ -7,8 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from app import extract_youtube_video_id
+
 api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-video_id = os.getenv("YOUTUBE_VIDEO_ID", "").strip() or "0KVvjduZIG0"
+raw_video_input = os.getenv("YOUTUBE_VIDEO_ID", "").strip() or os.getenv("YOUTUBE_CHANNEL_HANDLE", "").strip()
+video_id = extract_youtube_video_id(raw_video_input) if raw_video_input else ""
 
 print("=" * 60)
 print("YOUTUBE DATA API V3 VIEWER TELEMETRY VALIDATOR")
@@ -16,7 +19,7 @@ print("=" * 60)
 
 if not api_key:
     print("\n[!] YOUTUBE_API_KEY is currently empty in .env!")
-    print("Please open .env and paste your API key on line 16:")
+    print("Please open .env and paste your API key on line 19:")
     print("  YOUTUBE_API_KEY=AIzaSyYourActualKeyHere\n")
     print("To get a YouTube Data API v3 key:")
     print("  1. Go to Google Cloud Console: https://console.cloud.google.com/apis/credentials")
@@ -24,8 +27,14 @@ if not api_key:
     print("  3. Create or copy an API key and paste it into .env under YOUTUBE_API_KEY=")
     sys.exit(1)
 
-print(f"-> Testing with Video ID: {video_id}")
-print(f"-> Testing with API Key:  {api_key[:8]}...{api_key[-4:] if len(api_key) > 8 else ''}")
+if not video_id:
+    print(f"\n[!] Could not resolve a video ID from: '{raw_video_input}'")
+    print("Please set YOUTUBE_VIDEO_ID in .env with a live video ID or URL.")
+    sys.exit(0)
+
+print(f"-> Target Video Input: {raw_video_input}")
+print(f"-> Resolved Video ID:  {video_id}")
+print(f"-> Testing with API Key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 8 else ''}")
 
 url = f"https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails,snippet,status&id={video_id}&key={api_key}"
 req = urllib.request.Request(

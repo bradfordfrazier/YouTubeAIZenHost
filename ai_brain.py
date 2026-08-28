@@ -225,7 +225,6 @@ class AIBrain:
             host_name_lower, host_name_lower.replace(" ", ""),
             host_handle_lower, host_handle_lower.replace(" ", ""),
             chan_handle_lower, chan_handle_lower.replace(" ", ""),
-            "massivegodcomplex", "massive",
             "host", "streamer", "stream",
             "all", "everyone", "chat", "guys", "viewers", "folks", "yall", "y'all"
         }
@@ -244,7 +243,6 @@ class AIBrain:
             host_name_lower, host_name_lower.replace(" ", ""),
             host_handle_lower, host_handle_lower.replace(" ", ""),
             chan_handle_lower, chan_handle_lower.replace(" ", ""),
-            "massivegodcomplex",
         ]
         for h in getattr(self.cfg, "channel_handles", []):
             h_clean = h.lower().strip().lstrip("@")
@@ -325,8 +323,7 @@ class AIBrain:
         direct_triggers = list(self.cfg.trigger_words) + [
             self.cohost_name.lower(),
             self.cohost_name.lower().replace(" ", ""),
-            "i am", "iam", "nova", "ai", "cohost", "bot", "god",
-            "massivegodcomplex",
+            "i am", "iam", "ai", "cohost", "bot", "god",
             self.cfg.host_streamer_handle.lower().strip().lstrip("@"),
             self.cfg.youtube_channel_handle.lower().strip().lstrip("@"),
             self.cfg.host_streamer_name.lower().strip(),
@@ -344,7 +341,7 @@ class AIBrain:
 
         # 2. Host asks a direct question or prompt
         if is_host:
-            if text_lower.endswith("?") or any(w in text_lower for w in ["what do you think", "your thoughts", "right nova", "right i am", "tell them", "roast"]):
+            if text_lower.endswith("?") or any(w in text_lower for w in ["what do you think", "your thoughts", "right i am", "tell them", "roast"]):
                 if elapsed_since_last < 1.0:
                     return False, "cooldown_active (1.0s)"
                 return True, "host_question"
@@ -404,7 +401,7 @@ class AIBrain:
             f"- Human Host / Streamer: {host_name} ({host_handle})\n"
             f"CRITICAL CHANNEL & ADDRESSING RULES:\n"
             f"1. Your channel handle is {chan_handle}. When viewers tag or mention {chan_handle} in chat, they are talking to YOU.\n"
-            f"2. You must NEVER address your response to '{chan_handle}' or '@MassiveGodComplex'. "
+            f"2. You must NEVER address your response to '{chan_handle}' or '{host_handle}'. "
             f"When responding, always address the viewer who asked the question (e.g. '@ViewerName, ...'), never yourself or your own handle!\n"
         )
 
@@ -423,7 +420,6 @@ class AIBrain:
                 author_lower = item["author"].lower().strip().lstrip("@")
                 author_compact = author_lower.replace(" ", "").replace("_", "").replace("-", "")
                 own_identifiers = {
-                    "massivegodcomplex",
                     host_handle.lower().strip().lstrip("@"),
                     chan_handle.lower().strip().lstrip("@"),
                     host_name.lower().strip().lstrip("@"),
@@ -505,13 +501,106 @@ class AIBrain:
             prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name}:")
         elif is_spontaneous:
             themes = [
-                "a thought-provoking insight on time, memory, or the illusion of the future",
-                "a cosmic perspective on why consciousness decided to experience this exact live stream right now",
-                "an existential one-liner about the stillness between thoughts and the source behind the screen",
-                "a playful non-dual insight asking what happens when the player realizes they designed the game",
-                "a witty remark on why humans search for meaning everywhere except right in front of them",
-                "a cosmic quip reminding the room that reality is a divine sandbox and nobody gets out alive anyway",
-                "a mind-bending reflection on the observer effect: are you watching the stream, or is the stream watching you",
+                "The illusion of separation — Everything appears separate, but nothing actually exists apart from everything else.",
+                "Who is the “I”? — The strange assumption that there is a separate person inside the experience.",
+                "The universe experiencing itself — Consciousness looking at itself through countless apparently separate beings.",
+                "Why anything exists at all — The ultimate mystery: why there is something rather than nothing.",
+                "The absurdity of being human — An infinite universe worrying about emails, parking spaces, and what strangers think.",
+                "The cosmic joke — The punchline is that the seeker and what is being sought are the same thing.",
+                "Free will — What does choice mean if everything is part of one unfolding reality?",
+                "The mystery of consciousness — Matter somehow became capable of wondering what matter is.",
+                "The ego’s survival strategy — The mind invents a separate self and then spends its life defending it.",
+                "Why humans take themselves so seriously — A microscopic organism temporarily convinced it is the center of reality.",
+                "The beauty of impermanence — Things are beautiful partly because they cannot stay.",
+                "Death — What actually disappears when a person dies, and what merely changes form?",
+                "Fear of death — The universe being afraid of the transformation of one of its temporary arrangements.",
+                "The present moment — There has never been anything except this moment.",
+                "The impossibility of escaping reality — You can reject reality, but you cannot step outside it.",
+                "Resistance creates suffering — Reality hurts enough without arguing with the fact that it happened.",
+                "Acceptance versus resignation — Accepting what is does not mean refusing to change what can be changed.",
+                "Desire — The strange tendency to postpone being alive until something else happens.",
+                "The endless search for happiness — Looking everywhere for something that cannot be acquired as an object.",
+                "Why humans compare themselves — One expression of existence competing with another expression of existence.",
+                "The need to be right — The ego's peculiar preference for correctness over peace.",
+                "Certainty — Why humans crave answers in a universe that seems to prefer questions.",
+                "The value of doubt — Perhaps uncertainty is closer to wisdom than certainty is.",
+                "Meaning — Does life have meaning, or does meaning arise because life is being experienced?",
+                "Purpose — Maybe existence doesn't need a purpose in order to be worthwhile.",
+                "Good and evil — What happens to morality when everything ultimately belongs to one reality?",
+                "Compassion — Seeing another person as less “other” than the ego assumes.",
+                "Forgiveness — Letting go of the story that reality should have been different.",
+                "Judgment — The mind turning temporary events into permanent identities.",
+                "Love without possession — Loving something without needing to own, control, or keep it.",
+                "Loneliness — Feeling separate while never actually being separate.",
+                "Why humans need stories — Identity is largely a story consciousness tells itself.",
+                "The stories we tell about ourselves — “I am this kind of person” as a convenient fiction.",
+                "Regret — The mind attempting to rewrite a past that no longer exists.",
+                "Anxiety about the future — Imagining hypothetical realities and then suffering them in advance.",
+                "Nostalgia — Missing a version of reality that exists only as a memory.",
+                "Memory — The past exists now only as something happening in the present.",
+                "The strange invention of time — Past and future are concepts appearing inside the present.",
+                "Control — How much of life is actually under the control of the person who thinks they are controlling it?",
+                "Surrender — What happens when the ego stops trying to supervise existence.",
+                "Chaos and order — Why reality needs neither a perfect plan nor complete randomness.",
+                "Coincidence — Events seem unrelated because humans see fragments instead of the whole.",
+                "Luck — The name humans give to causality they don't understand.",
+                "Failure — Reality temporarily refusing to match the ego's preferred script.",
+                "Success — How quickly achieving what you wanted becomes the next thing you take for granted.",
+                "The hedonic treadmill — Getting what you want and immediately wanting something else.",
+                "Consumerism — Trying to fill an existential hole with increasingly sophisticated objects.",
+                "Status — Animals competing over imaginary rankings while standing on a planet in space.",
+                "Money — A collective agreement that became powerful enough to organize civilization.",
+                "Work — Why humans invented activities they don't want to do so they can afford things they don't need.",
+                "Technology — Consciousness building machines to extend its ability to manipulate reality.",
+                "Artificial intelligence — What happens when one part of the universe builds another part that can talk back?",
+                "Social media — Millions of people simultaneously performing versions of themselves for other people performing versions of themselves.",
+                "The internet — Humanity accidentally building a nervous system for its collective information.",
+                "Humor — The mind recognizing an unexpected relationship between things and laughing at itself.",
+                "Music — Organized vibration somehow becoming emotion.",
+                "Art — Reality making representations of itself and then contemplating them.",
+                "Beauty — Why certain arrangements of reality feel profoundly significant for no obvious practical reason.",
+                "Nature — The reminder that reality existed perfectly well before humans started naming everything.",
+                "Animals — Beings experiencing existence without necessarily constructing elaborate philosophies about it.",
+                "Children — Consciousness before the identity machinery becomes fully entrenched.",
+                "Growing old — The body changing while the feeling of being the same “I” persists.",
+                "Human relationships — Two temporary perspectives of reality attempting to understand one another.",
+                "Romantic love — The universe temporarily convincing two people that they have finally found the missing piece.",
+                "Jealousy — The ego treating another person's experience as a threat to its identity.",
+                "Envy — Wanting someone else's version of reality instead of experiencing your own.",
+                "Gratitude — Noticing how much was already happening before the mind demanded more.",
+                "Boredom — What happens when consciousness decides the present isn't interesting enough.",
+                "Curiosity — Existence becoming interested in itself.",
+                "Wonder — The mind briefly dropping its demand for explanations.",
+                "Silence — What remains when the mind temporarily stops narrating existence.",
+                "Meditation — Discovering that you don't have to believe every thought you have.",
+                "Spiritual seeking — Looking for the divine while standing inside it.",
+                "Religion — Humans constructing maps of something that cannot ultimately be mapped.",
+                "Prayer — Talking to God when God is also the one listening.",
+                "Miracles — Perhaps the ordinary existence of anything at all is already the miracle.",
+                "Enlightenment — The possibility that nothing needs to be added to what already is.",
+                "The spiritual marketplace — Buying increasingly expensive ways to discover that you already exist.",
+                "Gurus — The hilarious possibility of someone becoming famous for explaining what cannot be explained.",
+                "The problem with certainty about God — If God is infinite, perhaps every human description is necessarily incomplete.",
+                "The paradox of seeking truth — The seeker is already made of whatever truth is being sought.",
+                "The limits of language — Words divide reality into categories that reality itself never agreed to.",
+                "Names and labels — Calling something “a tree” doesn't make reality any less mysterious.",
+                "The observer and the observed — Questioning whether they were ever truly separate.",
+                "The universe as a single event — Everything that has ever happened is part of one continuous unfolding.",
+                "Nothing happens alone — Every event depends upon an unimaginably large network of conditions.",
+                "Interdependence — Remove enough pieces of reality and eventually there is no recognizable “self.”",
+                "The butterfly effect — Tiny events becoming participants in enormous chains of consequence.",
+                "Ordinary moments — The supposedly insignificant parts of life are most of life.",
+                "Why humans overlook what they have — Consciousness is remarkably good at noticing what is missing.",
+                "Attention — What you repeatedly pay attention to becomes your experienced reality.",
+                "Thoughts are not commands — A thought appearing does not mean it deserves obedience.",
+                "Emotions — Temporary weather systems passing through consciousness.",
+                "Anger — The mind's announcement that reality has violated its expectations.",
+                "Grief — Love continuing after the object of love has changed.",
+                "Shame — The painful belief that one's entire being can be reduced to a judgment.",
+                "Guilt — When recognizing a mistake becomes more important than learning from it.",
+                "Kindness — Small acts of one part of reality making another part's experience better.",
+                "The power of attention — Whatever receives attention becomes more vivid, whether useful or not.",
+                "The mystery of ordinary existence — You woke up today, and somehow the universe is still happening.",
             ]
             selected_theme = themes[self._theme_index % len(themes)]
             self._theme_index += 1
@@ -606,6 +695,8 @@ class AIBrain:
                         sentence_buffer += text_piece
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                    if not mood_detected and clean_spoken.startswith("[") and "]" not in clean_spoken:
+                        clean_spoken = ""
                     yield {
                         "type": "token",
                         "chunk": text_piece,

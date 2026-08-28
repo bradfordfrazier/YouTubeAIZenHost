@@ -118,11 +118,12 @@ async def test_ai_brain():
     assert not peer_trig, "Expected member-to-member reply to NOT trigger AI response"
     assert "member_reply_entanglement" in peer_reason, f"Expected member_reply_entanglement reason, got: {peer_reason}"
 
-    # 3. Test Direct Channel/Host Address (@MassiveGodComplex is NEVER filtered as peer reply)
+    # 3. Test Direct Channel/Host Address (Channel handle is NEVER filtered as peer reply)
     brain.last_response_time = 0.0
-    mgc_trig, mgc_reason = brain.should_trigger_response("@MassiveGodComplex is this stream live right now?", is_host=False)
-    print(f"-> Direct Host/Channel address evaluation (@MassiveGodComplex): should_trigger={mgc_trig}, reason={mgc_reason}")
-    assert mgc_trig, "Expected address to @MassiveGodComplex to NOT be filtered as peer entanglement"
+    chan_handle = brain.cfg.youtube_channel_handle
+    mgc_trig, mgc_reason = brain.should_trigger_response(f"{chan_handle} is this stream live right now?", is_host=False)
+    print(f"-> Direct Host/Channel address evaluation ({chan_handle}): should_trigger={mgc_trig}, reason={mgc_reason}")
+    assert mgc_trig, f"Expected address to {chan_handle} to NOT be filtered as peer entanglement"
 
     # 4. Test Direct AI Address from Member
     brain.last_response_time = 0.0

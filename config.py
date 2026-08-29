@@ -124,7 +124,6 @@ class AppConfig:
     idle_silence_threshold_sec: float = float(os.getenv("IDLE_SILENCE_THRESHOLD_SEC", "45.0"))
     spontaneous_min_interval_sec: float = float(os.getenv("SPONTANEOUS_MIN_INTERVAL_SEC", "60.0"))
     spontaneous_max_backoff_sec: float = float(os.getenv("SPONTANEOUS_MAX_BACKOFF_SEC", "600.0"))
-    ai_comment_pause_sec: float = float(os.getenv("AI_COMMENT_PAUSE_SEC", "2.0"))
     motto_phrase: str = os.getenv("MOTTO_PHRASE", "Everything is perfect.")
 
     # --------------------------------------------------------------------------

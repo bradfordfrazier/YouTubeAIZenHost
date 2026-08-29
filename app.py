@@ -745,11 +745,6 @@ class LocalCoHostApp:
         self.visualizer.clear_subtitle()
         self.current_ai_subtitle = ""
 
-        # 2. Pre-Speech Empty Hold Pause (e.g. 2.0s)
-        pause_sec = getattr(self.cfg, "ai_comment_pause_sec", 2.0)
-        if pause_sec > 0:
-            await asyncio.sleep(pause_sec)
-
         full_statement = ""
         is_completed = False
         active_mood = "energetic"

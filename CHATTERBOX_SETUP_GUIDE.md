@@ -86,15 +86,32 @@ Register-ScheduledTask -TaskName "ChatterBoxTurboTTS" -Action $action -Trigger $
 
 ---
 
-## 5. Reference Voice Customization
+## 5. Reference Voice Customization & Pure Oracle (VCTK) Voices
 
-ChatterBox Turbo supports zero-shot voice cloning using clean reference audio clips:
-1. Record a **5 to 15 second** audio clip of speech in WAV format (clean recording, minimal background noise).
-2. Save the file into `C:\Services\tts-server\voices\` (for example, `C:\Services\tts-server\voices\cohost.wav`).
-3. In the streaming app's `.env`, configure:
-   ```env
-   TTS_REFERENCE_VOICE=cohost.wav
-   ```
+ChatterBox Turbo supports zero-shot voice cloning using clean reference audio clips or built-in VCTK speaker recipes.
+
+### Pure Oracle & Androgynous Transcendent Tone Targets
+To achieve an **Androgynous Transcendent Tone (Pure Oracle)**—characterized by neutral fundamental pitch (~145–170 Hz), flat emotional cadence, smooth articulation, and absence of heavy chest resonance or high-register breathiness—the server includes automatic resolution for these targeted speakers:
+
+| Voice Name / Alias | Description & Profile | Pitch / Register |
+| :--- | :--- | :--- |
+| `pure_oracle` / `oracle` | **Pure Oracle**: Disembodied androgynous cadence, flat spiritual authority | ~155 Hz, zero inflection |
+| `p248` / `p248.wav` | **Speaker p248** (Female, Neutral English): Lower pitch register, crisp steady transitions | ~150 Hz, steady |
+| `p308` / `p308.wav` | **Speaker p308** (Female, Southern British / RP): Flat, formal pitch contours | ~165 Hz, formal |
+| `p361` / `p361.wav` | **Speaker p361** (American / Neutral): Clear, dry mid-frequency articulation | ~155 Hz, dry |
+| `p374` / `p374.wav` | **Speaker p374** (American / Neutral): Minimal dynamic fluctuation, steady cadence | ~150 Hz, minimal swing |
+
+### Automatic On-Demand Voice Downloading
+If a requested voice (e.g. `TTS_REFERENCE_VOICE=pure_oracle.wav` or `TTS_REFERENCE_VOICE=p248.wav`) does not exist locally on GAMER in `C:\Services\tts-server\voices\`:
+1. The server's `voice_manager.py` automatically downloads or synthesizes the calibrated reference passage (the standardized Rainbow Passage or Speech Accent Archive Stella Paragraph).
+2. The reference clip is cached in `C:\Services\tts-server\voices\` and condition-cached for sub-second inference.
+
+### Configuring in `.env`
+In `D:\Dev\YouTubeAIZenHost\.env` on the OBS PC (or locally on GAMER):
+```env
+# Choose between 'pure_oracle.wav', 'p248.wav', 'p308.wav', 'p361.wav', 'p374.wav', or 'cohost.wav'
+TTS_REFERENCE_VOICE=pure_oracle.wav
+```
 
 ---
 

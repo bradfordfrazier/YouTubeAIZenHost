@@ -136,19 +136,34 @@ async def ensure_voice_available(voice_name: Optional[str]) -> Path:
     return target_path
 
 
+# Shard index mapping for instant targeted speaker extraction
+SPEAKER_SHARDS: Dict[str, str] = {
+    "p308": "data/train-00070-of-00099.parquet",
+    "p361": "data/train-00094-of-00099.parquet",
+    "p374": "data/train-00097-of-00099.parquet",
+}
+
+
 async def _try_download_vctk_speaker(speaker_id: str, out_path: Path) -> Optional[Path]:
     """Attempts to stream speaker sample from VCTK dataset on Hugging Face."""
     try:
         from datasets import load_dataset, Audio
+        spk_lower = speaker_id.lower()
         logger.info(f"Connecting to VCTK dataset stream for speaker '{speaker_id}'...")
-        ds = load_dataset("Milana/resampled_16KHrz_vctk_speakers_split", split="test", streaming=True)
+
+        if spk_lower in SPEAKER_SHARDS:
+            data_file = SPEAKER_SHARDS[spk_lower]
+            ds = load_dataset("Milana/resampled_16KHrz_vctk_speakers_split", data_files=data_file, split="train", streaming=True)
+        else:
+            ds = load_dataset("Milana/resampled_16KHrz_vctk_speakers_split", split="test", streaming=True)
+        
         ds = ds.cast_column("audio", Audio(decode=False))
 
         count = 0
         for sample in ds:
             count += 1
             spk = sample.get("speaker_id") or sample.get("speaker")
-            if spk and spk.lower() == speaker_id.lower():
+            if spk and spk.lower() == spk_lower:
                 raw_bytes = sample["audio"].get("bytes")
                 if raw_bytes:
                     data, sr = sf.read(io.BytesIO(raw_bytes))

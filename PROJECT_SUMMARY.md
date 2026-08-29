@@ -21,7 +21,7 @@ flowchart TD
         GDI -->|Local OBS WebSocket :4455| APP
         CHAT --> APP
 
-        BRAIN["AI Brain (Gemini 2.5/2.0 Flash)"]
+        BRAIN["AI Brain (Gemini 3.7 Flash)"]
         TTS["TTS Engine (edge-tts / 48kHz Resampler)"]
         VIS["Visualizer (1080p60 GPU Pygame Canvas)"]
         NDI["NDI Broadcaster (cyndilib / AI_COHOST_FEED)"]
@@ -81,7 +81,7 @@ flowchart TD
 | **OBS Integration** | Dual: Window/App Audio Capture + NDI | Works natively in OBS without plugins, or via DistroAV NDI. |
 | **Video Resolution & Rate** | 1920x1080 @ 60.00 FPS (or 1080x1920 @ 60fps) | Broadcast standard; matches high-motion streaming layouts. |
 | **Audio Format & Clocking** | 48,000 Hz Stereo Float32 Planar + Interleaved | Simultaneous NDI planar feed + Windows WASAPI output; 20ms packets yield exact 1:1 AV sync. |
-| **LLM Inference** | Gemini 2.5 / 2.0 Flash (Streaming) | Sub-second token time-to-first-byte (TTFB) enables natural conversational turns. |
+| **LLM Inference** | Gemini 3.7 Flash (Native Async Streaming) | Sub-second token time-to-first-byte (TTFB) with `thinking_level=LOW` enables natural, punchy conversational turns. |
 | **Mood Tagging System** | Regex `[MOOD: <name>]` | First-token extraction adjusts visualizer shader palette before speech begins. |
 | **Visualizer Tech** | Pygame + NumPy Vectorization | Achieves 65-250+ FPS at 1080p without dedicated 3D engine overhead. |
 | **Fault Tolerance** | Auto-reconnect & Token Protection | Eco/Standby modes prevent token burn; automated reconnect for OBS and YouTube. |

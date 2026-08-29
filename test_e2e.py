@@ -29,14 +29,16 @@ async def run_e2e_test():
 
     # Start 60fps video task and audio pump thread
     import threading
-    app.audio_thread = threading.Thread(
-        target=app._audio_pump_thread,
+    app.ndi_audio_running = True
+    app.ndi_audio_thread = threading.Thread(
+        target=app._ndi_audio_pump_worker,
         name="NDI_Audio_Pump_Thread",
         daemon=True,
     )
-    app.audio_thread.start()
+    app.ndi_audio_thread.start()
 
     video_task = asyncio.create_task(app.video_broadcast_task(), name="video_broadcaster")
+    scheduler_task = asyncio.create_task(app.comment_queue_scheduler_task(), name="comment_scheduler")
 
     await asyncio.sleep(0.5)
     print("-> All-Local AI Co-Host running with 60 FPS Visualizer & NDI Broadcaster")
@@ -121,9 +123,10 @@ async def run_e2e_test():
     # Stop app
     app.stop()
     video_task.cancel()
+    scheduler_task.cancel()
     try:
-        await video_task
-    except asyncio.CancelledError:
+        await asyncio.gather(video_task, scheduler_task, return_exceptions=True)
+    except Exception:
         pass
     app.ndi.close()
 

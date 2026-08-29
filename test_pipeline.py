@@ -192,6 +192,8 @@ async def test_ai_brain():
     assert "rate_limit_exceeded" in rate_reason
 
     brain.response_timestamps.clear()
+    brain.is_generating = False
+    brain.last_response_time = 0.0
 
     # 11. Test Spontaneous Spiritual Reflection Stream
     print("-> Testing Spontaneous Spiritual Reflection Stream from AI Brain...")

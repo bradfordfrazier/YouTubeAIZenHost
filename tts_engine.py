@@ -13,6 +13,7 @@ import threading
 import time
 from typing import Dict, Optional, Tuple
 
+import aiohttp
 import numpy as np
 import scipy.signal
 import soundfile as sf
@@ -44,6 +45,21 @@ class TTSEngine:
         self.fps = self.cfg.visualizer_fps  # 60
         self.samples_per_frame = self.sample_rate // self.fps  # 800 samples/frame
 
+        # Dual-Backend Configuration (ChatterBox Turbo on LAN / Edge-TTS Local Fallback)
+        self.tts_backend = getattr(self.cfg, "tts_backend", "chatterbox").lower()
+        self.server_url = getattr(self.cfg, "tts_server_url", "http://192.168.0.115:8123").rstrip("/")
+        self.reference_voice = getattr(self.cfg, "tts_reference_voice", "cohost.wav")
+        self.timeout_floor = getattr(self.cfg, "tts_request_timeout_floor", 5.0)
+        self.timeout_ceiling = getattr(self.cfg, "tts_request_timeout_ceiling", 30.0)
+        self.exaggeration_default = getattr(self.cfg, "tts_exaggeration_default", 0.5)
+        self.mood_exaggeration_map = getattr(self.cfg, "tts_mood_exaggeration_map", {})
+
+        # Active backend state (tracks failover from chatterbox -> edge)
+        self.active_backend = self.tts_backend
+        self._health_checked = False
+        self._warned_unhealthy = False
+
+        # Edge-TTS settings
         self.voice = self.cfg.tts_voice
         self.pitch = self.cfg.tts_pitch
         self.rate = self.cfg.tts_rate
@@ -114,21 +130,83 @@ class TTSEngine:
 
         return data.astype(np.float32)
 
-    async def synthesize(self, text: str) -> np.ndarray:
+    async def check_health(self) -> bool:
         """
-        Synthesize text into 48kHz stereo float32 PCM numpy array.
-        Returns array of shape (num_samples, 2).
+        Queries the remote ChatterBox Turbo server health endpoint on GAMER.
+        If unreachable, logs a single warning and sets active backend to 'edge'.
         """
-        # Clean text of mood tags, markdown, and '@' symbols before speech synthesis
-        clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
-        clean_text = re.sub(r"@([a-zA-Z0-9_]+)", r"\1", clean_text)
-        clean_text = clean_text.replace("*", "").replace("`", "").strip()
+        if self.tts_backend != "chatterbox":
+            self.active_backend = "edge"
+            return True
 
-        if not clean_text:
-            return np.zeros((0, 2), dtype=np.float32)
+        url = f"{self.server_url}/health"
+        try:
+            timeout = aiohttp.ClientTimeout(total=2.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.active_backend = "chatterbox"
+                        self._health_checked = True
+                        logger.info(
+                            f"✅ [TTS-ENGINE] ChatterBox Turbo server at {self.server_url} is ONLINE "
+                            f"(warm: {data.get('warm')}, VRAM: {data.get('vram_used_mb')}MB)"
+                        )
+                        return True
+                    else:
+                        raise aiohttp.ClientError(f"Status {resp.status}")
+        except Exception as e:
+            if not self._warned_unhealthy:
+                logger.warning(
+                    f"⚠️ [TTS-ENGINE] ChatterBox Turbo server at {self.server_url} is UNREACHABLE ({e}). "
+                    f"Falling back to local Edge-TTS backend for session."
+                )
+                self._warned_unhealthy = True
+            self.active_backend = "edge"
+            self._health_checked = True
+            return False
 
-        logger.info(f"Synthesizing speech ({len(clean_text)} chars): '{clean_text[:60]}...'")
+    async def _synthesize_chatterbox(self, clean_text: str, exaggeration: float) -> Optional[np.ndarray]:
+        """Synthesizes speech via remote ChatterBox Turbo GPU inference server."""
+        url = f"{self.server_url}/synthesize"
+        # Dynamic timeout proportional to text length with floor/ceiling
+        calc_timeout = min(self.timeout_ceiling, max(self.timeout_floor, len(clean_text) * 0.08))
+        timeout = aiohttp.ClientTimeout(total=calc_timeout)
+        payload = {
+            "text": clean_text,
+            "voice": self.reference_voice,
+            "exaggeration": exaggeration,
+            "cfg_weight": 0.5,
+            "format": "wav",
+        }
 
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        raw_wav = await resp.read()
+                        if not raw_wav:
+                            return None
+                        # Zero-latency polyphase FIR decoding & resampling in worker thread
+                        data = await asyncio.to_thread(self._decode_and_resample, raw_wav)
+                        logger.info(
+                            f"[Chatterbox] Synthesized {len(data)/self.sample_rate:.2f}s audio "
+                            f"(exaggeration={exaggeration:.2f}) from {self.server_url}"
+                        )
+                        return data
+                    else:
+                        err_text = await resp.text()
+                        logger.warning(f"Chatterbox server returned error HTTP {resp.status}: {err_text}")
+                        return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning(f"Chatterbox connection/timeout to {self.server_url} ({e}); falling back to local edge-tts.")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error calling Chatterbox server: {e}", exc_info=True)
+            return None
+
+    async def _synthesize_edge_tts(self, clean_text: str) -> np.ndarray:
+        """Synthesizes speech locally via Microsoft edge-tts."""
         if not EDGE_TTS_AVAILABLE:
             logger.warning("edge-tts not available, generating synthesized tone placeholder")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
@@ -150,15 +228,48 @@ class TTSEngine:
                 logger.warning("No audio bytes received from edge-tts")
                 return np.zeros((0, 2), dtype=np.float32)
 
-            # Offload CPU-heavy decoding and polyphase FIR resampling to thread pool
             data = await asyncio.to_thread(self._decode_and_resample, bytes(audio_bytes))
+            logger.info(f"[Edge-TTS] Synthesized {len(data)/self.sample_rate:.2f}s of 48kHz stereo audio")
+            return data
+        except Exception as e:
+            logger.error(f"Error during edge-tts synthesis: {e}")
+            return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
-            logger.info(f"Synthesized {len(data)/self.sample_rate:.2f}s of 48kHz stereo audio")
+    async def synthesize(self, text: str) -> np.ndarray:
+        """
+        Synthesize text into 48kHz stereo float32 PCM numpy array.
+        Routes to ChatterBox Turbo GPU server or local Edge-TTS failback with mood mapping.
+        """
+        # Parse mood tag before cleaning
+        mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
+        active_mood = mood_match.group(1).lower() if mood_match else "neutral"
+        exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
+
+        # Clean text of mood tags, markdown, and '@' symbols before speech synthesis
+        clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(r"@([a-zA-Z0-9_]+)", r"\1", clean_text)
+        clean_text = clean_text.replace("*", "").replace("`", "").strip()
+
+        if not clean_text:
+            return np.zeros((0, 2), dtype=np.float32)
+
+        logger.info(f"Synthesizing speech ({len(clean_text)} chars, mood={active_mood}): '{clean_text[:60]}...'")
+
+        # 1. Primary: Remote Chatterbox Turbo GPU inference server
+        if self.active_backend == "chatterbox":
+            data = await self._synthesize_chatterbox(clean_text, exaggeration)
+            if data is not None and len(data) > 0:
+                return data
+            # If Chatterbox failed, fall through to Edge-TTS fallback
+            logger.info(f"Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
+
+        # 2. Fallback / Local Mode: Microsoft edge-tts
+        data = await self._synthesize_edge_tts(clean_text)
+        if len(data) > 0:
             return data
 
-        except Exception as e:
-            logger.error(f"Error during TTS synthesis: {e}")
-            return self._generate_sine_placeholder(1.5)
+        # 3. Final safety: Sine placeholder (never silent)
+        return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
     def _generate_sine_placeholder(self, duration_sec: float) -> np.ndarray:
         """Fallback beep / harmonic synthesizer."""
@@ -308,4 +419,5 @@ class TTSEngine:
             "rms": self.current_rms,
             "spectrum": self.smoothed_spectrum.copy(),
             "buffer_duration_sec": len(self._audio_buffer_ndi) / self.sample_rate,
+            "active_backend": self.active_backend,
         }

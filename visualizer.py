@@ -415,6 +415,13 @@ class Visualizer:
         self.typewriter_index = 0
         self.is_empty_hold = False
 
+        # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
+        self.ai_text_current = ""
+        self.ai_text_target = ""
+        self.ai_text_alpha = 0.0          # 0.0 (completely in void) to 1.0 (fully materialized)
+        self.ai_text_state = "fade_in"    # "fade_in", "steady", "fade_out", "idle_empty"
+        self.ai_text_y_drift = 0.0        # Subtle vertical drift during manifestation/dissolution
+
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
         # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
         self._bloom_sprites = {}
@@ -457,6 +464,7 @@ class Visualizer:
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
         self.surf_chat_card = pygame.Surface((chat_w, chat_h), pygame.SRCALPHA)
         self.surf_subtitle_card = pygame.Surface((sub_w, sub_h), pygame.SRCALPHA)
+        self.surf_ai_text = pygame.Surface((sub_w, sub_h), pygame.SRCALPHA)
         self.surf_promo_card = pygame.Surface((promo_w, promo_h), pygame.SRCALPHA)
 
         # Fallback chat history cache for instant restoration on visualizer startup
@@ -506,22 +514,23 @@ class Visualizer:
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
-        """Immediately clears subtitle panel and puts it into empty hold mode."""
+        """Immediately triggers graceful dissolution into the void and enters empty hold mode."""
         self.is_empty_hold = True
         self.subtitle_target_text = ""
-        self.typewriter_index = 0
+        self.ai_text_target = ""
+        if self.ai_text_alpha > 0.0:
+            self.ai_text_state = "fade_out"
 
     def set_subtitle(self, text: str):
-        """Update AI co-host speaking subtitle text."""
-        if not text:
+        """Update AI co-host speaking subtitle text with ethereal emergence."""
+        clean = text.strip() if text else ""
+        if not clean or len(clean) < 4:
             self.subtitle_target_text = ""
-            self.typewriter_index = 0
             return
 
         self.is_empty_hold = False
-        if text != self.subtitle_target_text:
-            self.subtitle_target_text = text
-            self.typewriter_index = 0
+        if clean != self.subtitle_target_text:
+            self.subtitle_target_text = clean
 
     def _update_palette_lerp(self, dt: float):
         """Smoothly interpolate colors toward target mood."""
@@ -1040,7 +1049,7 @@ class Visualizer:
 
     def _draw_live_chat_card(self, chat_messages: List[Dict]):
         """
-        Draws YouTube Live Chat contained glassmorphism panel (borderless container without border lines):
+        Draws YouTube Live Chat transparent overlay panel:
         16:9 Landscape: Left column below center (w=380, h=490, x=60, y=545).
         9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1274, up to 5 items).
         """
@@ -1052,11 +1061,6 @@ class Visualizer:
             card_x, card_y = 60, 545
 
         self.surf_chat_card.fill((0, 0, 0, 0))
-
-        # Contained glassmorphism background container (borderless - no outline stroke lines)
-        bg_color = (12, 16, 32, 245) if self.is_vertical else (12, 18, 32, 235)
-        border_radius = 14
-        pygame.draw.rect(self.surf_chat_card, bg_color, (0, 0, card_w, card_h), border_radius=border_radius)
 
         # Header iconic graphic elements & typography
         pad_x = 24 if self.is_vertical else 18
@@ -1173,79 +1177,123 @@ class Visualizer:
 
     def _draw_ai_subtitle_card(self, is_speaking: bool, concurrent_viewers: int = 0):
         """
-        Draws AI Co-Host streaming response typewriter banner.
+        Draws AI Co-Host streaming response center comment area.
+        Features an ethereal manifestation & dissolution engine (emerging from nowhere and dissolving into nowhere)
+        illustrating pure consciousness arising and receding in awareness with spacious inside padding.
         16:9 Landscape: Bottom-center (w=880, h=360, y=633).
         9:16 Vertical: Mid tier above chat (w=940, h=380, y=866).
         """
         if self.is_vertical:
             card_w, card_h = 940, 380
-            card_x, card_y = (self.width - card_w) // 2, 866
+            card_x, card_y = (self.width - card_w) // 2, 818
         else:
             card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)
-            card_y = self.core_cy + 252 + 58
+            card_y = self.core_cy + 252 + 14
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
-        # High-contrast glassmorphism card frame
-        pygame.draw.rect(self.surf_subtitle_card, (12, 16, 32, 245), (0, 0, card_w, card_h), border_radius=14)
 
-        c_prim = tuple(int(c) for c in self.c_primary)
-        pygame.draw.rect(self.surf_subtitle_card, (*c_prim, 220), (0, 0, card_w, card_h), width=2, border_radius=14)
-
-        header_title = f"{self.cohost_name.upper()} (HOST)"
-        title_rend = self.font_title.render(header_title, True, c_prim)
-        title_y = 16 if self.is_vertical else 16
-        self.surf_subtitle_card.blit(title_rend, (24, title_y))
-
-        if is_speaking:
-            pulse_alpha = int(128 + 127 * math.sin(self.time_elapsed * 8))
-            dot_r = 7 if self.is_vertical else 6
-            dot_surf = pygame.Surface((dot_r * 2 + 2, dot_r * 2 + 2), pygame.SRCALPHA)
-            pygame.draw.circle(dot_surf, (0, 255, 180, pulse_alpha), (dot_r + 1, dot_r + 1), dot_r)
-            speaking_lbl = self.font_badge.render("SPEAKING", True, (0, 255, 180))
-            spk_w = speaking_lbl.get_width()
-            self.surf_subtitle_card.blit(dot_surf, (card_w - 36, 25 if not self.is_vertical else 26))
-            self.surf_subtitle_card.blit(speaking_lbl, (card_w - spk_w - 46, 22 if not self.is_vertical else 20))
-
-        # Determine text to render
+        # 1. Determine target text to be manifested
         if self.is_empty_hold:
-            text_to_render = ""
+            desired_target = ""
         elif not self.subtitle_target_text or (concurrent_viewers <= 0 and not is_speaking):
-            text_to_render = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+            desired_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
         else:
-            # Typewriter text progress
-            target_len = len(self.subtitle_target_text)
-            if self.typewriter_index < target_len:
-                self.typewriter_index = min(target_len, self.typewriter_index + 2)
-            text_to_render = self.subtitle_target_text[: self.typewriter_index]
+            desired_target = self.subtitle_target_text
 
-        if not text_to_render:
-            self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
-            return
-
-        words = text_to_render.split(" ")
-        lines = []
-        cur_line = ""
-        max_text_w = card_w - (60 if self.is_vertical else 50)
-        for w in words:
-            test = f"{cur_line} {w}".strip()
-            if self.font_ai_subtitle.size(test)[0] < max_text_w:
-                cur_line = test
+        # 2. State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
+        if desired_target != self.ai_text_target:
+            self.ai_text_target = desired_target
+            if self.ai_text_alpha > 0.05 and self.ai_text_current != desired_target:
+                self.ai_text_state = "fade_out"
             else:
-                if cur_line:
-                    lines.append(cur_line)
-                cur_line = w
-        if cur_line:
-            lines.append(cur_line)
+                self.ai_text_current = desired_target
+                self.ai_text_state = "fade_in" if desired_target else "idle_empty"
 
-        max_lines = 6
-        line_h = 48 if self.is_vertical else 42
-        y_start = 74 if self.is_vertical else 66
-        for i, line in enumerate(lines[:max_lines]):
-            line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
-            self.surf_subtitle_card.blit(line_sh, (26, y_start + i * line_h + 2))
-            line_rend = self.font_ai_subtitle.render(line, True, (255, 255, 255))
-            self.surf_subtitle_card.blit(line_rend, (24, y_start + i * line_h))
+        dt = 1.0 / self.fps
+        if self.ai_text_state == "fade_out":
+            self.ai_text_alpha -= dt * 2.8  # ~0.35s graceful dissolution into nowhere
+            self.ai_text_y_drift = -4.0 * (1.0 - max(0.0, self.ai_text_alpha))
+            if self.ai_text_alpha <= 0.0:
+                self.ai_text_alpha = 0.0
+                self.ai_text_current = self.ai_text_target
+                self.ai_text_y_drift = 6.0
+                if self.ai_text_current:
+                    self.ai_text_state = "fade_in"
+                else:
+                    self.ai_text_state = "idle_empty"
+
+        elif self.ai_text_state == "fade_in":
+            self.ai_text_alpha += dt * 2.2  # ~0.45s graceful emergence from nowhere
+            self.ai_text_y_drift = 6.0 * (1.0 - min(1.0, self.ai_text_alpha))
+            if self.ai_text_alpha >= 1.0:
+                self.ai_text_alpha = 1.0
+                self.ai_text_y_drift = 0.0
+                self.ai_text_state = "steady"
+
+        elif self.ai_text_state == "steady":
+            self.ai_text_alpha = 1.0
+            self.ai_text_y_drift = 0.0
+
+        elif self.ai_text_state == "idle_empty":
+            self.ai_text_alpha = 0.0
+            self.ai_text_y_drift = 0.0
+
+        # Maintain typewriter_index for compatibility with callers
+        if self.ai_text_current:
+            self.typewriter_index = len(self.ai_text_current)
+
+        # 3. Render Ethereal Floating Text Centered Horizontally & Vertically
+        self.surf_ai_text.fill((0, 0, 0, 0))
+
+        if self.ai_text_alpha > 0.005 and self.ai_text_current:
+            pad_x = 52 if self.is_vertical else 48
+            max_text_w = card_w - (pad_x * 2)
+
+            words = self.ai_text_current.split(" ")
+            lines = []
+            cur_line = ""
+            for w in words:
+                test = f"{cur_line} {w}".strip()
+                if self.font_ai_subtitle.size(test)[0] < max_text_w:
+                    cur_line = test
+                else:
+                    if cur_line:
+                        lines.append(cur_line)
+                    cur_line = w
+            if cur_line:
+                lines.append(cur_line)
+
+            display_lines = lines[:7]
+            line_h = 46 if self.is_vertical else 42
+            total_text_h = len(display_lines) * line_h
+
+            # Center vertically within the comment container
+            if total_text_h < card_h:
+                y_start = (card_h - total_text_h) // 2
+            else:
+                y_start = 12
+            y_start += self.ai_text_y_drift
+
+            # Dynamic mood-matched color
+            mood_color = tuple(int(np.clip(c, 0, 255)) for c in self.c_primary)
+
+            for i, line in enumerate(display_lines):
+                cur_y = int(y_start + i * line_h)
+                line_w = self.font_ai_subtitle.size(line)[0]
+                line_x = (card_w - line_w) // 2
+
+                # Crisp dark drop shadow for sharp edge contrast
+                line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
+                self.surf_ai_text.blit(line_sh, (line_x + 2, cur_y + 2))
+
+                # Mood-matched vibrant text
+                line_rend = self.font_ai_subtitle.render(line, True, mood_color)
+                self.surf_ai_text.blit(line_rend, (line_x, cur_y))
+
+            alpha_int = int(np.clip(self.ai_text_alpha * 255, 0, 255))
+            self.surf_ai_text.set_alpha(alpha_int)
+            self.surf_subtitle_card.blit(self.surf_ai_text, (0, 0))
 
         self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
 

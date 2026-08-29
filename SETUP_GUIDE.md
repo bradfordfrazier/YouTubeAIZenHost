@@ -47,7 +47,8 @@ YOUTUBE_VIDEO_ID=
 
 # 3. Google Gemini API
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.7-flash
+GEMINI_THINKING_LEVEL=LOW
 AI_COHOST_NAME=I Am
 
 # 4. Neural TTS Voice

@@ -1,7 +1,7 @@
 # ==============================================================================
 # Unified Requirements for Distributed Live Stream AI Co-Host Pipeline
 # ==============================================================================
-google-genai>=1.0.0
+google-genai>=2.0.0
 google-generativeai>=0.8.0
 edge-tts>=7.0.0
 cyndilib>=0.1.1

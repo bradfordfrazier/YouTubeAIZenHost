@@ -236,7 +236,7 @@ class CastEngine:
         """
         Evaluates whether a synthetic cast question should be injected.
         Only triggers if:
-        1. AI is not currently speaking or generating
+        1. Comment queue is not saturated (is_ai_busy=False)
         2. Real chat has been quiet >= quiet_threshold_sec
         3. Sufficient cooldown has elapsed since the last cast question >= min_interval_sec
         """

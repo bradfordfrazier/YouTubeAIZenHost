@@ -1762,20 +1762,14 @@ class LocalCoHostApp:
                 now = time.time()
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_cast = now - self.cast.last_cast_time
-                is_busy = (
-                    self.brain.is_generating
-                    or self.tts.is_speaking
-                    or self.tts.remaining_speech_duration > 0.05
-                    or self.active_turn_event is not None
-                    or len(self.comment_queue) > 0
-                )
+                is_queue_full = len(self.comment_queue) >= getattr(self.cfg, "max_comment_queue_size", 5)
 
                 if self.cast.should_trigger_cast(
                     time_since_last_chat=time_since_last_chat,
                     time_since_last_cast=time_since_last_cast,
                     quiet_threshold_sec=self.cfg.cast_quiet_chat_threshold_sec,
                     min_interval_sec=self.cfg.cast_min_interval_sec,
-                    is_ai_busy=is_busy,
+                    is_ai_busy=is_queue_full,
                 ):
                     persona, question = self.cast.next_cast_question()
 

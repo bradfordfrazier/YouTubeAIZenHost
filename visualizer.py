@@ -583,12 +583,13 @@ class Visualizer:
         self.subtitle_target_text = ""
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
         self.ai_text_target = motto
-        if self.ai_text_current != motto and self.ai_text_alpha > 0.05:
+        if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05:
             self.ai_text_state = "fade_out"
         else:
             self.ai_text_current = motto
             self.ai_text_alpha = 1.0
             self.ai_text_state = "steady"
+            self._active_pinned_message = None
         self.ai_text_y_drift = 0.0
         self.question_fade_alpha = 0.0
         self.question_fade_state = "idle"
@@ -690,7 +691,6 @@ class Visualizer:
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
         has_active_statement = bool(
             (self.subtitle_target_text and self.subtitle_target_text != motto)
-            or (self.ai_text_target and self.ai_text_target != motto)
             or (self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05)
         )
 
@@ -1303,15 +1303,8 @@ class Visualizer:
             self._cached_chat_messages = list(chat_messages)
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
 
-        # Filter out the pinned message from the recent list to prevent duplicate display
-        filtered_msgs = []
-        for m in display_msgs:
-            if pinned_msg_text and m.get("message", "").strip() == pinned_msg_text:
-                continue
-            filtered_msgs.append(m)
-
         max_msgs = (4 if self.is_vertical else 3) if pinned_message else (5 if self.is_vertical else 4)
-        recent_chats = filtered_msgs[-max_msgs:] if filtered_msgs else []
+        recent_chats = list(reversed(display_msgs))[:max_msgs] if display_msgs else []
 
         if not recent_chats and not pinned_message:
             empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
@@ -1554,19 +1547,20 @@ class Visualizer:
             desired_target = self.subtitle_target_text
 
         # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
-        if desired_target != self.ai_text_target:
+        if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in")):
             self.ai_text_target = desired_target
-            # If transitioning to a new statement, always start cleanly from alpha=0 to prevent old comment flash
-            if desired_target and self.ai_text_current != desired_target:
+            # If current statement is visible and different from desired target, fade it out first!
+            if self.ai_text_current and self.ai_text_current != desired_target and self.ai_text_alpha > 0.05:
+                self.ai_text_state = "fade_out"
+            elif desired_target:
                 self.ai_text_current = desired_target
                 self.ai_text_alpha = 0.0
                 self.ai_text_state = "fade_in"
                 self.ai_text_y_drift = 6.0
-            elif not desired_target and self.ai_text_alpha > 0.05:
-                self.ai_text_state = "fade_out"
             else:
-                self.ai_text_current = desired_target
-                self.ai_text_state = "fade_in" if desired_target else "idle_empty"
+                self.ai_text_current = ""
+                self.ai_text_alpha = 0.0
+                self.ai_text_state = "idle_empty"
 
         dt = 1.0 / self.fps
         if self.ai_text_state == "fade_out":
@@ -1580,6 +1574,8 @@ class Visualizer:
                     self.ai_text_state = "fade_in"
                 else:
                     self.ai_text_state = "idle_empty"
+                if not self.ai_text_current or self.ai_text_current == motto:
+                    self._active_pinned_message = None
 
         elif self.ai_text_state == "fade_in":
             self.ai_text_alpha += dt * 2.2  # ~0.45s graceful emergence from nowhere

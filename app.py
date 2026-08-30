@@ -860,23 +860,17 @@ class LocalCoHostApp:
                         concurrent_viewers=self.concurrent_viewers,
                     )
 
-                # 8. Post-Speech 10-Second Hold: Fade out comment & unpin question after 10s, then fade in motto
+                # 8. Post-Speech 10-Second Hold: Display comment & pinned chat for exactly 10.0s after speech ends, then fade out, unpin, and fade in motto
                 logger.info("⏳ [Post-Speech Hold] Holding Oracle comment & pinned question for 10.0s before motto transition...")
                 try:
-                    if self.new_comment_signal and not self.comment_queue:
-                        self.new_comment_signal.clear()
-                        await asyncio.wait_for(self.new_comment_signal.wait(), timeout=10.0)
-                    else:
-                        await asyncio.sleep(min(10.0, 0.5 if self.comment_queue else 10.0))
-                except asyncio.TimeoutError:
+                    await asyncio.sleep(10.0)
+                except asyncio.CancelledError:
                     pass
 
-                # If no immediate new event took over, transition to motto
-                if not self.comment_queue:
-                    logger.info("✨ [Motto Transition] 10s post-speech hold finished. Unpinning question and transitioning to motto.")
-                    self.current_pinned_chat = None
-                    self.current_ai_subtitle = ""
-                    self.visualizer.clear_subtitle()
+                logger.info("✨ [Motto Transition] 10s post-speech hold finished. Unpinning question and transitioning to motto.")
+                self.current_pinned_chat = None
+                self.current_ai_subtitle = ""
+                self.visualizer.clear_subtitle()
 
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
@@ -886,6 +880,9 @@ class LocalCoHostApp:
         finally:
             self.last_activity_time = time.time()
             self.last_spontaneous_time = time.time()
+            self.current_pinned_chat = None
+            self.current_ai_subtitle = ""
+            self.visualizer.clear_subtitle()
 
     # --------------------------------------------------------------------------
     # 3. Local OBS Studio Integration (Direct WebSocket on localhost)

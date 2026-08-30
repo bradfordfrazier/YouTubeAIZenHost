@@ -1304,7 +1304,7 @@ class Visualizer:
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
 
         max_msgs = (4 if self.is_vertical else 3) if pinned_message else (5 if self.is_vertical else 4)
-        recent_chats = list(reversed(display_msgs))[:max_msgs] if display_msgs else []
+        recent_chats = display_msgs[-max_msgs:] if display_msgs else []
 
         if not recent_chats and not pinned_message:
             empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))

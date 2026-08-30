@@ -249,7 +249,7 @@ class TTSEngine:
 
         # Clean text of mood tags, markdown, and '@' symbols before speech synthesis
         clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
-        clean_text = re.sub(r"@([a-zA-Z0-9_]+)", r"\1", clean_text)
+        clean_text = re.sub(r"@+", "", clean_text)
         clean_text = clean_text.replace("*", "").replace("`", "").strip()
 
         if not clean_text:

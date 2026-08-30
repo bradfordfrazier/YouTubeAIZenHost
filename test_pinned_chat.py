@@ -9,6 +9,7 @@ Verifies:
 """
 
 import asyncio
+import time
 import numpy as np
 
 from visualizer import Visualizer
@@ -416,6 +417,56 @@ def test_in_feed_highlight_and_scrolling_pin_docking():
     assert len(buf3) == 1920 * 1080 * 4
 
 
+def test_queue_aware_hold_and_direct_turn_transitions():
+    """Verifies that when multiple comments are in queue, post-speech hold uses short hold and transitions directly without motto."""
+    async def _test():
+        app = LocalCoHostApp()
+        app.cfg.comment_post_speech_hold_sec = 15.0
+        app.cfg.comment_active_queue_hold_sec = 0.2
+
+        async def mock_queue_speech(txt):
+            pass
+
+        async def mock_wait():
+            pass
+
+        app.tts.queue_speech = mock_queue_speech
+        app.tts.wait_until_speech_completed = mock_wait
+        app.new_comment_signal = asyncio.Event()
+
+        # Create two events
+        event_1 = CommentEvent(
+            prompt_trigger="Chat message from @Seeker1: 'What is awareness?'",
+            event_type="chat",
+            priority=5,
+            created_at=time.time(),
+            max_age_sec=90.0,
+            chat_item={"author": "Seeker1", "message": "What is awareness?"},
+        )
+        event_2 = CommentEvent(
+            prompt_trigger="Chat message from @ExistentialDave: 'Who submits the Jira ticket?'",
+            event_type="cast",
+            priority=6,
+            created_at=time.time(),
+            max_age_sec=90.0,
+            chat_item={"author": "ExistentialDave", "message": "Who submits the Jira ticket?"},
+        )
+
+        # Enqueue event 2 so queue is NOT empty during event 1
+        app.comment_queue.append(event_2)
+
+        t_start = time.perf_counter()
+        await app._execute_ai_turn(event_1)
+        t_elapsed = time.perf_counter() - t_start
+
+        # With active queue, hold should NOT wait 15 seconds! It should complete rapidly (< 8s total with speech)
+        assert t_elapsed < 10.0
+        # When queue has items, it should not have cleared into motto
+        assert event_2 in app.comment_queue
+
+    asyncio.run(_test())
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -452,6 +503,10 @@ if __name__ == "__main__":
     print("Testing In-Feed Highlight and Scrolling Pin Docking...")
     test_in_feed_highlight_and_scrolling_pin_docking()
     print("In-Feed Highlight and Scrolling Pin Docking Passed!")
+
+    print("Testing Queue-Aware Hold and Direct Turn Transitions...")
+    test_queue_aware_hold_and_direct_turn_transitions()
+    print("Queue-Aware Hold and Direct Turn Transitions Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

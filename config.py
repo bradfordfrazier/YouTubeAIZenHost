@@ -192,6 +192,7 @@ class AppConfig:
     comment_fade_in_sec: float = float(os.getenv("COMMENT_FADE_IN_SEC", "0.6"))
     comment_fade_out_sec: float = float(os.getenv("COMMENT_FADE_OUT_SEC", "1.2"))
     comment_post_speech_hold_sec: float = float(os.getenv("COMMENT_POST_SPEECH_HOLD_SEC", "15.0"))
+    comment_active_queue_hold_sec: float = float(os.getenv("COMMENT_ACTIVE_QUEUE_HOLD_SEC", "2.5"))
     comment_pause_sec: float = float(os.getenv("COMMENT_PAUSE_SEC", "2.0"))
     motto_fade_in_sec: float = float(os.getenv("MOTTO_FADE_IN_SEC", "1.4"))
     motto_fade_out_sec: float = float(os.getenv("MOTTO_FADE_OUT_SEC", "0.6"))

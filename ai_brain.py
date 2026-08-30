@@ -914,6 +914,7 @@ class AIBrain:
                         sentence_buffer += text_piece
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                    clean_spoken = re.sub(r"@+", "@", clean_spoken)
                     if not mood_detected and clean_spoken.startswith("[") and "]" not in clean_spoken:
                         clean_spoken = ""
                     yield {
@@ -927,7 +928,7 @@ class AIBrain:
                     sentences = self.sentence_pattern.findall(sentence_buffer)
                     if sentences:
                         for s in sentences[:-1]:
-                            s_clean = s.strip()
+                            s_clean = re.sub(r"@+", "@", s.strip())
                             if s_clean:
                                 yield {"type": "sentence", "text": s_clean, "mood": active_mood}
                         sentence_buffer = sentences[-1]
@@ -950,6 +951,7 @@ class AIBrain:
                             yield {"type": "mood", "mood": active_mood}
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                    clean_spoken = re.sub(r"@+", "@", clean_spoken)
                     yield {
                         "type": "token",
                         "chunk": text_piece,
@@ -960,6 +962,7 @@ class AIBrain:
 
             # Flush remaining sentence buffer
             final_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+            final_spoken = re.sub(r"@+", "@", final_spoken)
 
             # Clean trailing cut-off fragments: find the last valid sentence terminator
             last_punct = max(final_spoken.rfind("."), final_spoken.rfind("!"), final_spoken.rfind("?"))
@@ -980,7 +983,7 @@ class AIBrain:
 
             if is_valid_sentence:
                 if sentence_buffer.strip():
-                    yield {"type": "sentence", "text": sentence_buffer.strip(), "mood": active_mood}
+                    yield {"type": "sentence", "text": re.sub(r"@+", "@", sentence_buffer.strip()), "mood": active_mood}
                 now_ts = time.time()
                 self.dialogue_history.append({"text": final_spoken, "mood": active_mood, "timestamp": now_ts})
                 self.response_timestamps.append(now_ts)

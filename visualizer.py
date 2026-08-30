@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -603,7 +604,7 @@ class Visualizer:
 
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
-        clean = text.strip() if text else ""
+        clean = re.sub(r"@+", "@", text).strip() if text else ""
         if not clean or len(clean) < 4:
             self.subtitle_target_text = ""
             return
@@ -1386,7 +1387,10 @@ class Visualizer:
             # Exclude active question from lower scrolling area to prevent duplicate display
             scrolling_msgs = [
                 m for m in display_msgs
-                if not (m.get("author", "").strip().lower().lstrip("@") == active_auth and m.get("message", "").strip() == active_msg)
+                if not (
+                    m.get("author", "").strip().lower().lstrip("@") == active_auth
+                    and (m.get("message", "").strip() == active_msg or active_msg in m.get("message", "").strip() or m.get("message", "").strip() in active_msg)
+                )
             ]
             max_msgs = (3 if self.is_vertical else 2)
             recent_chats = scrolling_msgs[-max_msgs:] if scrolling_msgs else []
@@ -1413,7 +1417,7 @@ class Visualizer:
                     has_active_question
                     and not is_pinned_at_top
                     and raw_author.lower() == active_auth
-                    and msg == active_msg
+                    and (msg == active_msg or active_msg in msg or msg in active_msg)
                 )
 
                 # Text wrapping

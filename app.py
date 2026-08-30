@@ -630,15 +630,15 @@ class LocalCoHostApp:
 
         # Default priorities & TTLs based on event type
         priority_map = {
-            "host": (1, 60.0),
-            "superchat": (2, 60.0),
-            "direct_mention": (3, 40.0),
-            "greeting": (4, 30.0),
-            "chat": (5, 30.0),
-            "cast": (6, 25.0),
-            "spontaneous": (10, 15.0),
+            "host": (1, 120.0),
+            "superchat": (2, 180.0),
+            "direct_mention": (3, 90.0),
+            "greeting": (4, 60.0),
+            "chat": (5, 90.0),
+            "cast": (6, 90.0),
+            "spontaneous": (10, 30.0),
         }
-        def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 30.0))
+        def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 90.0))
         prio = priority if priority is not None else def_pri
         ttl = max_age_sec if max_age_sec is not None else def_ttl
 
@@ -823,7 +823,7 @@ class LocalCoHostApp:
                     self.visualizer.set_mood(mood)
 
             # 4. Synthesize speech and begin typewriter display
-            clean_speech = full_statement.strip()
+            clean_speech = re.sub(r"@+", "@", full_statement).strip()
             words = clean_speech.split()
             if (
                 is_completed
@@ -877,18 +877,38 @@ class LocalCoHostApp:
                         concurrent_viewers=self.concurrent_viewers,
                     )
 
-                # 8. Post-Speech Hold: Display comment & pinned chat for configurable duration (default 15.0s) after speech ends, then fade out, unpin, pause, and fade in motto
-                hold_sec = max(0.0, getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
-                logger.info(f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question for {hold_sec:.1f}s before motto transition...")
+                # 8. Dynamic Queue-Aware Post-Speech Hold:
+                # If there are pending comments waiting in queue, hold briefly (e.g. 2.5s) for audience reading,
+                # then proceed directly to the next comment without transitioning to the motto!
+                # If the queue is empty, hold for the full post_speech_hold duration (default 15.0s).
+                # During the hold, poll for incoming comments so the co-host responds immediately if a viewer chats.
+                has_queued_next = len(self.comment_queue) > 0
+                max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+                min_hold = min(2.5, max_hold)
+
+                t_hold_start = time.perf_counter()
+                logger.info(f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
+
                 try:
-                    await asyncio.sleep(hold_sec)
+                    while time.perf_counter() - t_hold_start < max_hold:
+                        await asyncio.sleep(0.15)
+                        # If a new comment arrives in queue while idle-holding, break early after min_hold!
+                        if len(self.comment_queue) > 0 and (time.perf_counter() - t_hold_start) >= min_hold:
+                            logger.info(f"⚡ [Queue Wakeup] New comment detected in queue ({len(self.comment_queue)} pending). Transitioning directly to next turn.")
+                            has_queued_next = True
+                            break
                 except asyncio.CancelledError:
                     pass
 
-                logger.info(f"✨ [Motto Transition] {hold_sec:.1f}s post-speech hold finished. Unpinning question and transitioning to motto.")
-                self.current_pinned_chat = None
-                self.current_ai_subtitle = ""
-                self.visualizer.clear_subtitle()
+                # If there are more comments in queue, do NOT transition to motto!
+                # Transition directly to the next comment cleanly without any motto flicker.
+                if len(self.comment_queue) > 0 or has_queued_next:
+                    logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
+                else:
+                    logger.info(f"✨ [Motto Transition] {max_hold:.1f}s post-speech hold finished with empty queue. Unpinning question and transitioning to motto.")
+                    self.current_pinned_chat = None
+                    self.current_ai_subtitle = ""
+                    self.visualizer.clear_subtitle()
 
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
@@ -898,9 +918,10 @@ class LocalCoHostApp:
         finally:
             self.last_activity_time = time.time()
             self.last_spontaneous_time = time.time()
-            self.current_pinned_chat = None
-            self.current_ai_subtitle = ""
-            self.visualizer.clear_subtitle()
+            if not self.comment_queue:
+                self.current_pinned_chat = None
+                self.current_ai_subtitle = ""
+                self.visualizer.clear_subtitle()
 
     # --------------------------------------------------------------------------
     # 3. Local OBS Studio Integration (Direct WebSocket on localhost)
@@ -1455,24 +1476,24 @@ class LocalCoHostApp:
                             # The AI co-host recognizes its own handle (@MassiveGodComplex / channel owner) and skips responding to itself
                             logger.info(f"🛡️ [Own Handle Recognized] Chat message from own channel/host handle @{author_name}: '{msg}'. Skipping AI self-response.")
                         elif self.cfg.chat_reader_mode:
-                            spoken_text = f"Superchat from @{author_name} for {item.amountString}! {msg}" if is_superchat else f"@{author_name} says, {msg}"
+                            spoken_text = f"Superchat from @{author_name.lstrip('@')} for {item.amountString}! {msg}" if is_superchat else f"@{author_name.lstrip('@')} says, {msg}"
                             mood = "hyped" if is_superchat else "energetic"
                             self.visualizer.set_mood(mood)
-                            self.current_ai_subtitle = f"💬 @{author_name}: {msg}"
+                            self.current_ai_subtitle = f"💬 @{author_name.lstrip('@')}: {msg}"
                             self.visualizer.set_subtitle(self.current_ai_subtitle)
                             asyncio.create_task(self.tts.queue_speech(spoken_text))
                         elif is_new_chatter and self.cfg.greet_new_chatters:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False, is_new_chatter=True)
                             if is_superchat or should_trigger:
                                 prompt = (
-                                    f"[NEW_CHATTER_GREETING] @{author_name} just sent their very first message: '{msg}'. "
-                                    f"Greet @{author_name} warmly and wittily by name while responding to their comment!"
+                                    f"[NEW_CHATTER_GREETING] @{author_name.lstrip('@')} just sent their very first message: '{msg}'. "
+                                    f"Greet @{author_name.lstrip('@')} warmly and wittily by name while responding to their comment!"
                                 )
                                 self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4, chat_item=chat_entry)
                         else:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
-                                prefix = f"Chat message from @{author_name}"
+                                prefix = f"Chat message from @{author_name.lstrip('@')}"
                                 prio = 2 if is_superchat else (3 if "direct_mention" in reason else 5)
                                 ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
                                 self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio, chat_item=chat_entry)

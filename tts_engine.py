@@ -67,6 +67,8 @@ class TTSEngine:
         # Dual independent sample buffers for NDI and Local Windows Audio
         self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
         self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
+        self._last_ndi_pop_time = 0.0
+        self._last_local_pop_time = 0.0
         self._buffer_lock = threading.RLock()
 
         # FFT & Dynamics Analysis State
@@ -291,23 +293,42 @@ class TTSEngine:
             self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
             self.is_speaking = False
 
-    async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: float = 60.0):
+    async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: Optional[float] = None):
         """Asynchronously waits until all buffered speech audio has finished broadcasting out through NDI/audio."""
         t0 = time.time()
         # Brief initial sleep so the pop_audio_packet / pop_local_audio threads register playback start
         await asyncio.sleep(0.15)
-        while time.time() - t0 < timeout:
+
+        expected_dur = getattr(self, "last_synthesized_duration", 0.0)
+        # Cap wait timeout to avoid hanging indefinitely if a playback backend is inactive
+        max_wait = (expected_dur + 2.5) if expected_dur > 0 else (timeout or 25.0)
+        if timeout:
+            max_wait = min(max_wait, timeout)
+
+        while time.time() - t0 < max_wait:
+            now = time.time()
             with self._buffer_lock:
-                buf_len_ndi = len(self._audio_buffer_ndi)
-                buf_len_local = len(self._audio_buffer_local)
-                max_buf = max(buf_len_ndi, buf_len_local)
-            if max_buf == 0:
+                ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0
+                local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0
+
+                buf_len_ndi = len(self._audio_buffer_ndi) if ndi_active else 0
+                buf_len_local = len(self._audio_buffer_local) if local_active else 0
+                is_done = (buf_len_ndi == 0 and buf_len_local == 0)
+
+            if is_done:
                 with self._buffer_lock:
                     self.is_speaking = False
+                    self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
+                    self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
                 # Safety padding for soundcard hardware driver ringbuffer drain before resolving
-                await asyncio.sleep(0.40)
+                await asyncio.sleep(0.35)
                 break
             await asyncio.sleep(poll_interval)
+        else:
+            with self._buffer_lock:
+                self.is_speaking = False
+                self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
+                self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
 
     async def queue_speech(self, text: str):
         """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
@@ -328,6 +349,7 @@ class TTSEngine:
             - packet_audio: shape (num_samples, 2) interleaved float32
         """
         n = num_samples
+        self._last_ndi_pop_time = time.time()
         with self._buffer_lock:
             if len(self._audio_buffer_ndi) >= n:
                 packet_audio = self._audio_buffer_ndi[:n]
@@ -361,6 +383,7 @@ class TTSEngine:
         Guarantees zero buffer underruns, zero drift, and smooth audio scaling.
         """
         n = num_samples
+        self._last_local_pop_time = time.time()
         with self._buffer_lock:
             if len(self._audio_buffer_local) >= n:
                 packet_audio = self._audio_buffer_local[:n]

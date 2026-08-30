@@ -142,12 +142,37 @@ def test_app_turn_pinning_lifecycle():
     asyncio.run(_test())
 
 
+def test_zero_flash_subtitle_transitions():
+    """Verifies that clear_subtitle and set_subtitle purge previous comment and never flash old text."""
+    vis = Visualizer(width=1920, height=1080)
+    vis.set_subtitle("This is the previous oracle comment from 5 minutes ago.")
+    vis.ai_text_alpha = 1.0
+    vis.ai_text_current = "This is the previous oracle comment from 5 minutes ago."
+
+    # Clear subtitle must completely wipe stale text and alpha
+    vis.clear_subtitle()
+    assert vis.ai_text_current == ""
+    assert vis.ai_text_target == ""
+    assert vis.ai_text_alpha == 0.0
+    assert vis.ai_text_state == "idle_empty"
+
+    # Setting new subtitle starts cleanly from alpha 0.0 without flashing old text
+    vis.set_subtitle("This is the brand new statement.")
+    assert vis.ai_text_current == "This is the brand new statement."
+    assert vis.ai_text_alpha == 0.0
+    assert vis.ai_text_state == "fade_in"
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
     print("Visualizer Pinned Chat Rendering Passed!")
 
+    print("Testing Zero-Flash Subtitle Transitions...")
+    test_zero_flash_subtitle_transitions()
+    print("Zero-Flash Subtitle Transitions Passed!")
+
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()
     print("App Turn Pinning Lifecycle Passed!")
-    print("\nALL PINNED CHAT TESTS PASSED 100%!")
+    print("\nALL PINNED CHAT & READABILITY TESTS PASSED 100%!")

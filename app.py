@@ -778,6 +778,16 @@ class LocalCoHostApp:
         else:
             self.current_pinned_chat = None
 
+        # Calculate minimum reading duration for the question if present
+        question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
+        if question_text:
+            word_count = len(question_text.split())
+            min_question_read_sec = max(3.5, min(6.5, 2.0 + word_count * 0.35))
+        else:
+            min_question_read_sec = 0.0
+
+        t_question_shown = time.perf_counter()
+
         full_statement = ""
         is_completed = False
         active_mood = "energetic"
@@ -804,6 +814,14 @@ class LocalCoHostApp:
                 and len(words) >= 3
                 and clean_speech[-1] in ".!?\"'”’)"
             ):
+                # Ensure the question preview has lingered on screen long enough for audience readability before speaking
+                if min_question_read_sec > 0:
+                    elapsed = time.perf_counter() - t_question_shown
+                    remaining_linger = min_question_read_sec - elapsed
+                    if remaining_linger > 0.05:
+                        logger.info(f"⏳ [Question Linger] Holding question preview on screen for {remaining_linger:.2f}s for audience comprehension...")
+                        await asyncio.sleep(remaining_linger)
+
                 logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
                 await self.tts.queue_speech(clean_speech)
                 self.current_ai_subtitle = clean_speech

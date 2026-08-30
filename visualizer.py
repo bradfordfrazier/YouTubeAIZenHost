@@ -468,12 +468,14 @@ class Visualizer:
         self.subtitle_target_text = ""
         self.typewriter_index = 0
         self.is_empty_hold = False
+        self.active_question_text = ""
+        self.active_question_start_time = 0.0
 
         # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
         self.ai_text_current = ""
         self.ai_text_target = ""
         self.ai_text_alpha = 0.0          # 0.0 (completely in void) to 1.0 (fully materialized)
-        self.ai_text_state = "fade_in"    # "fade_in", "steady", "fade_out", "idle_empty"
+        self.ai_text_state = "idle_empty" # "fade_in", "steady", "fade_out", "idle_empty"
         self.ai_text_y_drift = 0.0        # Subtle vertical drift during manifestation/dissolution
 
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
@@ -571,15 +573,19 @@ class Visualizer:
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
-        """Immediately triggers graceful dissolution into the void and enters empty hold mode."""
+        """Immediately clears subtitle text and purges stale comments from memory to prevent flashing."""
         self.is_empty_hold = True
         self.subtitle_target_text = ""
         self.ai_text_target = ""
-        if self.ai_text_alpha > 0.0:
-            self.ai_text_state = "fade_out"
+        self.ai_text_current = ""
+        self.ai_text_alpha = 0.0
+        self.ai_text_state = "idle_empty"
+        self.ai_text_y_drift = 0.0
+        if hasattr(self, "surf_ai_text"):
+            self.surf_ai_text.fill((0, 0, 0, 0))
 
     def set_subtitle(self, text: str):
-        """Update AI co-host speaking subtitle text with ethereal emergence."""
+        """Update AI co-host speaking subtitle text with clean ethereal emergence."""
         clean = text.strip() if text else ""
         if not clean or len(clean) < 4:
             self.subtitle_target_text = ""
@@ -588,6 +594,13 @@ class Visualizer:
         self.is_empty_hold = False
         if clean != self.subtitle_target_text:
             self.subtitle_target_text = clean
+            # When switching to a new utterance, ensure no old text flashes
+            if not self.ai_text_current or self.ai_text_state in ("idle_empty", "fade_out") or self.ai_text_current != clean:
+                self.ai_text_current = clean
+                self.ai_text_target = clean
+                self.ai_text_alpha = 0.0
+                self.ai_text_state = "fade_in"
+                self.ai_text_y_drift = 6.0
 
     def _update_palette_lerp(self, dt: float):
         """Smoothly interpolate colors toward target mood."""
@@ -1369,12 +1382,33 @@ class Visualizer:
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
 
+        # Track active question timestamp to ensure comfortable linger duration
+        if pinned_chat_message and isinstance(pinned_chat_message, dict):
+            curr_q_msg = pinned_chat_message.get("message", "").strip()
+            if curr_q_msg and curr_q_msg != self.active_question_text:
+                self.active_question_text = curr_q_msg
+                self.active_question_start_time = time.time()
+                # Purge old speech text from buffer to prevent flashing of previous comment
+                self.ai_text_current = ""
+                self.ai_text_target = ""
+                self.ai_text_alpha = 0.0
+                self.ai_text_state = "idle_empty"
+        else:
+            self.active_question_text = ""
+            self.active_question_start_time = 0.0
+
+        # Calculate word-count-based reading duration (min 3.5s, up to 7.0s)
+        q_words = len(self.active_question_text.split()) if self.active_question_text else 0
+        min_q_linger = max(3.5, min(7.0, 2.0 + q_words * 0.35))
+        q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
+
         # Check if we should display the incoming question preview before Oracle speech begins
         showing_question_preview = bool(
             pinned_chat_message
             and isinstance(pinned_chat_message, dict)
-            and not is_speaking
-            and not self.subtitle_target_text
+            and self.active_question_text
+            and (not is_speaking or q_time_elapsed < min_q_linger)
+            and (not self.subtitle_target_text or q_time_elapsed < min_q_linger)
         )
 
         if showing_question_preview:
@@ -1472,7 +1506,13 @@ class Visualizer:
         # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
         if desired_target != self.ai_text_target:
             self.ai_text_target = desired_target
-            if self.ai_text_alpha > 0.05 and self.ai_text_current != desired_target:
+            # If transitioning to a new statement, always start cleanly from alpha=0 to prevent old comment flash
+            if desired_target and self.ai_text_current != desired_target:
+                self.ai_text_current = desired_target
+                self.ai_text_alpha = 0.0
+                self.ai_text_state = "fade_in"
+                self.ai_text_y_drift = 6.0
+            elif not desired_target and self.ai_text_alpha > 0.05:
                 self.ai_text_state = "fade_out"
             else:
                 self.ai_text_current = desired_target

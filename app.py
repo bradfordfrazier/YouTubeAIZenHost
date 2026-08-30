@@ -20,7 +20,7 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 import numpy as np
 
@@ -386,6 +386,7 @@ class CommentEvent:
     created_at: float = field(default_factory=time.time)
     max_age_sec: float = 35.0
     force: bool = False
+    chat_item: Optional[Dict[str, Any]] = None
 
 
 class LocalCoHostApp:
@@ -436,6 +437,7 @@ class LocalCoHostApp:
         # Chat & Subtitle State
         self.current_host_transcript = ""
         self.current_ai_subtitle = ""
+        self.current_pinned_chat: Optional[Dict[str, Any]] = None
         self.chat_history: Deque[Dict] = collections.deque(maxlen=50)
         self.seen_chat_handles: set = set()
         self.discovered_channel_handle: Optional[str] = None
@@ -620,6 +622,7 @@ class LocalCoHostApp:
         priority: Optional[int] = None,
         max_age_sec: Optional[float] = None,
         force: bool = False,
+        chat_item: Optional[Dict] = None,
     ):
         """Thread-safe and async-safe enqueueing of AI comment turns with priority and backpressure."""
         if not prompt_trigger or not self.running:
@@ -659,6 +662,7 @@ class LocalCoHostApp:
             created_at=time.time(),
             max_age_sec=ttl,
             force=force,
+            chat_item=chat_item,
         )
 
         if force:
@@ -746,9 +750,33 @@ class LocalCoHostApp:
         t_start = time.perf_counter()
         logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
 
-        # 1. Clear previous subtitle card
+        # 1. Clear previous subtitle card and setup pinned question highlight
         self.visualizer.clear_subtitle()
         self.current_ai_subtitle = ""
+
+        # Set active pinned chat question during turn
+        if getattr(event, "chat_item", None):
+            self.current_pinned_chat = event.chat_item
+        elif event.event_type in ("chat", "superchat", "direct_mention", "cast", "greeting"):
+            m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
+            author_name = m_auth.group(1) if m_auth else ""
+            m_q = re.search(r"['\"]([^'\"]+)['\"]", event.prompt_trigger)
+            q_text = m_q.group(1) if m_q else event.prompt_trigger
+
+            matched = None
+            if author_name:
+                for ch in reversed(self.chat_history):
+                    if ch.get("author", "").lower().lstrip("@") == author_name.lower():
+                        matched = ch
+                        break
+            self.current_pinned_chat = matched or {
+                "author": author_name or "Viewer",
+                "message": q_text,
+                "is_cast": (event.event_type == "cast"),
+                "is_superchat": (event.event_type == "superchat"),
+            }
+        else:
+            self.current_pinned_chat = None
 
         full_statement = ""
         is_completed = False
@@ -828,6 +856,7 @@ class LocalCoHostApp:
             self.visualizer.clear_subtitle()
             self.current_ai_subtitle = ""
         finally:
+            self.current_pinned_chat = None
             self.last_activity_time = time.time()
             self.last_spontaneous_time = time.time()
 
@@ -1397,14 +1426,14 @@ class LocalCoHostApp:
                                     f"[NEW_CHATTER_GREETING] @{author_name} just sent their very first message: '{msg}'. "
                                     f"Greet @{author_name} warmly and wittily by name while responding to their comment!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4, chat_item=chat_entry)
                         else:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
                                 prefix = f"Chat message from @{author_name}"
                                 prio = 2 if is_superchat else (3 if "direct_mention" in reason else 5)
                                 ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
-                                self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio)
+                                self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
                             else:
                                 if "member_reply_entanglement" in reason:
                                     logger.info(f"⏸️ [Chat Filtered] Not triggering AI ({reason}). Preserving member entanglement.")
@@ -1769,7 +1798,7 @@ class LocalCoHostApp:
                         )
 
                     prompt = f"Cast member @{persona.handle} ({persona.archetype_title}) asks: '{question}'"
-                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=6)
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=6, chat_item=chat_entry)
 
             except asyncio.CancelledError:
                 break
@@ -1961,6 +1990,7 @@ class LocalCoHostApp:
                     engagement_mode=self.engagement_mode,
                     concurrent_viewers=self.concurrent_viewers,
                     is_stream_live=self.is_streaming,
+                    pinned_chat_message=self.current_pinned_chat,
                 )
 
                 # 2. Transmit video frame asynchronously over NDI (zero copy, zero drift)

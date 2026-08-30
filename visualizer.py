@@ -622,6 +622,7 @@ class Visualizer:
         engagement_mode: str = "active",
         concurrent_viewers: int = 0,
         is_stream_live: bool = True,
+        pinned_chat_message: Optional[Dict] = None,
     ) -> bytes:
         """
         Renders a full 1080p60 frame and returns the RGBA byte buffer.
@@ -659,7 +660,7 @@ class Visualizer:
             is_stream_live=is_stream_live,
         )
         self._draw_host_transcript_card(host_transcript)
-        self._draw_live_chat_card(chat_messages)
+        self._draw_live_chat_card(chat_messages, pinned_message=pinned_chat_message)
         self._draw_ai_subtitle_card(is_speaking, concurrent_viewers=concurrent_viewers)
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
@@ -1104,9 +1105,9 @@ class Visualizer:
 
         self.screen.blit(self.surf_host_card, (card_x, card_y))
 
-    def _draw_live_chat_card(self, chat_messages: List[Dict]):
+    def _draw_live_chat_card(self, chat_messages: List[Dict], pinned_message: Optional[Dict] = None):
         """
-        Draws YouTube Live Chat transparent overlay panel:
+        Draws YouTube Live Chat transparent overlay panel with support for pinned active question highlight:
         16:9 Landscape: Left column below center (w=380, h=490, x=60, y=545).
         9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1274, up to 5 items).
         """
@@ -1157,16 +1158,120 @@ class Visualizer:
         self.surf_chat_card.blit(feed_lbl_sh, (feed_x + 1, feed_y + 1))
         self.surf_chat_card.blit(feed_lbl, (feed_x, feed_y))
 
-        # Recent messages (up to 5 items in vertical, 4 items in compact landscape)
+        y_offset = 64 if self.is_vertical else 48
+        max_content_y = card_h - (14 if self.is_vertical else 12)
+        line_h = 38 if self.is_vertical else 28
+        auth_h = 36 if self.is_vertical else 32
+        sh_off = 2 if self.is_vertical else 1
+
+        # ----------------------------------------------------------------------
+        # 3. PINNED ACTIVE QUESTION HIGHLIGHT (When Oracle is Responding)
+        # ----------------------------------------------------------------------
+        pinned_msg_text = ""
+        if pinned_message and isinstance(pinned_message, dict):
+            pin_raw_auth = pinned_message.get("author", "Viewer").strip().lstrip("@")
+            pin_clean_auth = f"@{pin_raw_auth}"
+            pin_msg = pinned_message.get("message", "").strip()
+            pinned_msg_text = pin_msg
+            pin_is_sc = pinned_message.get("is_superchat", False)
+            pin_is_cast = pinned_message.get("is_cast", False) or pinned_message.get("author_type") == "cast"
+            pin_amount = pinned_message.get("amount", "")
+
+            # Text wrapping for pinned message
+            max_pin_text_w = card_w - (pad_x * 2 + 24)
+            words = pin_msg.split(" ")
+            pin_wrapped = []
+            cur_l = ""
+            for w in words:
+                test_l = f"{cur_l} {w}".strip()
+                if self.font_chat_msg.size(test_l)[0] < max_pin_text_w:
+                    cur_l = test_l
+                else:
+                    if cur_l:
+                        pin_wrapped.append(cur_l)
+                    cur_l = w
+            if cur_l:
+                pin_wrapped.append(cur_l)
+            display_pin_lines = pin_wrapped[:3] if pin_wrapped else [""]
+
+            # Compute pinned card height
+            pin_box_h = auth_h + (len(display_pin_lines) * line_h) + (14 if self.is_vertical else 10)
+            pin_box_w = card_w - (pad_x * 2)
+
+            # Colors for pinned container
+            border_pulse = 0.85 + 0.15 * math.sin(self.time_elapsed * 5.0)
+            if pin_is_sc:
+                pin_border_col = (255, 215, 0)
+                pin_auth_col = (255, 225, 60)
+            elif pin_is_cast:
+                pin_border_col = (215, 140, 255)
+                pin_auth_col = (235, 170, 255)
+            else:
+                pin_border_col = (0, 240, 255)
+                pin_auth_col = (100, 245, 255)
+
+            # Glassmorphic glowing pinned background container
+            pin_surf = pygame.Surface((pin_box_w, pin_box_h), pygame.SRCALPHA)
+            pygame.draw.rect(pin_surf, (14, 22, 42, 240), (0, 0, pin_box_w, pin_box_h), border_radius=12)
+            pygame.draw.rect(pin_surf, (24, 40, 72, 220), (2, 2, pin_box_w - 4, pin_box_h - 4), border_radius=10)
+            pygame.draw.rect(
+                pin_surf,
+                (*pin_border_col, int(220 * border_pulse)),
+                (0, 0, pin_box_w, pin_box_h),
+                width=2,
+                border_radius=12,
+            )
+
+            # Top right "PINNED / ANSWERING" badge pill inside pinned container
+            pin_badge_tag = "PINNED QUESTION"
+            pin_badge_txt = self.font_callout_tag.render(pin_badge_tag, True, (255, 215, 0))
+            pin_badge_w = pin_badge_txt.get_width() + 16
+            pin_badge_h = 20 if self.is_vertical else 18
+            pin_badge_x = pin_box_w - pin_badge_w - 8
+            pin_badge_y = 6
+            pygame.draw.rect(pin_surf, (255, 215, 0, 40), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), border_radius=4)
+            pygame.draw.rect(pin_surf, (255, 215, 0, 180), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), width=1, border_radius=4)
+            pin_surf.blit(pin_badge_txt, (pin_badge_x + 8, pin_badge_y + (2 if self.is_vertical else 1)))
+
+            # Author line inside pinned container
+            cast_tag = getattr(self.cfg, "cast_tag", "CAST")
+            pin_cast_str = f" [{cast_tag}]" if pin_is_cast else ""
+            pin_sc_str = f" [{pin_amount}]" if pin_is_sc else pin_cast_str
+            auth_sh = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
+            auth_rend = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
+            pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
+            pin_surf.blit(auth_rend, (10, 6))
+
+            # Message lines inside pinned container
+            msg_y_start = 6 + auth_h - (2 if self.is_vertical else 0)
+            for idx, l_text in enumerate(display_pin_lines):
+                line_y = msg_y_start + idx * line_h
+                line_sh = self.font_chat_msg.render(l_text, True, (0, 0, 0))
+                line_rend = self.font_chat_msg.render(l_text, True, (255, 255, 255))
+                pin_surf.blit(line_sh, (10 + sh_off, line_y + sh_off))
+                pin_surf.blit(line_rend, (10, line_y))
+
+            self.surf_chat_card.blit(pin_surf, (pad_x, y_offset))
+            y_offset += pin_box_h + (14 if self.is_vertical else 10)
+
+        # ----------------------------------------------------------------------
+        # 4. CHRONOLOGICAL RECENT CHAT MESSAGES
+        # ----------------------------------------------------------------------
         if chat_messages:
             self._cached_chat_messages = list(chat_messages)
         display_msgs = chat_messages if chat_messages else self._cached_chat_messages
-        max_msgs = 5 if self.is_vertical else 4
-        recent_chats = display_msgs[-max_msgs:] if display_msgs else []
-        y_offset = 64 if self.is_vertical else 48
-        max_content_y = card_h - (14 if self.is_vertical else 12)
 
-        if not recent_chats:
+        # Filter out the pinned message from the recent list to prevent duplicate display
+        filtered_msgs = []
+        for m in display_msgs:
+            if pinned_msg_text and m.get("message", "").strip() == pinned_msg_text:
+                continue
+            filtered_msgs.append(m)
+
+        max_msgs = (4 if self.is_vertical else 3) if pinned_message else (5 if self.is_vertical else 4)
+        recent_chats = filtered_msgs[-max_msgs:] if filtered_msgs else []
+
+        if not recent_chats and not pinned_message:
             empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
             empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (140, 165, 200))
             self.surf_chat_card.blit(empty_txt_sh, (pad_x + 1, y_offset + 1))
@@ -1197,8 +1302,6 @@ class Visualizer:
                     wrapped_lines.append(cur_l)
 
                 display_lines = wrapped_lines[:2] if wrapped_lines else [""]
-                line_h = 38 if self.is_vertical else 28
-                auth_h = 36 if self.is_vertical else 32
                 item_h = auth_h + len(display_lines) * line_h + (8 if self.is_vertical else 4)
 
                 if y_offset + item_h > max_content_y:
@@ -1217,7 +1320,6 @@ class Visualizer:
                 cast_tag = getattr(self.cfg, "cast_tag", "CAST")
                 cast_badge_str = f" [{cast_tag}]" if is_cast else ""
                 sc_badge_str = f" [{amount}]" if is_sc else cast_badge_str
-                sh_off = 2 if self.is_vertical else 1
 
                 # Author row with dark drop-shadow for crisp edge definition
                 auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))

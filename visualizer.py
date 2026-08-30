@@ -661,7 +661,11 @@ class Visualizer:
         )
         self._draw_host_transcript_card(host_transcript)
         self._draw_live_chat_card(chat_messages, pinned_message=pinned_chat_message)
-        self._draw_ai_subtitle_card(is_speaking, concurrent_viewers=concurrent_viewers)
+        self._draw_ai_subtitle_card(
+            is_speaking=is_speaking,
+            concurrent_viewers=concurrent_viewers,
+            pinned_chat_message=pinned_chat_message,
+        )
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
         self._draw_promo_callout_overlay(dt)
@@ -1340,13 +1344,20 @@ class Visualizer:
 
         self.screen.blit(self.surf_chat_card, (card_x, card_y))
 
-    def _draw_ai_subtitle_card(self, is_speaking: bool, concurrent_viewers: int = 0):
+    def _draw_ai_subtitle_card(
+        self,
+        is_speaking: bool,
+        concurrent_viewers: int = 0,
+        pinned_chat_message: Optional[Dict] = None,
+    ):
         """
-        Draws AI Co-Host streaming response center comment area.
-        Features an ethereal manifestation & dissolution engine (emerging from nowhere and dissolving into nowhere)
-        illustrating pure consciousness arising and receding in awareness with spacious inside padding.
-        16:9 Landscape: Bottom-center (w=880, h=360, y=633).
-        9:16 Vertical: Mid tier above chat (w=940, h=380, y=866).
+        Draws AI Co-Host streaming response center comment area:
+        - When responding to a chat message and waiting for speech generation:
+          Immediately displays the chat question formatted visually as it appears in the chat panel.
+        - When the Oracle begins speaking:
+          Smoothly transitions to displaying the Oracle's spoken statement in the mood color.
+        - Resting/Idle:
+          Displays the subtle motto or dissolved empty state.
         """
         if self.is_vertical:
             card_w, card_h = 940, 380
@@ -1358,7 +1369,99 @@ class Visualizer:
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
 
-        # 1. Determine target text to be manifested
+        # Check if we should display the incoming question preview before Oracle speech begins
+        showing_question_preview = bool(
+            pinned_chat_message
+            and isinstance(pinned_chat_message, dict)
+            and not is_speaking
+            and not self.subtitle_target_text
+        )
+
+        if showing_question_preview:
+            # ------------------------------------------------------------------
+            # QUESTION PREVIEW: Display question formatted visually like chat
+            # ------------------------------------------------------------------
+            raw_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@")
+            clean_author = f"@{raw_author}"
+            is_sc = pinned_chat_message.get("is_superchat", False)
+            is_cast = pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast"
+            amount = pinned_chat_message.get("amount", "")
+            msg = pinned_chat_message.get("message", "").strip()
+
+            cast_tag = getattr(self.cfg, "cast_tag", "CAST")
+            cast_badge_str = f" [{cast_tag}]" if is_cast else ""
+            sc_badge_str = f" [{amount}]" if is_sc else cast_badge_str
+
+            if is_sc:
+                author_color = (255, 215, 0)
+            elif is_cast:
+                author_color = (215, 140, 255)
+            else:
+                author_color = (0, 235, 255)
+
+            pad_x = 48 if self.is_vertical else 42
+            max_text_w = card_w - (pad_x * 2)
+
+            # Wrap question text
+            words = msg.split(" ")
+            wrapped_lines = []
+            cur_l = ""
+            for w in words:
+                test_l = f"{cur_l} {w}".strip()
+                if self.font_ai_subtitle.size(test_l)[0] < max_text_w:
+                    cur_l = test_l
+                else:
+                    if cur_l:
+                        wrapped_lines.append(cur_l)
+                    cur_l = w
+            if cur_l:
+                wrapped_lines.append(cur_l)
+
+            display_lines = wrapped_lines[:4] if wrapped_lines else [""]
+            line_h = 44 if self.is_vertical else 40
+            auth_h = 36 if self.is_vertical else 32
+            total_content_h = auth_h + (len(display_lines) * line_h) + 8
+
+            if total_content_h < card_h:
+                y_start = (card_h - total_content_h) // 2
+            else:
+                y_start = 14
+
+            # Subtle breathing alpha indicating contemplation
+            pulse_a = int(220 + 35 * math.sin(self.time_elapsed * 4.0))
+
+            # 1. Author Header line (Centered horizontally)
+            auth_str = f"💬 {clean_author}{sc_badge_str}:"
+            auth_w = self.font_chat_author.size(auth_str)[0]
+            auth_x = (card_w - auth_w) // 2
+            sh_off = 2 if self.is_vertical else 1
+
+            auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
+            self.surf_ai_text.fill((0, 0, 0, 0))
+            self.surf_ai_text.blit(auth_sh, (auth_x + sh_off, y_start + sh_off))
+            auth_rend = self.font_chat_author.render(auth_str, True, author_color)
+            self.surf_ai_text.blit(auth_rend, (auth_x, y_start))
+
+            # 2. Message lines (Centered horizontally)
+            msg_y_start = y_start + auth_h + 4
+            for idx, line_txt in enumerate(display_lines):
+                line_w = self.font_ai_subtitle.size(line_txt)[0]
+                line_x = (card_w - line_w) // 2
+                line_y = msg_y_start + idx * line_h
+
+                line_sh = self.font_ai_subtitle.render(line_txt, True, (0, 0, 0))
+                self.surf_ai_text.blit(line_sh, (line_x + sh_off, line_y + sh_off))
+                line_rend = self.font_ai_subtitle.render(line_txt, True, (255, 255, 255))
+                self.surf_ai_text.blit(line_rend, (line_x, line_y))
+
+            self.surf_ai_text.set_alpha(min(255, pulse_a))
+            self.surf_subtitle_card.blit(self.surf_ai_text, (0, 0))
+            self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
+            return
+
+        # ----------------------------------------------------------------------
+        # ORACLE SPOKEN STATEMENT / IDLE MOTTO MANIFESTATION
+        # ----------------------------------------------------------------------
         if self.is_empty_hold:
             desired_target = ""
         elif not self.subtitle_target_text or (concurrent_viewers <= 0 and not is_speaking):
@@ -1366,7 +1469,7 @@ class Visualizer:
         else:
             desired_target = self.subtitle_target_text
 
-        # 2. State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
+        # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
         if desired_target != self.ai_text_target:
             self.ai_text_target = desired_target
             if self.ai_text_alpha > 0.05 and self.ai_text_current != desired_target:
@@ -1408,7 +1511,7 @@ class Visualizer:
         if self.ai_text_current:
             self.typewriter_index = len(self.ai_text_current)
 
-        # 3. Render Ethereal Floating Text Centered Horizontally & Vertically
+        # Render Ethereal Floating Text Centered Horizontally & Vertically
         self.surf_ai_text.fill((0, 0, 0, 0))
 
         if self.ai_text_alpha > 0.005 and self.ai_text_current:

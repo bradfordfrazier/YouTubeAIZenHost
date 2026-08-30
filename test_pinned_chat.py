@@ -32,41 +32,67 @@ def test_visualizer_pinned_chat_rendering():
             {"author": "SeekerDave", "message": "What is the nature of consciousness?", "is_superchat": True, "amount": "$10.00"},
         ]
 
-        # 1. Test standard pinned question
+        # 1. Test question preview in Oracle comment panel (before speaking begins)
         pinned_msg = {
             "author": "SeekerDave",
             "message": "What is the nature of consciousness?",
             "is_superchat": True,
             "amount": "$10.00",
         }
-        buf = vis.render_frame(
+        audio_metrics_thinking = {
+            "rms": 0.0,
+            "spectrum": np.zeros(32, dtype=np.float32),
+            "is_speaking": False,
+        }
+        buf_preview = vis.render_frame(
+            audio_metrics=audio_metrics_thinking,
+            chat_messages=chat_messages,
+            host_transcript="",
+            ai_subtitle="",
+            pinned_chat_message=pinned_msg,
+        )
+        assert isinstance(buf_preview, (bytes, bytearray))
+        assert len(buf_preview) == vis.width * vis.height * 4
+
+        # 2. Test transition to Oracle statement when speaking begins
+        buf_speaking = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,
             host_transcript="",
             ai_subtitle="Consciousness is the mirror observing itself.",
             pinned_chat_message=pinned_msg,
         )
-        assert isinstance(buf, (bytes, bytearray))
-        assert len(buf) == vis.width * vis.height * 4
+        assert isinstance(buf_speaking, (bytes, bytearray))
+        assert len(buf_speaking) == vis.width * vis.height * 4
 
-        # 2. Test cast member pinned question
+        # 3. Test cast member question preview & speaking
         pinned_cast = {
             "author": "ExistentialDave",
             "message": "Is the universe just one big mirror pretending to have edges?",
             "is_cast": True,
             "cast_persona": "ExistentialDave",
         }
-        buf_cast = vis.render_frame(
+        buf_cast_preview = vis.render_frame(
+            audio_metrics=audio_metrics_thinking,
+            chat_messages=chat_messages,
+            host_transcript="",
+            ai_subtitle="",
+            pinned_chat_message=pinned_cast,
+        )
+        assert isinstance(buf_cast_preview, (bytes, bytearray))
+        assert len(buf_cast_preview) == vis.width * vis.height * 4
+
+        buf_cast_speaking = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,
             host_transcript="",
             ai_subtitle="Edges are merely where the painting gets nervous.",
             pinned_chat_message=pinned_cast,
         )
-        assert isinstance(buf_cast, (bytes, bytearray))
-        assert len(buf_cast) == vis.width * vis.height * 4
+        assert isinstance(buf_cast_speaking, (bytes, bytearray))
+        assert len(buf_cast_speaking) == vis.width * vis.height * 4
 
-        # 3. Test unpinned normal feed
+        # 4. Test unpinned normal feed
         buf_unpinned = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,

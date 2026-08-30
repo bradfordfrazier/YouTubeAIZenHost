@@ -261,6 +261,7 @@ class TTSEngine:
         if self.active_backend == "chatterbox":
             data = await self._synthesize_chatterbox(clean_text, exaggeration)
             if data is not None and len(data) > 0:
+                self.last_synthesized_duration = len(data) / self.sample_rate
                 return data
             # If Chatterbox failed, fall through to Edge-TTS fallback
             logger.info(f"Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
@@ -268,10 +269,13 @@ class TTSEngine:
         # 2. Fallback / Local Mode: Microsoft edge-tts
         data = await self._synthesize_edge_tts(clean_text)
         if len(data) > 0:
+            self.last_synthesized_duration = len(data) / self.sample_rate
             return data
 
         # 3. Final safety: Sine placeholder (never silent)
-        return self._generate_sine_placeholder(len(clean_text) * 0.06)
+        placeholder = self._generate_sine_placeholder(len(clean_text) * 0.06)
+        self.last_synthesized_duration = len(placeholder) / self.sample_rate
+        return placeholder
 
     def _generate_sine_placeholder(self, duration_sec: float) -> np.ndarray:
         """Fallback beep / harmonic synthesizer."""
@@ -297,11 +301,11 @@ class TTSEngine:
         """Asynchronously waits until all buffered speech audio has finished broadcasting out through NDI/audio."""
         t0 = time.time()
         # Brief initial sleep so the pop_audio_packet / pop_local_audio threads register playback start
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.10)
 
         expected_dur = getattr(self, "last_synthesized_duration", 0.0)
         # Cap wait timeout to avoid hanging indefinitely if a playback backend is inactive
-        max_wait = (expected_dur + 2.5) if expected_dur > 0 else (timeout or 25.0)
+        max_wait = (expected_dur + 1.5) if expected_dur > 0 else (timeout or 10.0)
         if timeout:
             max_wait = min(max_wait, timeout)
 
@@ -313,7 +317,13 @@ class TTSEngine:
 
                 buf_len_ndi = len(self._audio_buffer_ndi) if ndi_active else 0
                 buf_len_local = len(self._audio_buffer_local) if local_active else 0
-                is_done = (buf_len_ndi == 0 and buf_len_local == 0)
+
+                # If neither backend is actively popping (e.g. standalone test or idle capture),
+                # elapsed time matching expected duration means playback is complete
+                if not ndi_active and not local_active:
+                    is_done = (time.time() - t0) >= expected_dur
+                else:
+                    is_done = (buf_len_ndi == 0 and buf_len_local == 0)
 
             if is_done:
                 with self._buffer_lock:
@@ -321,7 +331,7 @@ class TTSEngine:
                     self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
                     self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
                 # Safety padding for soundcard hardware driver ringbuffer drain before resolving
-                await asyncio.sleep(0.35)
+                await asyncio.sleep(0.15)
                 break
             await asyncio.sleep(poll_interval)
         else:
@@ -334,11 +344,16 @@ class TTSEngine:
         """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
         audio = await self.synthesize(text)
         if len(audio) > 0:
+            dur = len(audio) / self.sample_rate
+            self.last_synthesized_duration = dur
             with self._buffer_lock:
                 # Seamless crossfade stitching if buffer already contains pending audio
                 self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
                 self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
-            logger.debug(f"Queued audio buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s")
+                self.is_speaking = True
+            logger.info(f"Queued {dur:.2f}s audio (buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)")
+        else:
+            self.last_synthesized_duration = 0.0
 
     def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:
         """

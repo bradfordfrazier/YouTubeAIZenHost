@@ -1658,6 +1658,7 @@ class Visualizer:
             # Dynamic mood-matched color
             mood_color = tuple(int(np.clip(c, 0, 255)) for c in self.c_primary)
 
+            alpha_int = int(np.clip(self.ai_text_alpha * 255, 0, 255))
             for i, line in enumerate(display_lines):
                 cur_y = int(y_start + i * line_h)
                 line_w = self.font_ai_subtitle.size(line)[0]
@@ -1665,13 +1666,14 @@ class Visualizer:
 
                 # Crisp dark drop shadow for sharp edge contrast
                 line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
+                line_sh.set_alpha(int(alpha_int * 0.9))
                 self.surf_ai_text.blit(line_sh, (line_x + 2, cur_y + 2))
 
                 # Mood-matched vibrant text
                 line_rend = self.font_ai_subtitle.render(line, True, mood_color)
+                line_rend.set_alpha(alpha_int)
                 self.surf_ai_text.blit(line_rend, (line_x, cur_y))
 
-            alpha_int = int(np.clip(self.ai_text_alpha * 255, 0, 255))
             self.surf_ai_text.set_alpha(alpha_int)
             self.surf_subtitle_card.blit(self.surf_ai_text, (0, 0))
 

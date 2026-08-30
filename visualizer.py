@@ -1356,27 +1356,22 @@ class Visualizer:
             pygame.draw.rect(pin_surf, (255, 215, 0, int(180 * self.pinned_chat_alpha)), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), width=1, border_radius=4)
             pin_surf.blit(pin_badge_txt, (pin_badge_x + 8, pin_badge_y + (2 if self.is_vertical else 1)))
 
-            # Author line inside pinned container
+            # Author line inside pinned container (100% opaque text)
             pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
             auth_sh = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
-            auth_sh.set_alpha(int(pin_alpha_int * 0.9))
             auth_rend = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
-            auth_rend.set_alpha(pin_alpha_int)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
             pin_surf.blit(auth_rend, (10, 6))
 
-            # Message lines inside pinned container
+            # Message lines inside pinned container (100% opaque text)
             msg_y_start = 6 + auth_h - (2 if self.is_vertical else 0)
             for idx, l_text in enumerate(display_pin_lines):
                 line_y = msg_y_start + idx * line_h
                 line_sh = self.font_chat_msg.render(l_text, True, (0, 0, 0))
-                line_sh.set_alpha(int(pin_alpha_int * 0.9))
                 line_rend = self.font_chat_msg.render(l_text, True, (255, 255, 255))
-                line_rend.set_alpha(pin_alpha_int)
                 pin_surf.blit(line_sh, (10 + sh_off, line_y + sh_off))
                 pin_surf.blit(line_rend, (10, line_y))
 
-            pin_surf.set_alpha(pin_alpha_int)
             self.surf_chat_card.blit(pin_surf, (pad_x, y_offset))
             y_offset += int(pin_box_h * self.pinned_chat_alpha) + (14 if self.is_vertical else 10)
 
@@ -1488,11 +1483,9 @@ class Visualizer:
                     pygame.draw.rect(row_surf, (*row_border_col, int(180 * row_alpha)), (badge_x, badge_y, badge_w, badge_h), width=1, border_radius=4)
                     row_surf.blit(badge_txt, (badge_x + 7, badge_y + (1 if self.is_vertical else 0)))
 
-                    # Author & Message lines inside row_surf
+                    # Author & Message lines inside row_surf (100% opaque text)
                     auth_sh = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                    auth_sh.set_alpha(int(row_alpha_int * 0.9))
                     auth_rend = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, author_color)
-                    auth_rend.set_alpha(row_alpha_int)
                     row_surf.blit(auth_sh, (8 + sh_off, 4 + sh_off))
                     row_surf.blit(auth_rend, (8, 4))
 
@@ -1500,9 +1493,7 @@ class Visualizer:
                     for line_idx, line_text in enumerate(display_lines):
                         line_y = msg_start_y + line_idx * line_h
                         line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                        line_sh.set_alpha(int(row_alpha_int * 0.9))
                         line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                        line_rend.set_alpha(row_alpha_int)
                         row_surf.blit(line_sh, (8 + sh_off, line_y + sh_off))
                         row_surf.blit(line_rend, (8, line_y))
 

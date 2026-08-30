@@ -489,6 +489,43 @@ def test_strict_fifo_chat_ordering():
     assert authors_in_order == ["VIP", "ViewerA", "ViewerB", "ViewerC", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
 
 
+def test_system_prompt_never_pinned_or_added_to_chat_history():
+    """Verifies that internal bracketed prompts like [VIEWER_JOINED] are NEVER pinned as chat questions or added to chat history."""
+    async def _test():
+        app = LocalCoHostApp()
+        app.chat_history.clear()
+        app.cfg.comment_post_speech_hold_sec = 0.1
+        app.cfg.comment_active_queue_hold_sec = 0.1
+
+        async def mock_queue_speech(txt):
+            # During speech, system prompt should NOT be pinned as chat
+            assert app.current_pinned_chat is None
+
+        async def mock_wait():
+            pass
+
+        app.tts.queue_speech = mock_queue_speech
+        app.tts.wait_until_speech_completed = mock_wait
+        app.new_comment_signal = asyncio.Event()
+
+        prompt = "[VIEWER_JOINED] A sole viewer has entered the stream. (Concurrent viewers: 1). Acknowledge their presence directly on @MassiveGodComplex."
+        event = CommentEvent(
+            prompt_trigger=prompt,
+            event_type="system",
+            priority=10,
+            created_at=time.time(),
+            max_age_sec=30.0,
+        )
+
+        await app._execute_ai_turn(event)
+
+        # Chat history must remain completely empty (no bogus system prompt added)
+        assert len(app.chat_history) == 0
+        assert app.current_pinned_chat is None
+
+    asyncio.run(_test())
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -533,6 +570,10 @@ if __name__ == "__main__":
     print("Testing Strict FIFO Chat Ordering...")
     test_strict_fifo_chat_ordering()
     print("Strict FIFO Chat Ordering Passed!")
+
+    print("Testing System Prompts Never Pinned or Added to Chat...")
+    test_system_prompt_never_pinned_or_added_to_chat_history()
+    print("System Prompts Never Pinned or Added to Chat Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

@@ -469,6 +469,9 @@ class LocalCoHostApp:
                 restored_count = 0
                 for item in data[-50:]:
                     if isinstance(item, dict) and "author" in item and "message" in item:
+                        msg_text = str(item.get("message", "")).strip()
+                        if msg_text.startswith("[") and any(tag in msg_text for tag in ["[VIEWER_JOINED]", "[SPONTANEOUS_REFLECTION]", "[CHAT_ENCOURAGEMENT]", "[NEW_SUBSCRIBER]", "[NEW_MEMBER]", "[CELEBRATION]"]):
+                            continue
                         self.chat_history.append(item)
                         # Pre-seed author into seen_chat_handles so returning chatters aren't greeted as brand new
                         author_clean = str(item.get("author", "")).strip().lstrip("@").lower()
@@ -537,7 +540,7 @@ class LocalCoHostApp:
                     f"Do not ask for chat comments or plead for engagement."
                 )
             logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
-            self._trigger_ai_turn(prompt_trigger=prompt, force=False)
+            self._trigger_ai_turn(prompt_trigger=prompt, event_type="system", priority=10, force=False)
         else:
             logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Room transitioned to ACTIVE.")
 
@@ -771,55 +774,53 @@ class LocalCoHostApp:
         if getattr(event, "chat_item", None):
             self.current_pinned_chat = event.chat_item
         elif event.event_type in ("chat", "superchat", "direct_mention", "cast", "greeting"):
-            m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
-            author_name = m_auth.group(1) if m_auth else ""
-            q_text = event.prompt_trigger
-            if ": '" in event.prompt_trigger:
-                q_text = event.prompt_trigger.split(": '", 1)[1].rstrip("'\"").strip()
-            elif ': "' in event.prompt_trigger:
-                q_text = event.prompt_trigger.split(': "', 1)[1].rstrip("'\"").strip()
+            # Internal bracketed system instructions must NEVER be treated as chat questions
+            if event.prompt_trigger.strip().startswith("["):
+                self.current_pinned_chat = None
+            else:
+                m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
+                author_name = m_auth.group(1) if m_auth else ""
+                q_text = event.prompt_trigger
+                if ": '" in event.prompt_trigger:
+                    q_text = event.prompt_trigger.split(": '", 1)[1].rstrip("'\"").strip()
+                elif ': "' in event.prompt_trigger:
+                    q_text = event.prompt_trigger.split(': "', 1)[1].rstrip("'\"").strip()
 
-            matched = None
-            if author_name:
-                # First pass: match both author and message in chronological order (FIFO)
-                for ch in self.chat_history:
-                    ch_auth = ch.get("author", "").strip().lower().lstrip("@")
-                    if ch_auth == author_name.lower().lstrip("@"):
-                        ch_msg = ch.get("message", "").strip()
-                        if q_text and (q_text in ch_msg or ch_msg in q_text):
-                            matched = ch
-                            break
-                # Second pass fallback: match author in chronological order (FIFO)
-                if not matched:
+                matched = None
+                if author_name:
+                    # First pass: match both author and message in chronological order (FIFO)
                     for ch in self.chat_history:
                         ch_auth = ch.get("author", "").strip().lower().lstrip("@")
                         if ch_auth == author_name.lower().lstrip("@"):
-                            matched = ch
-                            break
+                            ch_msg = ch.get("message", "").strip()
+                            if q_text and (q_text in ch_msg or ch_msg in q_text):
+                                matched = ch
+                                break
+                    # Second pass fallback: match author in chronological order (FIFO)
+                    if not matched:
+                        for ch in self.chat_history:
+                            ch_auth = ch.get("author", "").strip().lower().lstrip("@")
+                            if ch_auth == author_name.lower().lstrip("@"):
+                                matched = ch
+                                break
 
-            if matched:
                 self.current_pinned_chat = matched
-            else:
-                self.current_pinned_chat = {
-                    "author": author_name or "Viewer",
-                    "message": q_text,
-                    "is_cast": (event.event_type == "cast"),
-                    "is_superchat": (event.event_type == "superchat"),
-                }
         else:
             self.current_pinned_chat = None
 
         # Ensure active question is present in live chat feed (appended to bottom if not already present)
+        # Only valid viewer/cast chat items (never internal bracketed system prompts) should be in feed
         if self.current_pinned_chat:
             p_author = self.current_pinned_chat.get("author", "").strip()
             p_msg = self.current_pinned_chat.get("message", "").strip()
-            if not any(
-                e.get("author", "").strip().lower().lstrip("@") == p_author.lower().lstrip("@")
-                and (e.get("message", "").strip() == p_msg or p_msg in e.get("message", "").strip() or e.get("message", "").strip() in p_msg)
-                for e in self.chat_history
-            ):
-                self.chat_history.append(dict(self.current_pinned_chat))
-                self._save_cached_chat()
+            if p_author and p_msg and not p_msg.startswith("["):
+                if not any(
+                    e.get("author", "").strip().lower().lstrip("@") == p_author.lower().lstrip("@")
+                    and (e.get("message", "").strip() == p_msg or p_msg in e.get("message", "").strip() or e.get("message", "").strip() in p_msg)
+                    for e in self.chat_history
+                ):
+                    self.chat_history.append(dict(self.current_pinned_chat))
+                    self._save_cached_chat()
 
         # Calculate minimum reading duration for the question if present
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""

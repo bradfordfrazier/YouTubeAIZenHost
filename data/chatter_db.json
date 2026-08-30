@@ -1,0 +1,123 @@
+{
+  "existentialdave": {
+    "handle": "ExistentialDave",
+    "display_name": "Existential Dave",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T09:04:31.886511",
+    "visit_count": 1,
+    "message_count": 4,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "IT",
+      "Jira",
+      "free will",
+      "server room crisis"
+    ],
+    "notes": [
+      "Archetype: Overthinking IT Specialist. Senior sysadmin having an ongoing non-dual crisis."
+    ],
+    "last_session_id": ""
+  },
+  "speedrunnerkyle": {
+    "handle": "SpeedrunnerKyle",
+    "display_name": "Speedrunner Kyle",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T08:50:23.541577",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "speedrunning",
+      "samsara",
+      "Any% route",
+      "frame-perfect peace"
+    ],
+    "notes": [
+      "Archetype: Enlightenment Speedrunner. Gamer attempting to glitch past dualistic suffering."
+    ],
+    "last_session_id": ""
+  },
+  "astralbrenda": {
+    "handle": "AstralBrenda",
+    "display_name": "Astral Brenda",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T08:50:23.541577",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "amethyst",
+      "Mercury retrograde",
+      "5G chakras",
+      "tarot"
+    ],
+    "notes": [
+      "Archetype: Esoteric Crystal Enthusiast. Devoted crystal collector seeking esoteric shortcuts."
+    ],
+    "last_session_id": ""
+  },
+  "trollchad": {
+    "handle": "TrollChad",
+    "display_name": "Troll Chad",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T08:50:23.541577",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "burrito microwave",
+      "cereal soup",
+      "meme dilemmas",
+      "hot dog buns"
+    ],
+    "notes": [
+      "Archetype: Cosmic Provocateur. Internet provocateur testing the machine with absurd questions."
+    ],
+    "last_session_id": ""
+  },
+  "heartfeltsarah": {
+    "handle": "HeartfeltSarah",
+    "display_name": "Heartfelt Sarah",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T08:50:23.541577",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "grief",
+      "loss",
+      "loneliness",
+      "healing",
+      "unworthy feelings"
+    ],
+    "notes": [
+      "Archetype: Earnest Seeker. Tender human seeking real comfort and existential presence."
+    ],
+    "last_session_id": ""
+  },
+  "curioustimmy": {
+    "handle": "CuriousTimmy",
+    "display_name": "Curious Timmy",
+    "first_seen_iso": "2026-08-30T08:50:23.541577",
+    "last_seen_iso": "2026-08-30T08:50:23.541577",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [
+      "lamp darkness",
+      "pre-birth self",
+      "dream nature",
+      "talking trees"
+    ],
+    "notes": [
+      "Archetype: Childlike Inquirer. Innocent child whose simple inquiries dismantle ego complexity."
+    ],
+    "last_session_id": ""
+  }
+}

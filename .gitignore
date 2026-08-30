@@ -13,3 +13,4 @@ __pycache__/
 test_output/
 chat_cache.json
 *.tmp
+logs/

@@ -25,8 +25,10 @@ from typing import Deque, Dict, List, Optional
 import numpy as np
 
 from ai_brain import AIBrain
+from cast_engine import CastEngine
 from config import config
 from ndi_streamer import NDIStreamer
+from session_log import SessionLogger
 from tts_engine import TTSEngine
 from visualizer import Visualizer
 
@@ -401,6 +403,8 @@ class LocalCoHostApp:
         self.tts = TTSEngine()
         self.visualizer = Visualizer()
         self.ndi = NDIStreamer()
+        self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
+        self.cast = CastEngine()
 
         # OBS State
         self.obs_client = None
@@ -628,6 +632,7 @@ class LocalCoHostApp:
             "direct_mention": (3, 40.0),
             "greeting": (4, 30.0),
             "chat": (5, 30.0),
+            "cast": (6, 25.0),
             "spontaneous": (10, 15.0),
         }
         def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 30.0))
@@ -778,7 +783,36 @@ class LocalCoHostApp:
 
                 # 5. CRITICAL: Wait until audio has completely finished broadcasting out
                 await self.tts.wait_until_speech_completed()
-                logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({time.perf_counter() - t_start:.2f}s total turn time).")
+                t_total = time.perf_counter() - t_start
+                logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
+
+                # 6. Record turn to in-session conversational thread memory (C2)
+                m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
+                author_name = m_auth.group(1) if m_auth else ""
+                self.brain.record_completed_turn(
+                    trigger=event.prompt_trigger,
+                    full_text=clean_speech,
+                    mood=active_mood,
+                    author=author_name,
+                )
+
+                # 7. Structured Session Log
+                if self.session_log:
+                    exag_map = getattr(self.cfg, "tts_mood_exaggeration_map", {})
+                    exaggeration = exag_map.get(active_mood.lower(), getattr(self.cfg, "tts_exaggeration_default", 0.5))
+                    self.session_log.log_ai_turn(
+                        trigger=event.prompt_trigger,
+                        event_type=event.event_type,
+                        full_text=clean_speech,
+                        mood=active_mood,
+                        exaggeration=exaggeration,
+                        tts_backend=self.cfg.tts_backend,
+                        turn_latency_sec=t_total,
+                        audio_duration_sec=getattr(self.tts, "last_synthesized_duration", 0.0),
+                        author=author_name or event.prompt_trigger[:40],
+                        is_cast=(event.event_type == "cast"),
+                        concurrent_viewers=self.concurrent_viewers,
+                    )
             else:
                 logger.warning(f"Incomplete, truncated, or empty response generated ('{clean_speech}'). Suppressing subtitle card.")
                 self.visualizer.clear_subtitle()
@@ -1306,6 +1340,24 @@ class LocalCoHostApp:
                         self.chat_history.append(chat_entry)
                         self._save_cached_chat()
                         self.brain.add_chat_message(author_name, msg, is_superchat, item.amountString if is_superchat else "")
+                        sess_id = self.session_log.session_id if self.session_log else ""
+                        self.brain.chatter_db.record_activity(
+                            handle=author_name,
+                            display_name=author_name,
+                            message=msg,
+                            is_member=(author_type == "member"),
+                            is_cast=False,
+                            session_id=sess_id,
+                        )
+                        if self.session_log:
+                            self.session_log.log_chat_message(
+                                author=author_name,
+                                author_type=author_type,
+                                message=msg,
+                                is_superchat=is_superchat,
+                                amount=item.amountString if is_superchat else "",
+                                is_cast=False,
+                            )
                         self.last_activity_time = now_ts
                         self.last_chat_time = now_ts
                         self.spontaneous_idle_count = 0
@@ -1540,6 +1592,24 @@ class LocalCoHostApp:
                 self.chat_history.append(chat_entry)
                 self._save_cached_chat()
                 self.brain.add_chat_message(author, message, False, "")
+                sess_id = self.session_log.session_id if self.session_log else ""
+                self.brain.chatter_db.record_activity(
+                    handle=author,
+                    display_name=author,
+                    message=message,
+                    is_member=(author_type == "member"),
+                    is_cast=False,
+                    session_id=sess_id,
+                )
+                if self.session_log:
+                    self.session_log.log_chat_message(
+                        author=author,
+                        author_type=author_type,
+                        message=message,
+                        is_superchat=False,
+                        amount="",
+                        is_cast=False,
+                    )
                 self.last_activity_time = time.time()
                 self.last_chat_time = time.time()
                 self.spontaneous_idle_count = 0
@@ -1606,6 +1676,106 @@ class LocalCoHostApp:
                 prio = 2 if is_sc else (3 if "direct_mention" in reason else 5)
                 ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
                 self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio)
+
+    async def cast_scheduler_task(self):
+        """
+        The Cast Subsystem Pacing Task (B1-B4).
+        During quiet stream intervals, injects structured questions from the openly-fictional
+        cast ensemble (@ExistentialDave, @SpeedrunnerKyle, @AstralBrenda, @TrollChad, @HeartfeltSarah, @CuriousTimmy).
+        Yields immediately whenever real human chatters or host speech is detected.
+        """
+        if not getattr(self.cfg, "cast_enabled", True):
+            return
+
+        logger.info(
+            f"🎭 [Cast Scheduler] Synthetic Cast ensemble active (Interval: {self.cfg.cast_min_interval_sec}-{self.cfg.cast_max_interval_sec}s, "
+            f"Quiet threshold: {self.cfg.cast_quiet_chat_threshold_sec}s)"
+        )
+        # Stagger initial start
+        await asyncio.sleep(15.0)
+
+        while self.running:
+            try:
+                await asyncio.sleep(5.0)
+                if not getattr(self.cfg, "cast_enabled", True):
+                    continue
+
+                if self.engagement_mode == "standby":
+                    continue
+
+                now = time.time()
+                time_since_last_chat = now - self.last_chat_time
+                time_since_last_cast = now - self.cast.last_cast_time
+                is_busy = (
+                    self.brain.is_generating
+                    or self.tts.is_speaking
+                    or self.tts.remaining_speech_duration > 0.05
+                    or self.active_turn_event is not None
+                    or len(self.comment_queue) > 0
+                )
+
+                if self.cast.should_trigger_cast(
+                    time_since_last_chat=time_since_last_chat,
+                    time_since_last_cast=time_since_last_cast,
+                    quiet_threshold_sec=self.cfg.cast_quiet_chat_threshold_sec,
+                    min_interval_sec=self.cfg.cast_min_interval_sec,
+                    is_ai_busy=is_busy,
+                ):
+                    persona, question = self.cast.next_cast_question()
+
+                    now_ts = time.time()
+                    self.chat_timestamps.append(now_ts)
+
+                    chat_entry = {
+                        "author": persona.name,
+                        "author_type": "cast",
+                        "is_cast": True,
+                        "cast_persona": persona.persona_type,
+                        "message": question,
+                        "is_superchat": False,
+                        "amount": "",
+                        "timestamp": now_ts,
+                    }
+                    self.chat_history.append(chat_entry)
+                    self._save_cached_chat()
+                    self.brain.add_chat_message(persona.name, question, False, "")
+                    sess_id = self.session_log.session_id if self.session_log else ""
+                    self.brain.chatter_db.record_activity(
+                        handle=persona.handle,
+                        display_name=persona.name,
+                        message=question,
+                        is_member=False,
+                        is_cast=True,
+                        session_id=sess_id,
+                    )
+                    self.last_activity_time = now_ts
+                    self.last_chat_time = now_ts
+                    self.spontaneous_idle_count = 0
+                    self.encouragement_idle_count = 0
+
+                    if self.session_log:
+                        self.session_log.log_cast_question(
+                            persona_name=persona.name,
+                            persona_handle=persona.handle,
+                            persona_type=persona.persona_type,
+                            question=question,
+                        )
+                        self.session_log.log_chat_message(
+                            author=persona.name,
+                            author_type="cast",
+                            message=question,
+                            is_cast=True,
+                            cast_persona=persona.persona_type,
+                        )
+
+                    prompt = f"Cast member @{persona.handle} ({persona.archetype_title}) asks: '{question}'"
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=6)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cast scheduler task: {e}", exc_info=True)
+                await asyncio.sleep(5.0)
 
     # --------------------------------------------------------------------------
     # 6. Idle Reflection & Chat Encouragement Monitor
@@ -1703,6 +1873,40 @@ class LocalCoHostApp:
         if status:
             logger.debug(f"Audio Callback status: {status}")
         outdata[:] = self.tts.pop_local_audio(frames, volume=getattr(self.cfg, "local_audio_volume", 1.0))
+
+    async def stream_observability_task(self):
+        """
+        Periodically logs stream health telemetry HUD to the console (E4).
+        """
+        logger.info("📊 [Observability HUD] Stream health and telemetry monitor active.")
+        await asyncio.sleep(30.0)
+        while self.running:
+            try:
+                await asyncio.sleep(60.0)
+                if not self.running:
+                    break
+
+                uptime_sec = time.time() - getattr(self, "start_time", time.time())
+                hrs, rem = divmod(int(uptime_sec), 3600)
+                mins, secs = divmod(rem, 60)
+                uptime_str = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
+                metrics = self.session_log.get_stream_health_metrics() if self.session_log else {}
+                cb_status = "TRIPPED (Cooldown)" if getattr(self.brain, "circuit_breaker_tripped", False) else "HEALTHY"
+                cache_lvl = self.brain.reflection_cache.size() if hasattr(self.brain, "reflection_cache") else 0
+
+                hud = (
+                    f"\n{'='*65}\n"
+                    f"📡 [STREAM TELEMETRY HUD] Uptime: {uptime_str} | Mode: {self.engagement_mode.upper()} | Viewers: {self.concurrent_viewers}\n"
+                    f"🗣️ AI Turns: {metrics.get('total_turns', 0)} | Cast: {metrics.get('total_cast_questions', 0)} | Chats: {metrics.get('total_chats', 0)} | Avg Latency: {metrics.get('avg_latency_sec', 0.0)}s\n"
+                    f"🧠 Cache Level: {cache_lvl}/4 | Mood: {self.brain.current_mood.upper()} | TTS: {self.cfg.tts_backend.upper()} | Circuit Breaker: {cb_status}\n"
+                    f"{'='*65}"
+                )
+                logger.info(hud)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Observability HUD note: {e}")
 
     def _ndi_audio_pump_worker(self):
         """
@@ -1875,7 +2079,17 @@ class LocalCoHostApp:
             asyncio.create_task(self.transcript_file_task(), name="transcript_watcher"),
             asyncio.create_task(self.console_chat_task(), name="console_input"),
             asyncio.create_task(self.idle_reflection_monitor_task(), name="idle_reflection"),
+            asyncio.create_task(self.stream_observability_task(), name="observability_hud"),
         ]
+
+        if getattr(self.cfg, "cast_enabled", True):
+            self.tasks.append(asyncio.create_task(self.cast_scheduler_task(), name="cast_scheduler"))
+
+        if getattr(self.cfg, "reflection_cache_enabled", True) and hasattr(self.brain, "reflection_cache"):
+            self.tasks.append(asyncio.create_task(self.brain.reflection_cache.replenish_worker(self.brain), name="reflection_cache_worker"))
+
+        if getattr(self.cfg, "mock_chat_enabled", False):
+            self.tasks.append(asyncio.create_task(self._run_mock_chat_generator(), name="mock_chat"))
 
         try:
             results = await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -1952,6 +2166,16 @@ class LocalCoHostApp:
         if hasattr(self, "ndi") and self.ndi is not None:
             try:
                 self.ndi.close()
+            except Exception:
+                pass
+
+        # 6. Finalize session log and record summary in MemoryManager (C4)
+        if hasattr(self, "session_log") and self.session_log is not None:
+            try:
+                summary = self.session_log.get_session_summary()
+                self.session_log.close()
+                if hasattr(self, "brain") and hasattr(self.brain, "memory_mgr"):
+                    self.brain.memory_mgr.record_session_summary(self.session_log.session_id, summary)
             except Exception:
                 pass
 

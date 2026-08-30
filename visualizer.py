@@ -91,11 +91,65 @@ class ColorPalette:
             "glow": (255, 215, 0, 80),
             "speed": 0.6,
         },
+        "savage": {
+            "bg_dark": (24, 8, 14),
+            "bg_accent": (75, 12, 35),
+            "primary": (255, 40, 70),
+            "secondary": (180, 20, 240),
+            "highlight": (255, 210, 150),
+            "glow": (255, 40, 70, 85),
+            "speed": 1.7,
+        },
+        "laughing": {
+            "bg_dark": (22, 14, 10),
+            "bg_accent": (70, 40, 15),
+            "primary": (255, 200, 30),
+            "secondary": (255, 90, 60),
+            "highlight": (255, 255, 200),
+            "glow": (255, 180, 20, 80),
+            "speed": 1.6,
+        },
+        "deadpan": {
+            "bg_dark": (14, 16, 20),
+            "bg_accent": (32, 38, 48),
+            "primary": (140, 180, 215),
+            "secondary": (90, 130, 160),
+            "highlight": (220, 235, 245),
+            "glow": (140, 180, 215, 45),
+            "speed": 0.4,
+        },
+        "shocked": {
+            "bg_dark": (18, 10, 34),
+            "bg_accent": (60, 20, 95),
+            "primary": (160, 70, 255),
+            "secondary": (0, 255, 255),
+            "highlight": (255, 255, 255),
+            "glow": (160, 70, 255, 90),
+            "speed": 2.2,
+        },
+        "curious": {
+            "bg_dark": (10, 20, 24),
+            "bg_accent": (20, 50, 60),
+            "primary": (0, 230, 220),
+            "secondary": (40, 220, 140),
+            "highlight": (200, 255, 250),
+            "glow": (0, 230, 220, 70),
+            "speed": 1.0,
+        },
+        "neutral": {
+            "bg_dark": (12, 16, 26),
+            "bg_accent": (28, 40, 65),
+            "primary": (100, 180, 255),
+            "secondary": (130, 120, 210),
+            "highlight": (235, 245, 255),
+            "glow": (100, 180, 255, 60),
+            "speed": 0.7,
+        },
     }
 
     @classmethod
     def get(cls, mood: str) -> Dict:
-        return cls.PALETTES.get(mood.lower(), cls.PALETTES["energetic"])
+        return cls.PALETTES.get(mood.lower(), cls.PALETTES["neutral"])
 
 
 class Particle:
@@ -509,8 +563,11 @@ class Visualizer:
 
     def set_mood(self, mood: str):
         """Update active mood."""
-        if mood.lower() in ColorPalette.PALETTES and mood.lower() != self.target_mood:
-            self.target_mood = mood.lower()
+        m_lower = (mood or "neutral").strip().lower()
+        if m_lower not in ColorPalette.PALETTES:
+            m_lower = "neutral"
+        if m_lower != self.target_mood:
+            self.target_mood = m_lower
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
@@ -1117,6 +1174,7 @@ class Visualizer:
         else:
             for item in recent_chats:
                 is_sc = item.get("is_superchat", False)
+                is_cast = item.get("is_cast", False) or item.get("author_type") == "cast"
                 raw_author = item.get("author", "Viewer").strip().lstrip("@")
                 clean_author = f"@{raw_author}"
                 msg = item.get("message", "").strip()
@@ -1149,11 +1207,16 @@ class Visualizer:
                 if is_sc:
                     author_color = (255, 215, 0)
                     msg_color = (255, 252, 245)
+                elif is_cast:
+                    author_color = (215, 140, 255)
+                    msg_color = (245, 238, 255)
                 else:
                     author_color = (0, 235, 255)
                     msg_color = (255, 255, 255)
 
-                sc_badge_str = f" [{amount}]" if is_sc else ""
+                cast_tag = getattr(self.cfg, "cast_tag", "CAST")
+                cast_badge_str = f" [{cast_tag}]" if is_cast else ""
+                sc_badge_str = f" [{amount}]" if is_sc else cast_badge_str
                 sh_off = 2 if self.is_vertical else 1
 
                 # Author row with dark drop-shadow for crisp edge definition
@@ -1383,10 +1446,10 @@ class Visualizer:
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Ask Your Questions Now!' celestial callout card:
+        Draws the 'Ask I AM Anything' oracle inquiry callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
-        - Top centered 'DIVINE Q&A LIVE' badge tag
-        - Centered title row with celestial sunbeam question glyph + massive bold title
+        - Top centered 'ORACLE INQUIRY' badge tag
+        - Centered title row with celestial sunbeam question glyph + bold title
         - Centered high-legibility subtitle
         - Shimmering specular rim sweep & corner glints
         """
@@ -1403,8 +1466,8 @@ class Visualizer:
         # Top rim specular sheen
         pygame.draw.line(surf, (255, 255, 255, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
 
-        # 2. Top Pill Tag: "DIVINE Q&A LIVE" (Centered)
-        tag_txt = self.font_callout_tag.render("DIVINE Q&A LIVE", True, (0, 240, 255))
+        # 2. Top Pill Tag: "ORACLE INQUIRY" (Centered)
+        tag_txt = self.font_callout_tag.render("ORACLE INQUIRY", True, (0, 240, 255))
         tag_w = tag_txt.get_width() + (40 if self.is_vertical else 34)
         tag_h = 28 if self.is_vertical else 22
         tag_x = (w - tag_w) // 2
@@ -1420,7 +1483,7 @@ class Visualizer:
         surf.blit(tag_txt, (tag_x + (26 if self.is_vertical else 22), tag_y + (3 if self.is_vertical else 2)))
 
         # 3. Middle Title Row: Celestial Question Badge + Title (Centered Lockup)
-        title_str = "Ask Your Questions Now!"
+        title_str = "Ask I AM Anything"
         title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
         sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
 
@@ -1457,7 +1520,7 @@ class Visualizer:
         surf.blit(title_rend, (title_x, title_y))
 
         # 4. Bottom Subtitle Row (Centered)
-        sub_str = "Drop your questions in chat • Divine wisdom & occassional roasting"
+        sub_str = "Questions of reality, existence, or absurdities • Serious or ridiculous, I answer both"
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_x = (w - sub_rend.get_width()) // 2
         sub_y = 118 if self.is_vertical else 96
@@ -1483,10 +1546,10 @@ class Visualizer:
 
     def _draw_like_sub_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Like & Subscribe!' creator community callout card:
+        Draws the 'Subscribing Changes Nothing' community callout card:
         - Sleek ruby-tinted glassmorphic container with neon coral/magenta border
-        - Top centered 'COMMUNITY HYPE' badge tag
-        - Centered title row with YouTube Play badge + ringing bell + massive bold title
+        - Top centered 'STREAM CONTINUITY' badge tag
+        - Centered title row with YouTube Play badge + ringing bell + bold title
         - Centered high-legibility subtitle
         - Shimmering specular rim sweep & corner glints
         """
@@ -1503,8 +1566,8 @@ class Visualizer:
         # Top rim specular sheen
         pygame.draw.line(surf, (255, 220, 230, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
 
-        # 2. Top Pill Tag: "COMMUNITY HYPE" (Centered)
-        tag_txt = self.font_callout_tag.render("COMMUNITY HYPE", True, (255, 100, 130))
+        # 2. Top Pill Tag: "STREAM CONTINUITY" (Centered)
+        tag_txt = self.font_callout_tag.render("STREAM CONTINUITY", True, (255, 100, 130))
         tag_w = tag_txt.get_width() + (40 if self.is_vertical else 34)
         tag_h = 28 if self.is_vertical else 22
         tag_x = (w - tag_w) // 2
@@ -1520,7 +1583,7 @@ class Visualizer:
         surf.blit(tag_txt, (tag_x + (26 if self.is_vertical else 22), tag_y + (3 if self.is_vertical else 2)))
 
         # 3. Middle Title Row: YouTube & Bell Badge + Title (Centered Lockup)
-        title_str = "Like & Subscribe!"
+        title_str = "Subscribing Changes Nothing."
         title_rend = self.font_callout_title.render(title_str, True, (255, 245, 245))
         sh_rend = self.font_callout_title.render(title_str, True, (160, 20, 50))
 
@@ -1587,7 +1650,7 @@ class Visualizer:
         surf.blit(title_rend, (title_x, title_y))
 
         # 4. Bottom Subtitle Row (Centered)
-        sub_str = "Smash like & ring bell for live stream alerts!"
+        sub_str = "It is, however, appreciated • Ring bell for live alerts"
         sub_rend = self.font_callout_sub.render(sub_str, True, (255, 220, 205))
         sub_x = (w - sub_rend.get_width()) // 2
         sub_y = 118 if self.is_vertical else 96

@@ -1574,7 +1574,7 @@ class Visualizer:
 
         dt = 1.0 / self.fps
         if self.ai_text_state == "fade_out":
-            self.ai_text_alpha -= dt * 2.8  # ~0.35s graceful dissolution into nowhere
+            self.ai_text_alpha -= dt * 0.85  # ~1.2s graceful slow dissolution into nowhere
             self.ai_text_y_drift = -4.0 * (1.0 - max(0.0, self.ai_text_alpha))
             if self.ai_text_alpha <= 0.0:
                 self.ai_text_alpha = 0.0
@@ -1602,7 +1602,9 @@ class Visualizer:
                 self.ai_text_y_drift = 6.0
 
         elif self.ai_text_state == "fade_in":
-            self.ai_text_alpha += dt * 2.2  # ~0.45s graceful emergence from nowhere
+            # Slower, highly meditative emergence for motto (~1.4s) vs crisp emergence for comments (~0.6s)
+            fade_rate = 0.70 if self.ai_text_current == motto else 1.60
+            self.ai_text_alpha += dt * fade_rate
             self.ai_text_y_drift = 6.0 * (1.0 - min(1.0, self.ai_text_alpha))
             if self.ai_text_alpha >= 1.0:
                 self.ai_text_alpha = 1.0

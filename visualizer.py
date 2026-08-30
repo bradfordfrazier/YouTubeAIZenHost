@@ -1214,7 +1214,7 @@ class Visualizer:
         pinned_msg_text = ""
         if pinned_message and isinstance(pinned_message, dict):
             pin_raw_auth = pinned_message.get("author", "Viewer").strip().lstrip("@")
-            pin_clean_auth = f"@{pin_raw_auth}"
+            pin_clean_auth = f"@{pin_raw_auth.replace(' ', '')}"
             pin_msg = pinned_message.get("message", "").strip()
             pinned_msg_text = pin_msg
             pin_is_sc = pinned_message.get("is_superchat", False)
@@ -1278,9 +1278,7 @@ class Visualizer:
             pin_surf.blit(pin_badge_txt, (pin_badge_x + 8, pin_badge_y + (2 if self.is_vertical else 1)))
 
             # Author line inside pinned container
-            cast_tag = getattr(self.cfg, "cast_tag", "CAST")
-            pin_cast_str = f" [{cast_tag}]" if pin_is_cast else ""
-            pin_sc_str = f" [{pin_amount}]" if pin_is_sc else pin_cast_str
+            pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
             auth_sh = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
             auth_rend = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
@@ -1325,7 +1323,7 @@ class Visualizer:
                 is_sc = item.get("is_superchat", False)
                 is_cast = item.get("is_cast", False) or item.get("author_type") == "cast"
                 raw_author = item.get("author", "Viewer").strip().lstrip("@")
-                clean_author = f"@{raw_author}"
+                clean_author = f"@{raw_author.replace(' ', '')}"
                 msg = item.get("message", "").strip()
                 amount = item.get("amount", "")
 
@@ -1361,9 +1359,7 @@ class Visualizer:
                     author_color = (0, 235, 255)
                     msg_color = (255, 255, 255)
 
-                cast_tag = getattr(self.cfg, "cast_tag", "CAST")
-                cast_badge_str = f" [{cast_tag}]" if is_cast else ""
-                sc_badge_str = f" [{amount}]" if is_sc else cast_badge_str
+                sc_badge_str = f" [{amount}]" if is_sc else ""
 
                 # Author row with dark drop-shadow for crisp edge definition
                 auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
@@ -1473,15 +1469,13 @@ class Visualizer:
             # QUESTION PREVIEW: Display question formatted visually like chat
             # ------------------------------------------------------------------
             raw_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@") if pinned_chat_message else "Viewer"
-            clean_author = f"@{raw_author}"
+            clean_author = f"@{raw_author.replace(' ', '')}"
             is_sc = pinned_chat_message.get("is_superchat", False) if pinned_chat_message else False
             is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast") if pinned_chat_message else False
             amount = pinned_chat_message.get("amount", "") if pinned_chat_message else ""
             msg = self.active_question_text or (pinned_chat_message.get("message", "").strip() if pinned_chat_message else "")
 
-            cast_tag = getattr(self.cfg, "cast_tag", "CAST")
-            cast_badge_str = f" [{cast_tag}]" if is_cast else ""
-            sc_badge_str = f" [{amount}]" if is_sc else cast_badge_str
+            sc_badge_str = f" [{amount}]" if is_sc else ""
 
             if is_sc:
                 author_color = (255, 215, 0)

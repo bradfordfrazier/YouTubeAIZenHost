@@ -54,7 +54,7 @@ class CastEngine:
     def _init_personas(self) -> Dict[str, CastPersona]:
         return {
             "ExistentialDave": CastPersona(
-                name="Existential Dave",
+                name="ExistentialDave",
                 handle="ExistentialDave",
                 persona_type="existential_it",
                 archetype_title="Overthinking IT Specialist",
@@ -75,7 +75,7 @@ class CastEngine:
                 ],
             ),
             "SpeedrunnerKyle": CastPersona(
-                name="Speedrunner Kyle",
+                name="SpeedrunnerKyle",
                 handle="SpeedrunnerKyle",
                 persona_type="speedrunner",
                 archetype_title="Enlightenment Speedrunner",
@@ -96,7 +96,7 @@ class CastEngine:
                 ],
             ),
             "AstralBrenda": CastPersona(
-                name="Astral Brenda",
+                name="AstralBrenda",
                 handle="AstralBrenda",
                 persona_type="crystal_seeker",
                 archetype_title="Esoteric Crystal Enthusiast",
@@ -117,7 +117,7 @@ class CastEngine:
                 ],
             ),
             "TrollChad": CastPersona(
-                name="Troll Chad",
+                name="TrollChad",
                 handle="TrollChad",
                 persona_type="troll_provocateur",
                 archetype_title="Cosmic Provocateur",
@@ -138,7 +138,7 @@ class CastEngine:
                 ],
             ),
             "HeartfeltSarah": CastPersona(
-                name="Heartfelt Sarah",
+                name="HeartfeltSarah",
                 handle="HeartfeltSarah",
                 persona_type="grief_vulnerability",
                 archetype_title="Earnest Seeker",
@@ -159,7 +159,7 @@ class CastEngine:
                 ],
             ),
             "CuriousTimmy": CastPersona(
-                name="Curious Timmy",
+                name="CuriousTimmy",
                 handle="CuriousTimmy",
                 persona_type="child_wonder",
                 archetype_title="Childlike Inquirer",

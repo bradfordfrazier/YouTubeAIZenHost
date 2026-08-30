@@ -832,8 +832,6 @@ class LocalCoHostApp:
                 t_total = time.perf_counter() - t_start
                 logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
 
-                # Note: Leave current_pinned_chat and current_ai_subtitle displayed on screen continuously until next event!
-
                 # 6. Record turn to in-session conversational thread memory (C2)
                 m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
                 author_name = m_auth.group(1) if m_auth else ""
@@ -861,8 +859,24 @@ class LocalCoHostApp:
                         is_cast=(event.event_type == "cast"),
                         concurrent_viewers=self.concurrent_viewers,
                     )
-            else:
-                logger.warning(f"Incomplete, truncated, or empty response generated ('{clean_speech}'). Suppressing subtitle card.")
+
+                # 8. Post-Speech 10-Second Hold: Fade out comment & unpin question after 10s, then fade in motto
+                logger.info("⏳ [Post-Speech Hold] Holding Oracle comment & pinned question for 10.0s before motto transition...")
+                try:
+                    if self.new_comment_signal and not self.comment_queue:
+                        self.new_comment_signal.clear()
+                        await asyncio.wait_for(self.new_comment_signal.wait(), timeout=10.0)
+                    else:
+                        await asyncio.sleep(min(10.0, 0.5 if self.comment_queue else 10.0))
+                except asyncio.TimeoutError:
+                    pass
+
+                # If no immediate new event took over, transition to motto
+                if not self.comment_queue:
+                    logger.info("✨ [Motto Transition] 10s post-speech hold finished. Unpinning question and transitioning to motto.")
+                    self.current_pinned_chat = None
+                    self.current_ai_subtitle = ""
+                    self.visualizer.clear_subtitle()
 
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
@@ -1769,7 +1783,7 @@ class LocalCoHostApp:
                     self.chat_timestamps.append(now_ts)
 
                     chat_entry = {
-                        "author": persona.name,
+                        "author": persona.handle,
                         "author_type": "cast",
                         "is_cast": True,
                         "cast_persona": persona.persona_type,
@@ -1780,11 +1794,11 @@ class LocalCoHostApp:
                     }
                     self.chat_history.append(chat_entry)
                     self._save_cached_chat()
-                    self.brain.add_chat_message(persona.name, question, False, "")
+                    self.brain.add_chat_message(persona.handle, question, False, "")
                     sess_id = self.session_log.session_id if self.session_log else ""
                     self.brain.chatter_db.record_activity(
                         handle=persona.handle,
-                        display_name=persona.name,
+                        display_name=persona.handle,
                         message=question,
                         is_member=False,
                         is_cast=True,
@@ -1797,13 +1811,13 @@ class LocalCoHostApp:
 
                     if self.session_log:
                         self.session_log.log_cast_question(
-                            persona_name=persona.name,
+                            persona_name=persona.handle,
                             persona_handle=persona.handle,
                             persona_type=persona.persona_type,
                             question=question,
                         )
                         self.session_log.log_chat_message(
-                            author=persona.name,
+                            author=persona.handle,
                             author_type="cast",
                             message=question,
                             is_cast=True,

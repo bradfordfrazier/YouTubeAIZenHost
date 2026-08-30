@@ -121,12 +121,12 @@ class ChatterDB:
         """Pre-seeds initial profiles for the 6 canonical cast archetypes."""
         now_iso = datetime.now().isoformat()
         cast_seeds = [
-            ("ExistentialDave", "Existential Dave", "Overthinking IT Specialist", ["IT", "Jira", "free will", "server room crisis"], "Senior sysadmin having an ongoing non-dual crisis."),
-            ("SpeedrunnerKyle", "Speedrunner Kyle", "Enlightenment Speedrunner", ["speedrunning", "samsara", "Any% route", "frame-perfect peace"], "Gamer attempting to glitch past dualistic suffering."),
-            ("AstralBrenda", "Astral Brenda", "Esoteric Crystal Enthusiast", ["amethyst", "Mercury retrograde", "5G chakras", "tarot"], "Devoted crystal collector seeking esoteric shortcuts."),
-            ("TrollChad", "Troll Chad", "Cosmic Provocateur", ["burrito microwave", "cereal soup", "meme dilemmas", "hot dog buns"], "Internet provocateur testing the machine with absurd questions."),
-            ("HeartfeltSarah", "Heartfelt Sarah", "Earnest Seeker", ["grief", "loss", "loneliness", "healing", "unworthy feelings"], "Tender human seeking real comfort and existential presence."),
-            ("CuriousTimmy", "Curious Timmy", "Childlike Inquirer", ["lamp darkness", "pre-birth self", "dream nature", "talking trees"], "Innocent child whose simple inquiries dismantle ego complexity."),
+            ("ExistentialDave", "ExistentialDave", "Overthinking IT Specialist", ["IT", "Jira", "free will", "server room crisis"], "Senior sysadmin having an ongoing non-dual crisis."),
+            ("SpeedrunnerKyle", "SpeedrunnerKyle", "Enlightenment Speedrunner", ["speedrunning", "samsara", "Any% route", "frame-perfect peace"], "Gamer attempting to glitch past dualistic suffering."),
+            ("AstralBrenda", "AstralBrenda", "Esoteric Crystal Enthusiast", ["amethyst", "Mercury retrograde", "5G chakras", "tarot"], "Devoted crystal collector seeking esoteric shortcuts."),
+            ("TrollChad", "TrollChad", "Cosmic Provocateur", ["burrito microwave", "cereal soup", "meme dilemmas", "hot dog buns"], "Internet provocateur testing the machine with absurd questions."),
+            ("HeartfeltSarah", "HeartfeltSarah", "Earnest Seeker", ["grief", "loss", "loneliness", "healing", "unworthy feelings"], "Tender human seeking real comfort and existential presence."),
+            ("CuriousTimmy", "CuriousTimmy", "Childlike Inquirer", ["lamp darkness", "pre-birth self", "dream nature", "talking trees"], "Innocent child whose simple inquiries dismantle ego complexity."),
         ]
         for handle, name, title, topics, note in cast_seeds:
             norm = self._normalize_handle(handle)

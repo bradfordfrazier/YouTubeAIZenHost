@@ -104,7 +104,7 @@ def test_visualizer_pinned_chat_rendering():
 
 
 def test_app_turn_pinning_lifecycle():
-    """Verifies that LocalCoHostApp keeps current_pinned_chat and Oracle response displayed continuously until next event."""
+    """Verifies that LocalCoHostApp keeps current_pinned_chat and Oracle response displayed for 10s, then transitions to motto."""
     app = LocalCoHostApp()
     assert app.current_pinned_chat is None
 
@@ -122,24 +122,12 @@ def test_app_turn_pinning_lifecycle():
         chat_item=chat_item_1,
     )
 
-    chat_item_2 = {
-        "author": "ZenPhilosopher",
-        "message": "What is the sound of one hand clapping?",
-        "is_superchat": False,
-    }
-    app.chat_history.append(chat_item_2)
-
-    event_2 = CommentEvent(
-        prompt_trigger="Chat message from @ZenPhilosopher: 'What is the sound of one hand clapping?'",
-        event_type="chat",
-        priority=5,
-        chat_item=chat_item_2,
-    )
-
     async def _test():
         # Mock TTS queue_speech to avoid hardware dependency
         async def mock_queue_speech(txt):
+            # During speech, question is pinned and response is set
             assert app.current_pinned_chat is not None
+            assert app.current_pinned_chat["author"] == "GrievingSeeker"
 
         async def mock_wait():
             pass
@@ -147,19 +135,23 @@ def test_app_turn_pinning_lifecycle():
         app.tts.queue_speech = mock_queue_speech
         app.tts.wait_until_speech_completed = mock_wait
 
-        # Turn 1: Process Question 1
-        await app._execute_ai_turn(event_1)
-        # Verify that after Turn 1 completion, Question 1 and response REMAIN displayed until next event
-        assert app.current_pinned_chat is not None
-        assert app.current_pinned_chat["author"] == "GrievingSeeker"
-        assert len(app.current_ai_subtitle) > 0
+        # Initialize signal and queue
+        app.new_comment_signal = asyncio.Event()
 
-        # Turn 2: Process Question 2
-        await app._execute_ai_turn(event_2)
-        # Verify that Question 2 seamlessly takes over and stays displayed
-        assert app.current_pinned_chat is not None
-        assert app.current_pinned_chat["author"] == "ZenPhilosopher"
-        assert len(app.current_ai_subtitle) > 0
+        # Trigger new comment signal after 0.1s to simulate the 10s hold expiring or advancing
+        async def trigger_hold():
+            await asyncio.sleep(0.1)
+            app.new_comment_signal.set()
+
+        asyncio.create_task(trigger_hold())
+
+        # Process Turn 1
+        await app._execute_ai_turn(event_1)
+
+        # After turn finishes (post-speech hold completes), comment is cleared, unpinned, and motto is set
+        assert app.current_pinned_chat is None
+        assert app.current_ai_subtitle == ""
+        assert app.visualizer.ai_text_target == "Everything is perfect."
 
     asyncio.run(_test())
 

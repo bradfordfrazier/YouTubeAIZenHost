@@ -238,8 +238,8 @@ def test_question_fade_in_out_animation():
     assert vis.question_fade_state in ("fade_in", "steady")
     assert vis.question_fade_alpha > 0.0
 
-    # Step through frames to reach full steady state
-    for _ in range(30):
+    # Step through frames to reach full steady state (0.6s fade_in = 36 frames at 60fps)
+    for _ in range(45):
         vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=[],
@@ -261,8 +261,8 @@ def test_question_fade_in_out_animation():
     )
     assert vis.question_fade_state in ("fade_out", "idle")
 
-    # Step through frames until question fade_out completes
-    for _ in range(40):
+    # Step through frames until question fade_out completes (1.2s fade_out = 72 frames at 60fps)
+    for _ in range(80):
         vis.render_frame(
             audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
             chat_messages=[],
@@ -272,6 +272,104 @@ def test_question_fade_in_out_animation():
         )
     assert vis.question_fade_state == "idle"
     assert vis.question_fade_alpha == 0.0
+
+
+def test_spontaneous_reflection_transition_lifecycle():
+    """Verifies unprompted spontaneous reflections transition cleanly from motto to reflection to pause to motto."""
+    vis = Visualizer(width=1920, height=1080)
+    # Start at idle motto
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    assert vis.ai_text_current == "Everything is perfect."
+
+    # Spontaneous reflection arrives (no pinned message)
+    refl_text = "Silence is not the absence of sound, but the presence of stillness."
+    vis.render_frame(
+        audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
+        chat_messages=[],
+        host_transcript="",
+        ai_subtitle=refl_text,
+        pinned_chat_message=None,
+    )
+    # Transitions to reflection text
+    assert vis.ai_text_target == refl_text
+
+    # Render frames to reach steady state
+    for _ in range(40):
+        vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, [], "", refl_text, pinned_chat_message=None)
+    assert vis.ai_text_current == refl_text
+    assert vis.ai_text_state == "steady"
+    assert vis.ai_text_alpha == 1.0
+
+    # Speech finishes, 15s hold elapses, clear_subtitle is called
+    vis.clear_subtitle()
+    assert vis.ai_text_state == "fade_out"
+
+    # Step through fade_out
+    for _ in range(80):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    # Reaches motto_pause
+    assert vis.ai_text_state in ("motto_pause", "fade_in", "steady")
+
+
+def test_live_chat_pinned_card_alpha_sync():
+    """Verifies that the live chat card's pinned container smoothly fades in and fades out synchronously."""
+    vis = Visualizer(width=1920, height=1080)
+    pinned_msg = {"author": "Sarah", "message": "How do we let go?", "is_superchat": False}
+
+    # Frame 1: Pinned message arrives -> starts fade_in
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+    assert vis.pinned_chat_state in ("fade_in", "steady")
+    assert vis.pinned_chat_alpha > 0.0
+
+    # Fast forward to steady
+    for _ in range(40):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+    assert vis.pinned_chat_state == "steady"
+    assert vis.pinned_chat_alpha == 1.0
+
+    # Unpin: pinned_chat_message becomes None (hold finished)
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    assert vis.pinned_chat_state == "fade_out"
+
+    # Step through fade_out
+    for _ in range(80):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    assert vis.pinned_chat_state == "idle"
+    assert vis.pinned_chat_alpha == 0.0
+    assert vis.pinned_chat_stored is None
+
+
+def test_configurable_transitions_override():
+    """Verifies that overriding transition configs in config.py directly controls fade and hold timings."""
+    orig_fade_in = config.comment_fade_in_sec
+    orig_fade_out = config.comment_fade_out_sec
+    orig_pause = config.comment_pause_sec
+    orig_hold = config.comment_post_speech_hold_sec
+
+    try:
+        config.comment_fade_in_sec = 0.2
+        config.comment_fade_out_sec = 0.3
+        config.comment_pause_sec = 0.5
+        config.comment_post_speech_hold_sec = 2.0
+
+        vis = Visualizer(width=1920, height=1080)
+        vis.set_subtitle("Fast fade test comment.")
+        for _ in range(20):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Fast fade test comment.", pinned_chat_message=None)
+        assert vis.ai_text_state == "steady"
+
+        vis.clear_subtitle()
+        assert vis.ai_text_state == "fade_out"
+
+        # After 0.3s (18 frames at 60fps), fade_out should complete and reach motto_pause
+        for _ in range(25):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        assert vis.ai_text_state in ("motto_pause", "fade_in")
+    finally:
+        config.comment_fade_in_sec = orig_fade_in
+        config.comment_fade_out_sec = orig_fade_out
+        config.comment_pause_sec = orig_pause
+        config.comment_post_speech_hold_sec = orig_hold
 
 
 if __name__ == "__main__":
@@ -294,6 +392,18 @@ if __name__ == "__main__":
     print("Testing Zero-Flash Subtitle Transitions...")
     test_zero_flash_subtitle_transitions()
     print("Zero-Flash Subtitle Transitions Passed!")
+
+    print("Testing Spontaneous Reflection Transition Lifecycle...")
+    test_spontaneous_reflection_transition_lifecycle()
+    print("Spontaneous Reflection Transition Lifecycle Passed!")
+
+    print("Testing Live Chat Pinned Card Alpha Sync...")
+    test_live_chat_pinned_card_alpha_sync()
+    print("Live Chat Pinned Card Alpha Sync Passed!")
+
+    print("Testing Configurable Transitions Override...")
+    test_configurable_transitions_override()
+    print("Configurable Transitions Override Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

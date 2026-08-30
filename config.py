@@ -188,6 +188,14 @@ class AppConfig:
     visualizer_borderless: bool = os.getenv("VISUALIZER_BORDERLESS", "false").lower() in ("true", "1", "yes")
     show_host_transcript_card: bool = os.getenv("SHOW_HOST_TRANSCRIPT_CARD", "false").lower() in ("true", "1", "yes")
 
+    # Comment Panel & Visualizer Transition Timings
+    comment_fade_in_sec: float = float(os.getenv("COMMENT_FADE_IN_SEC", "0.6"))
+    comment_fade_out_sec: float = float(os.getenv("COMMENT_FADE_OUT_SEC", "1.2"))
+    comment_post_speech_hold_sec: float = float(os.getenv("COMMENT_POST_SPEECH_HOLD_SEC", "15.0"))
+    comment_pause_sec: float = float(os.getenv("COMMENT_PAUSE_SEC", "2.0"))
+    motto_fade_in_sec: float = float(os.getenv("MOTTO_FADE_IN_SEC", "1.4"))
+    motto_fade_out_sec: float = float(os.getenv("MOTTO_FADE_OUT_SEC", "0.6"))
+
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()
         if ar in ("9:16", "vertical", "portrait", "shorts"):

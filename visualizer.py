@@ -1217,11 +1217,16 @@ class Visualizer:
         # ----------------------------------------------------------------------
         pinned_msg_text = ""
         dt = 1.0 / self.fps
+        comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
+        comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
+        pin_fade_in_rate = 1.0 / comment_fade_in_sec
+        pin_fade_out_rate = 1.0 / comment_fade_out_sec
+
         if pinned_message and isinstance(pinned_message, dict):
             self.pinned_chat_stored = pinned_message
             if self.pinned_chat_state != "steady":
                 self.pinned_chat_state = "fade_in"
-                self.pinned_chat_alpha = min(1.0, self.pinned_chat_alpha + dt * 2.5)
+                self.pinned_chat_alpha = min(1.0, self.pinned_chat_alpha + dt * pin_fade_in_rate)
                 if self.pinned_chat_alpha >= 1.0:
                     self.pinned_chat_alpha = 1.0
                     self.pinned_chat_state = "steady"
@@ -1229,7 +1234,7 @@ class Visualizer:
             if self.pinned_chat_state in ("fade_in", "steady"):
                 self.pinned_chat_state = "fade_out"
             if self.pinned_chat_state == "fade_out":
-                self.pinned_chat_alpha = max(0.0, self.pinned_chat_alpha - dt * 0.85)
+                self.pinned_chat_alpha = max(0.0, self.pinned_chat_alpha - dt * pin_fade_out_rate)
                 if self.pinned_chat_alpha <= 0.0:
                     self.pinned_chat_alpha = 0.0
                     self.pinned_chat_state = "idle"
@@ -1457,8 +1462,19 @@ class Visualizer:
         q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
 
         # 2. Update Question Fade In / Steady / Fade Out State Machine
+        comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
+        comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
+        comment_pause_sec = max(0.0, getattr(self.cfg, "comment_pause_sec", 2.0))
+        motto_fade_in_sec = max(0.05, getattr(self.cfg, "motto_fade_in_sec", 1.4))
+        motto_fade_out_sec = max(0.05, getattr(self.cfg, "motto_fade_out_sec", 0.6))
+
+        comment_fade_in_rate = 1.0 / comment_fade_in_sec
+        comment_fade_out_rate = 1.0 / comment_fade_out_sec
+        motto_fade_in_rate = 1.0 / motto_fade_in_sec
+        motto_fade_out_rate = 1.0 / motto_fade_out_sec
+
         if self.question_fade_state == "fade_in":
-            self.question_fade_alpha += dt * 2.5  # ~0.40s graceful fade-in emergence
+            self.question_fade_alpha += dt * comment_fade_in_rate
             self.question_y_drift = 6.0 * (1.0 - min(1.0, self.question_fade_alpha))
             if self.question_fade_alpha >= 1.0:
                 self.question_fade_alpha = 1.0
@@ -1475,7 +1491,7 @@ class Visualizer:
                 self.question_fade_state = "fade_out"
 
         elif self.question_fade_state == "fade_out":
-            self.question_fade_alpha -= dt * 2.8  # ~0.35s graceful fade-out dissolution
+            self.question_fade_alpha -= dt * comment_fade_out_rate
             self.question_y_drift = -4.0 * (1.0 - max(0.0, self.question_fade_alpha))
             if self.question_fade_alpha <= 0.0:
                 self.question_fade_alpha = 0.0
@@ -1546,9 +1562,11 @@ class Visualizer:
             sh_off = 2 if self.is_vertical else 1
 
             auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
+            auth_sh.set_alpha(int(alpha_int * 0.9))
             self.surf_ai_text.fill((0, 0, 0, 0))
             self.surf_ai_text.blit(auth_sh, (auth_x + sh_off, y_start + sh_off))
             auth_rend = self.font_chat_author.render(auth_str, True, author_color)
+            auth_rend.set_alpha(alpha_int)
             self.surf_ai_text.blit(auth_rend, (auth_x, y_start))
 
             # 2. Message lines (Centered horizontally)
@@ -1559,8 +1577,10 @@ class Visualizer:
                 line_y = msg_y_start + idx * line_h
 
                 line_sh = self.font_ai_subtitle.render(line_txt, True, (0, 0, 0))
+                line_sh.set_alpha(int(alpha_int * 0.9))
                 self.surf_ai_text.blit(line_sh, (line_x + sh_off, line_y + sh_off))
                 line_rend = self.font_ai_subtitle.render(line_txt, True, (255, 255, 255))
+                line_rend.set_alpha(alpha_int)
                 self.surf_ai_text.blit(line_rend, (line_x, line_y))
 
             self.surf_ai_text.set_alpha(alpha_int)
@@ -1588,7 +1608,7 @@ class Visualizer:
                     self.ai_text_current = ""
                     self.ai_text_alpha = 0.0
                     self.ai_text_state = "motto_pause"
-                    self.motto_pause_timer = 2.0
+                    self.motto_pause_timer = comment_pause_sec
                 else:
                     self.ai_text_current = desired_target
                     self.ai_text_alpha = 0.0
@@ -1601,7 +1621,8 @@ class Visualizer:
 
         dt = 1.0 / self.fps
         if self.ai_text_state == "fade_out":
-            self.ai_text_alpha -= dt * 0.85  # ~1.2s graceful slow dissolution into nowhere
+            out_rate = motto_fade_out_rate if self.ai_text_current == motto else comment_fade_out_rate
+            self.ai_text_alpha -= dt * out_rate
             self.ai_text_y_drift = -4.0 * (1.0 - max(0.0, self.ai_text_alpha))
             if self.ai_text_alpha <= 0.0:
                 self.ai_text_alpha = 0.0
@@ -1610,7 +1631,7 @@ class Visualizer:
                 if self.ai_text_target == motto:
                     self.ai_text_current = ""
                     self.ai_text_state = "motto_pause"
-                    self.motto_pause_timer = 2.0
+                    self.motto_pause_timer = comment_pause_sec
                 elif self.ai_text_target:
                     self.ai_text_current = self.ai_text_target
                     self.ai_text_state = "fade_in"
@@ -1629,9 +1650,8 @@ class Visualizer:
                 self.ai_text_y_drift = 6.0
 
         elif self.ai_text_state == "fade_in":
-            # Slower, highly meditative emergence for motto (~1.4s) vs crisp emergence for comments (~0.6s)
-            fade_rate = 0.70 if self.ai_text_current == motto else 1.60
-            self.ai_text_alpha += dt * fade_rate
+            in_rate = motto_fade_in_rate if self.ai_text_current == motto else comment_fade_in_rate
+            self.ai_text_alpha += dt * in_rate
             self.ai_text_y_drift = 6.0 * (1.0 - min(1.0, self.ai_text_alpha))
             if self.ai_text_alpha >= 1.0:
                 self.ai_text_alpha = 1.0

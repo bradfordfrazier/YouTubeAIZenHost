@@ -149,18 +149,47 @@ def test_zero_flash_subtitle_transitions():
     vis.ai_text_alpha = 1.0
     vis.ai_text_current = "This is the previous oracle comment from 5 minutes ago."
 
-    # Clear subtitle must completely wipe stale text and alpha
+    # Clear subtitle targets void
     vis.clear_subtitle()
-    assert vis.ai_text_current == ""
     assert vis.ai_text_target == ""
-    assert vis.ai_text_alpha == 0.0
-    assert vis.ai_text_state == "idle_empty"
+    assert vis.ai_text_state in ("fade_out", "idle_empty")
 
     # Setting new subtitle starts cleanly from alpha 0.0 without flashing old text
     vis.set_subtitle("This is the brand new statement.")
     assert vis.ai_text_current == "This is the brand new statement."
     assert vis.ai_text_alpha == 0.0
     assert vis.ai_text_state == "fade_in"
+
+
+def test_pinned_comment_persists_during_oracle_statement():
+    """Verifies that the pinned chat message persists in the chat feed while the Oracle statement is displayed."""
+    vis = Visualizer(width=1920, height=1080)
+    pinned_msg = {
+        "author": "GrievingSeeker",
+        "message": "Where is my mother now?",
+        "is_superchat": False,
+    }
+
+    # 1. Oracle is speaking statement
+    vis.render_frame(
+        audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
+        chat_messages=[{"author": "Bob", "message": "hello"}],
+        host_transcript="",
+        ai_subtitle="She is in the silence you listen with.",
+        pinned_chat_message=pinned_msg,
+    )
+    assert vis._active_pinned_message == pinned_msg
+
+    # 2. Even if app.py passes pinned_chat_message=None while the Oracle statement is still active/fading out:
+    vis.render_frame(
+        audio_metrics={"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False},
+        chat_messages=[{"author": "Bob", "message": "hello"}],
+        host_transcript="",
+        ai_subtitle="She is in the silence you listen with.",
+        pinned_chat_message=None,
+    )
+    # Pinned message remains active in visualizer because Oracle comment is still visible
+    assert vis._active_pinned_message == pinned_msg
 
 
 def test_question_fade_in_out_animation():
@@ -228,6 +257,10 @@ if __name__ == "__main__":
     print("Testing Question Fade In / Out Animation...")
     test_question_fade_in_out_animation()
     print("Question Fade In / Out Animation Passed!")
+
+    print("Testing Pinned Comment Persistence...")
+    test_pinned_comment_persists_during_oracle_statement()
+    print("Pinned Comment Persistence Passed!")
 
     print("Testing Zero-Flash Subtitle Transitions...")
     test_zero_flash_subtitle_transitions()

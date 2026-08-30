@@ -473,6 +473,7 @@ class Visualizer:
         self.question_fade_alpha = 0.0
         self.question_fade_state = "idle"  # "fade_in", "steady", "fade_out", "idle"
         self.question_y_drift = 0.0
+        self._active_pinned_message: Optional[Dict] = None
 
         # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
         self.ai_text_current = ""
@@ -576,20 +577,23 @@ class Visualizer:
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
-        """Immediately clears subtitle text and purges stale comments from memory to prevent flashing."""
+        """Immediately clears subtitle text and triggers graceful dissolution to prevent flashing."""
         self.is_empty_hold = True
         self.subtitle_target_text = ""
         self.ai_text_target = ""
-        self.ai_text_current = ""
-        self.ai_text_alpha = 0.0
-        self.ai_text_state = "idle_empty"
+        if self.ai_text_alpha > 0.0:
+            self.ai_text_state = "fade_out"
+        else:
+            self.ai_text_current = ""
+            self.ai_text_alpha = 0.0
+            self.ai_text_state = "idle_empty"
         self.ai_text_y_drift = 0.0
         self.question_fade_alpha = 0.0
         self.question_fade_state = "idle"
         self.question_y_drift = 0.0
         self.active_question_text = ""
         self.active_question_start_time = 0.0
-        if hasattr(self, "surf_ai_text"):
+        if hasattr(self, "surf_ai_text") and self.ai_text_alpha <= 0.0:
             self.surf_ai_text.fill((0, 0, 0, 0))
 
     def set_subtitle(self, text: str):
@@ -681,11 +685,26 @@ class Visualizer:
             is_stream_live=is_stream_live,
         )
         self._draw_host_transcript_card(host_transcript)
-        self._draw_live_chat_card(chat_messages, pinned_message=pinned_chat_message)
+
+        # Maintain active pinned message in chat panel until Oracle response completely dissolves
+        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        has_active_statement = bool(
+            (self.subtitle_target_text and self.subtitle_target_text != motto)
+            or (self.ai_text_target and self.ai_text_target != motto)
+            or (self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05)
+        )
+
+        if pinned_chat_message and isinstance(pinned_chat_message, dict):
+            self._active_pinned_message = pinned_chat_message
+        elif not has_active_statement:
+            self._active_pinned_message = None
+
+        effective_pinned_chat = pinned_chat_message or self._active_pinned_message
+        self._draw_live_chat_card(chat_messages, pinned_message=effective_pinned_chat)
         self._draw_ai_subtitle_card(
             is_speaking=is_speaking,
             concurrent_viewers=concurrent_viewers,
-            pinned_chat_message=pinned_chat_message,
+            pinned_chat_message=effective_pinned_chat,
         )
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")

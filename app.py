@@ -832,6 +832,13 @@ class LocalCoHostApp:
                 t_total = time.perf_counter() - t_start
                 logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
 
+                # Hold final Oracle response & pinned question on screen for a post-speech absorption linger (~2.0s)
+                await asyncio.sleep(2.0)
+
+                # Gracefully clear subtitle and unpin question together
+                self.visualizer.clear_subtitle()
+                self.current_ai_subtitle = ""
+
                 # 6. Record turn to in-session conversational thread memory (C2)
                 m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
                 author_name = m_auth.group(1) if m_auth else ""

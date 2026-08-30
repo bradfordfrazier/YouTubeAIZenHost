@@ -415,7 +415,7 @@ class Visualizer:
 
         # Celestial Sparkle System around the central Point of Light
         self.core_cx = self.width // 2
-        self.core_cy = 500 if self.is_vertical else 300
+        self.core_cy = 454 if self.is_vertical else 258
         self.num_sparkles = 25
         self.celestial_sparkles = [
             CelestialSparkle(self.core_cx, self.core_cy) for _ in range(self.num_sparkles)
@@ -1157,15 +1157,15 @@ class Visualizer:
     def _draw_live_chat_card(self, chat_messages: List[Dict], pinned_message: Optional[Dict] = None):
         """
         Draws YouTube Live Chat transparent overlay panel with support for pinned active question highlight:
-        16:9 Landscape: Left column below center (w=380, h=490, x=60, y=545).
-        9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1274, up to 5 items).
+        16:9 Landscape: Left column below center (w=380, h=490, x=60, y=461).
+        9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1182, up to 5 items).
         """
         if self.is_vertical:
             card_w, card_h = 940, 580
-            card_x, card_y = (self.width - card_w) // 2, 1274
+            card_x, card_y = (self.width - card_w) // 2, 1182
         else:
             card_w, card_h = 380, 490
-            card_x, card_y = 60, 545
+            card_x, card_y = 60, 461
 
         self.surf_chat_card.fill((0, 0, 0, 0))
 
@@ -1387,11 +1387,75 @@ class Visualizer:
                     and (m.get("message", "").strip() == active_msg or active_msg in m.get("message", "").strip() or m.get("message", "").strip() in active_msg)
                 )
             ]
-            max_msgs = (3 if self.is_vertical else 2)
-            recent_chats = scrolling_msgs[-max_msgs:] if scrolling_msgs else []
+            candidate_msgs = scrolling_msgs
         else:
-            max_msgs = visible_feed_capacity
-            recent_chats = display_msgs[-max_msgs:] if display_msgs else []
+            candidate_msgs = display_msgs
+
+        available_height = max_content_y - y_offset
+
+        # Pre-measure candidate messages backwards from newest (bottom) to oldest (top)
+        # to guarantee that newest incoming comments & active questions are ALWAYS rendered at the bottom!
+        prepared_chats = []
+        accumulated_h = 0
+
+        for item in reversed(candidate_msgs):
+            is_sc = item.get("is_superchat", False)
+            is_cast = item.get("is_cast", False) or item.get("author_type") == "cast"
+            raw_author = item.get("author", "Viewer").strip().lstrip("@")
+            clean_author = f"@{raw_author.replace(' ', '')}"
+            msg = item.get("message", "").strip()
+            amount = item.get("amount", "")
+
+            # Check if this item is the active question currently in-feed
+            is_active_row = bool(
+                has_active_question
+                and not is_pinned_at_top
+                and raw_author.lower() == active_auth
+                and (msg == active_msg or active_msg in msg or msg in active_msg)
+            )
+
+            # Text wrapping
+            max_text_w = card_w - (pad_x * 2 + (24 if is_active_row else 10))
+            words = msg.split(" ")
+            wrapped_lines = []
+            cur_l = ""
+            for w in words:
+                test_l = f"{cur_l} {w}".strip()
+                if self.font_chat_msg.size(test_l)[0] < max_text_w:
+                    cur_l = test_l
+                else:
+                    if cur_l:
+                        wrapped_lines.append(cur_l)
+                    cur_l = w
+            if cur_l:
+                wrapped_lines.append(cur_l)
+
+            display_lines = wrapped_lines[:2] if wrapped_lines else [""]
+            item_h = auth_h + len(display_lines) * line_h + (10 if is_active_row else (8 if self.is_vertical else 4))
+            gap = (10 if self.is_vertical else 8) if is_active_row else (12 if self.is_vertical else 10)
+
+            needed_h = item_h + (gap if prepared_chats else 0)
+            if accumulated_h + needed_h > available_height and prepared_chats:
+                # Can't fit more older items above; preserve newest items at bottom
+                break
+
+            accumulated_h += needed_h
+            prepared_chats.append({
+                "item": item,
+                "is_sc": is_sc,
+                "is_cast": is_cast,
+                "raw_author": raw_author,
+                "clean_author": clean_author,
+                "msg": msg,
+                "amount": amount,
+                "is_active_row": is_active_row,
+                "display_lines": display_lines,
+                "item_h": item_h,
+                "gap": gap,
+            })
+
+        # Restore chronological order (top to bottom)
+        recent_chats = list(reversed(prepared_chats))
 
         if not recent_chats and not is_pinned_at_top:
             empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
@@ -1399,43 +1463,14 @@ class Visualizer:
             self.surf_chat_card.blit(empty_txt_sh, (pad_x + 1, y_offset + 1))
             self.surf_chat_card.blit(empty_txt, (pad_x, y_offset))
         else:
-            for item in recent_chats:
-                is_sc = item.get("is_superchat", False)
-                is_cast = item.get("is_cast", False) or item.get("author_type") == "cast"
-                raw_author = item.get("author", "Viewer").strip().lstrip("@")
-                clean_author = f"@{raw_author.replace(' ', '')}"
-                msg = item.get("message", "").strip()
-                amount = item.get("amount", "")
-
-                # Check if this item is the active question currently in-feed
-                is_active_row = bool(
-                    has_active_question
-                    and not is_pinned_at_top
-                    and raw_author.lower() == active_auth
-                    and (msg == active_msg or active_msg in msg or msg in active_msg)
-                )
-
-                # Text wrapping
-                max_text_w = card_w - (pad_x * 2 + (24 if is_active_row else 10))
-                words = msg.split(" ")
-                wrapped_lines = []
-                cur_l = ""
-                for w in words:
-                    test_l = f"{cur_l} {w}".strip()
-                    if self.font_chat_msg.size(test_l)[0] < max_text_w:
-                        cur_l = test_l
-                    else:
-                        if cur_l:
-                            wrapped_lines.append(cur_l)
-                        cur_l = w
-                if cur_l:
-                    wrapped_lines.append(cur_l)
-
-                display_lines = wrapped_lines[:2] if wrapped_lines else [""]
-                item_h = auth_h + len(display_lines) * line_h + (10 if is_active_row else (8 if self.is_vertical else 4))
-
-                if y_offset + item_h > max_content_y:
-                    break
+            for p_item in recent_chats:
+                is_sc = p_item["is_sc"]
+                is_cast = p_item["is_cast"]
+                clean_author = p_item["clean_author"]
+                amount = p_item["amount"]
+                is_active_row = p_item["is_active_row"]
+                display_lines = p_item["display_lines"]
+                item_h = p_item["item_h"]
 
                 sc_badge_str = f" [{amount}]" if is_sc else ""
 
@@ -1535,11 +1570,11 @@ class Visualizer:
         """
         if self.is_vertical:
             card_w, card_h = 940, 380
-            card_x, card_y = (self.width - card_w) // 2, 818
+            card_x, card_y = (self.width - card_w) // 2, 726
         else:
             card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)
-            card_y = self.core_cy + 252 + 14
+            card_y = self.core_cy + 224
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
 

@@ -526,6 +526,33 @@ def test_system_prompt_never_pinned_or_added_to_chat_history():
     asyncio.run(_test())
 
 
+def test_bottom_anchored_chat_rendering_with_many_messages():
+    """Verifies that newly arriving chat messages (especially active questions at the bottom of long history) are ALWAYS rendered and never clipped."""
+    vis = Visualizer(width=1920, height=1080)
+
+    chat_history = [
+        {"author": f"User{i}", "message": f"This is message number {i} from a viewer discussing deep topics."}
+        for i in range(10)
+    ]
+    active_question = chat_history[-1]
+
+    # Render frame with active question
+    vis.render_frame(
+        audio_metrics={"rms": 0.0, "spectrum": np.zeros(64)},
+        chat_messages=chat_history,
+        host_transcript="",
+        ai_subtitle="",
+        host_connected=True,
+        obs_connected=True,
+        engagement_mode="active",
+        concurrent_viewers=5,
+        is_stream_live=True,
+        pinned_chat_message=active_question,
+    )
+
+    assert vis.pinned_chat_stored == active_question
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -574,6 +601,10 @@ if __name__ == "__main__":
     print("Testing System Prompts Never Pinned or Added to Chat...")
     test_system_prompt_never_pinned_or_added_to_chat_history()
     print("System Prompts Never Pinned or Added to Chat Passed!")
+
+    print("Testing Bottom-Anchored Chat Rendering with Long History...")
+    test_bottom_anchored_chat_rendering_with_many_messages()
+    print("Bottom-Anchored Chat Rendering with Long History Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

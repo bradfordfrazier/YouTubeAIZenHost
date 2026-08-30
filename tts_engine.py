@@ -294,14 +294,18 @@ class TTSEngine:
     async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: float = 60.0):
         """Asynchronously waits until all buffered speech audio has finished broadcasting out through NDI/audio."""
         t0 = time.time()
-        # Brief initial sleep so the pop_audio_packet thread registers playback start
-        await asyncio.sleep(0.08)
+        # Brief initial sleep so the pop_audio_packet / pop_local_audio threads register playback start
+        await asyncio.sleep(0.15)
         while time.time() - t0 < timeout:
             with self._buffer_lock:
-                buf_len = len(self._audio_buffer_ndi)
-            if buf_len == 0:
+                buf_len_ndi = len(self._audio_buffer_ndi)
+                buf_len_local = len(self._audio_buffer_local)
+                max_buf = max(buf_len_ndi, buf_len_local)
+            if max_buf == 0:
                 with self._buffer_lock:
                     self.is_speaking = False
+                # Safety padding for soundcard hardware driver ringbuffer drain before resolving
+                await asyncio.sleep(0.40)
                 break
             await asyncio.sleep(poll_interval)
 

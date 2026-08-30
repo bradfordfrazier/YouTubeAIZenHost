@@ -476,11 +476,12 @@ class Visualizer:
         self._active_pinned_message: Optional[Dict] = None
 
         # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
-        self.ai_text_current = ""
-        self.ai_text_target = ""
-        self.ai_text_alpha = 0.0          # 0.0 (completely in void) to 1.0 (fully materialized)
-        self.ai_text_state = "idle_empty" # "fade_in", "steady", "fade_out", "idle_empty"
-        self.ai_text_y_drift = 0.0        # Subtle vertical drift during manifestation/dissolution
+        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.ai_text_current = motto
+        self.ai_text_target = motto
+        self.ai_text_alpha = 1.0          # Start with motto visible when there is nothing to display
+        self.ai_text_state = "steady"
+        self.ai_text_y_drift = 0.0
 
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
         # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
@@ -577,24 +578,23 @@ class Visualizer:
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
-        """Immediately clears subtitle text and triggers graceful dissolution to prevent flashing."""
-        self.is_empty_hold = True
+        """Immediately resets subtitle text to motto when there is nothing to display."""
+        self.is_empty_hold = False
         self.subtitle_target_text = ""
-        self.ai_text_target = ""
-        if self.ai_text_alpha > 0.0:
+        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.ai_text_target = motto
+        if self.ai_text_current != motto and self.ai_text_alpha > 0.05:
             self.ai_text_state = "fade_out"
         else:
-            self.ai_text_current = ""
-            self.ai_text_alpha = 0.0
-            self.ai_text_state = "idle_empty"
+            self.ai_text_current = motto
+            self.ai_text_alpha = 1.0
+            self.ai_text_state = "steady"
         self.ai_text_y_drift = 0.0
         self.question_fade_alpha = 0.0
         self.question_fade_state = "idle"
         self.question_y_drift = 0.0
         self.active_question_text = ""
         self.active_question_start_time = 0.0
-        if hasattr(self, "surf_ai_text") and self.ai_text_alpha <= 0.0:
-            self.surf_ai_text.fill((0, 0, 0, 0))
 
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
@@ -1553,10 +1553,9 @@ class Visualizer:
         # ----------------------------------------------------------------------
         # ORACLE SPOKEN STATEMENT / IDLE MOTTO MANIFESTATION
         # ----------------------------------------------------------------------
-        if self.is_empty_hold:
-            desired_target = ""
-        elif not self.subtitle_target_text or (concurrent_viewers <= 0 and not is_speaking):
-            desired_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        if not self.subtitle_target_text:
+            desired_target = motto
         else:
             desired_target = self.subtitle_target_text
 

@@ -104,30 +104,42 @@ def test_visualizer_pinned_chat_rendering():
 
 
 def test_app_turn_pinning_lifecycle():
-    """Verifies that LocalCoHostApp sets current_pinned_chat during a turn and clears it on completion."""
+    """Verifies that LocalCoHostApp keeps current_pinned_chat and Oracle response displayed continuously until next event."""
     app = LocalCoHostApp()
     assert app.current_pinned_chat is None
 
-    chat_item = {
+    chat_item_1 = {
         "author": "GrievingSeeker",
         "message": "My mother died three months ago. Where is she now?",
         "is_superchat": False,
     }
-    app.chat_history.append(chat_item)
+    app.chat_history.append(chat_item_1)
 
-    event = CommentEvent(
+    event_1 = CommentEvent(
         prompt_trigger="Chat message from @GrievingSeeker: 'My mother died three months ago. Where is she now?'",
         event_type="chat",
         priority=5,
-        chat_item=chat_item,
+        chat_item=chat_item_1,
+    )
+
+    chat_item_2 = {
+        "author": "ZenPhilosopher",
+        "message": "What is the sound of one hand clapping?",
+        "is_superchat": False,
+    }
+    app.chat_history.append(chat_item_2)
+
+    event_2 = CommentEvent(
+        prompt_trigger="Chat message from @ZenPhilosopher: 'What is the sound of one hand clapping?'",
+        event_type="chat",
+        priority=5,
+        chat_item=chat_item_2,
     )
 
     async def _test():
         # Mock TTS queue_speech to avoid hardware dependency
         async def mock_queue_speech(txt):
-            # While speech is queued, verify pinned chat is active
             assert app.current_pinned_chat is not None
-            assert app.current_pinned_chat["author"] == "GrievingSeeker"
 
         async def mock_wait():
             pass
@@ -135,9 +147,19 @@ def test_app_turn_pinning_lifecycle():
         app.tts.queue_speech = mock_queue_speech
         app.tts.wait_until_speech_completed = mock_wait
 
-        await app._execute_ai_turn(event)
-        # Verify that after turn completion, pinned chat is cleared
-        assert app.current_pinned_chat is None
+        # Turn 1: Process Question 1
+        await app._execute_ai_turn(event_1)
+        # Verify that after Turn 1 completion, Question 1 and response REMAIN displayed until next event
+        assert app.current_pinned_chat is not None
+        assert app.current_pinned_chat["author"] == "GrievingSeeker"
+        assert len(app.current_ai_subtitle) > 0
+
+        # Turn 2: Process Question 2
+        await app._execute_ai_turn(event_2)
+        # Verify that Question 2 seamlessly takes over and stays displayed
+        assert app.current_pinned_chat is not None
+        assert app.current_pinned_chat["author"] == "ZenPhilosopher"
+        assert len(app.current_ai_subtitle) > 0
 
     asyncio.run(_test())
 
@@ -149,16 +171,27 @@ def test_zero_flash_subtitle_transitions():
     vis.ai_text_alpha = 1.0
     vis.ai_text_current = "This is the previous oracle comment from 5 minutes ago."
 
-    # Clear subtitle targets void
+    # Clear subtitle resets target to motto phrase
     vis.clear_subtitle()
-    assert vis.ai_text_target == ""
-    assert vis.ai_text_state in ("fade_out", "idle_empty")
+    assert vis.ai_text_target == "Everything is perfect."
 
     # Setting new subtitle starts cleanly from alpha 0.0 without flashing old text
     vis.set_subtitle("This is the brand new statement.")
     assert vis.ai_text_current == "This is the brand new statement."
     assert vis.ai_text_alpha == 0.0
     assert vis.ai_text_state == "fade_in"
+
+
+def test_motto_display_when_idle():
+    """Verifies that the motto 'Everything is perfect.' is displayed when there is nothing to display."""
+    vis = Visualizer(width=1920, height=1080)
+    # Initial state (nothing to display)
+    assert vis.ai_text_target == "Everything is perfect."
+    assert vis.ai_text_current == "Everything is perfect."
+
+    # When clear_subtitle is called, returns to motto
+    vis.clear_subtitle()
+    assert vis.ai_text_target == "Everything is perfect."
 
 
 def test_pinned_comment_persists_during_oracle_statement():
@@ -253,6 +286,10 @@ if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
     print("Visualizer Pinned Chat Rendering Passed!")
+
+    print("Testing Motto Display When Idle...")
+    test_motto_display_when_idle()
+    print("Motto Display When Idle Passed!")
 
     print("Testing Question Fade In / Out Animation...")
     test_question_fade_in_out_animation()

@@ -832,12 +832,7 @@ class LocalCoHostApp:
                 t_total = time.perf_counter() - t_start
                 logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
 
-                # Hold final Oracle response & pinned question on screen for a post-speech absorption linger (~2.0s)
-                await asyncio.sleep(2.0)
-
-                # Gracefully clear subtitle and unpin question together
-                self.visualizer.clear_subtitle()
-                self.current_ai_subtitle = ""
+                # Note: Leave current_pinned_chat and current_ai_subtitle displayed on screen continuously until next event!
 
                 # 6. Record turn to in-session conversational thread memory (C2)
                 m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
@@ -868,20 +863,13 @@ class LocalCoHostApp:
                     )
             else:
                 logger.warning(f"Incomplete, truncated, or empty response generated ('{clean_speech}'). Suppressing subtitle card.")
-                self.visualizer.clear_subtitle()
-                self.current_ai_subtitle = ""
 
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
-            self.visualizer.clear_subtitle()
-            self.current_ai_subtitle = ""
             self.tts.clear_audio_buffer()
         except Exception as e:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
-            self.visualizer.clear_subtitle()
-            self.current_ai_subtitle = ""
         finally:
-            self.current_pinned_chat = None
             self.last_activity_time = time.time()
             self.last_spontaneous_time = time.time()
 

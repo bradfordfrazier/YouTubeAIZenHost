@@ -484,6 +484,11 @@ class Visualizer:
         self.ai_text_y_drift = 0.0
         self.motto_pause_timer = 0.0
 
+        # Live chat pinned question card animation state (synchronized dissolution with Oracle comment)
+        self.pinned_chat_alpha = 0.0
+        self.pinned_chat_state = "idle"  # "fade_in", "steady", "fade_out", "idle"
+        self.pinned_chat_stored: Optional[Dict] = None
+
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
         # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
         self._bloom_sprites = {}
@@ -579,14 +584,15 @@ class Visualizer:
             self.mood_lerp_factor = 0.0
 
     def clear_subtitle(self):
-        """Immediately resets subtitle text to motto when there is nothing to display."""
+        """Resets subtitle text to motto, initiating smooth synchronized dissolution of Oracle comment & pinned question."""
         self.is_empty_hold = False
         self.subtitle_target_text = ""
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
         self.ai_text_target = motto
-        if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05:
+        if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.01:
             self.ai_text_state = "fade_out"
-        elif self.ai_text_state == "motto_pause":
+            self.pinned_chat_state = "fade_out"
+        elif self.ai_text_state in ("motto_pause", "fade_out"):
             pass
         else:
             self.ai_text_current = ""
@@ -594,12 +600,6 @@ class Visualizer:
             self.ai_text_state = "motto_pause"
             self.motto_pause_timer = 2.0
             self._active_pinned_message = None
-        self.ai_text_y_drift = 0.0
-        self.question_fade_alpha = 0.0
-        self.question_fade_state = "idle"
-        self.question_y_drift = 0.0
-        self.active_question_text = ""
-        self.active_question_start_time = 0.0
 
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
@@ -1216,14 +1216,34 @@ class Visualizer:
         # 3. PINNED ACTIVE QUESTION HIGHLIGHT (When Oracle is Responding)
         # ----------------------------------------------------------------------
         pinned_msg_text = ""
+        dt = 1.0 / self.fps
         if pinned_message and isinstance(pinned_message, dict):
-            pin_raw_auth = pinned_message.get("author", "Viewer").strip().lstrip("@")
+            self.pinned_chat_stored = pinned_message
+            if self.pinned_chat_state != "steady":
+                self.pinned_chat_state = "fade_in"
+                self.pinned_chat_alpha = min(1.0, self.pinned_chat_alpha + dt * 2.5)
+                if self.pinned_chat_alpha >= 1.0:
+                    self.pinned_chat_alpha = 1.0
+                    self.pinned_chat_state = "steady"
+        else:
+            if self.pinned_chat_state in ("fade_in", "steady"):
+                self.pinned_chat_state = "fade_out"
+            if self.pinned_chat_state == "fade_out":
+                self.pinned_chat_alpha = max(0.0, self.pinned_chat_alpha - dt * 0.85)
+                if self.pinned_chat_alpha <= 0.0:
+                    self.pinned_chat_alpha = 0.0
+                    self.pinned_chat_state = "idle"
+                    self.pinned_chat_stored = None
+
+        if self.pinned_chat_alpha > 0.005 and self.pinned_chat_stored:
+            target_pin = self.pinned_chat_stored
+            pin_raw_auth = target_pin.get("author", "Viewer").strip().lstrip("@")
             pin_clean_auth = f"@{pin_raw_auth.replace(' ', '')}"
-            pin_msg = pinned_message.get("message", "").strip()
+            pin_msg = target_pin.get("message", "").strip()
             pinned_msg_text = pin_msg
-            pin_is_sc = pinned_message.get("is_superchat", False)
-            pin_is_cast = pinned_message.get("is_cast", False) or pinned_message.get("author_type") == "cast"
-            pin_amount = pinned_message.get("amount", "")
+            pin_is_sc = target_pin.get("is_superchat", False)
+            pin_is_cast = target_pin.get("is_cast", False) or target_pin.get("author_type") == "cast"
+            pin_amount = target_pin.get("amount", "")
 
             # Text wrapping for pinned message
             max_pin_text_w = card_w - (pad_x * 2 + 24)
@@ -1258,13 +1278,14 @@ class Visualizer:
                 pin_border_col = (0, 240, 255)
                 pin_auth_col = (100, 245, 255)
 
-            # Glassmorphic glowing pinned background container
+            # Glassmorphic glowing pinned background container with smooth alpha fading
+            pin_alpha_int = int(np.clip(self.pinned_chat_alpha * 255, 0, 255))
             pin_surf = pygame.Surface((pin_box_w, pin_box_h), pygame.SRCALPHA)
-            pygame.draw.rect(pin_surf, (14, 22, 42, 240), (0, 0, pin_box_w, pin_box_h), border_radius=12)
-            pygame.draw.rect(pin_surf, (24, 40, 72, 220), (2, 2, pin_box_w - 4, pin_box_h - 4), border_radius=10)
+            pygame.draw.rect(pin_surf, (14, 22, 42, int(240 * self.pinned_chat_alpha)), (0, 0, pin_box_w, pin_box_h), border_radius=12)
+            pygame.draw.rect(pin_surf, (24, 40, 72, int(220 * self.pinned_chat_alpha)), (2, 2, pin_box_w - 4, pin_box_h - 4), border_radius=10)
             pygame.draw.rect(
                 pin_surf,
-                (*pin_border_col, int(220 * border_pulse)),
+                (*pin_border_col, int(220 * border_pulse * self.pinned_chat_alpha)),
                 (0, 0, pin_box_w, pin_box_h),
                 width=2,
                 border_radius=12,
@@ -1273,18 +1294,21 @@ class Visualizer:
             # Top right "PINNED / ANSWERING" badge pill inside pinned container
             pin_badge_tag = "PINNED QUESTION"
             pin_badge_txt = self.font_callout_tag.render(pin_badge_tag, True, (255, 215, 0))
+            pin_badge_txt.set_alpha(pin_alpha_int)
             pin_badge_w = pin_badge_txt.get_width() + 16
             pin_badge_h = 20 if self.is_vertical else 18
             pin_badge_x = pin_box_w - pin_badge_w - 8
             pin_badge_y = 6
-            pygame.draw.rect(pin_surf, (255, 215, 0, 40), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), border_radius=4)
-            pygame.draw.rect(pin_surf, (255, 215, 0, 180), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), width=1, border_radius=4)
+            pygame.draw.rect(pin_surf, (255, 215, 0, int(40 * self.pinned_chat_alpha)), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), border_radius=4)
+            pygame.draw.rect(pin_surf, (255, 215, 0, int(180 * self.pinned_chat_alpha)), (pin_badge_x, pin_badge_y, pin_badge_w, pin_badge_h), width=1, border_radius=4)
             pin_surf.blit(pin_badge_txt, (pin_badge_x + 8, pin_badge_y + (2 if self.is_vertical else 1)))
 
             # Author line inside pinned container
             pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
             auth_sh = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
+            auth_sh.set_alpha(int(pin_alpha_int * 0.9))
             auth_rend = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
+            auth_rend.set_alpha(pin_alpha_int)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
             pin_surf.blit(auth_rend, (10, 6))
 
@@ -1293,12 +1317,15 @@ class Visualizer:
             for idx, l_text in enumerate(display_pin_lines):
                 line_y = msg_y_start + idx * line_h
                 line_sh = self.font_chat_msg.render(l_text, True, (0, 0, 0))
+                line_sh.set_alpha(int(pin_alpha_int * 0.9))
                 line_rend = self.font_chat_msg.render(l_text, True, (255, 255, 255))
+                line_rend.set_alpha(pin_alpha_int)
                 pin_surf.blit(line_sh, (10 + sh_off, line_y + sh_off))
                 pin_surf.blit(line_rend, (10, line_y))
 
+            pin_surf.set_alpha(pin_alpha_int)
             self.surf_chat_card.blit(pin_surf, (pad_x, y_offset))
-            y_offset += pin_box_h + (14 if self.is_vertical else 10)
+            y_offset += int(pin_box_h * self.pinned_chat_alpha) + (14 if self.is_vertical else 10)
 
         # ----------------------------------------------------------------------
         # 4. CHRONOLOGICAL RECENT CHAT MESSAGES

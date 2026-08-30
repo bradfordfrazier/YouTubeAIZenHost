@@ -778,6 +778,17 @@ class LocalCoHostApp:
         else:
             self.current_pinned_chat = None
 
+        # Ensure active question is present in live chat feed (appended to bottom if not already present)
+        if self.current_pinned_chat:
+            p_author = self.current_pinned_chat.get("author", "").strip()
+            p_msg = self.current_pinned_chat.get("message", "").strip()
+            if not any(
+                e.get("author", "").strip().lower().lstrip("@") == p_author.lower().lstrip("@")
+                and e.get("message", "").strip() == p_msg
+                for e in self.chat_history
+            ):
+                self.chat_history.append(dict(self.current_pinned_chat))
+
         # Calculate minimum reading duration for the question if present
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:

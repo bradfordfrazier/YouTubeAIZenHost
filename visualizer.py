@@ -1213,9 +1213,8 @@ class Visualizer:
         sh_off = 2 if self.is_vertical else 1
 
         # ----------------------------------------------------------------------
-        # 3. PINNED ACTIVE QUESTION HIGHLIGHT (When Oracle is Responding)
+        # 3. ACTIVE CHAT QUESTION IDENTIFICATION & PIN DOCKING CALCULATION
         # ----------------------------------------------------------------------
-        pinned_msg_text = ""
         dt = 1.0 / self.fps
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
@@ -1240,12 +1239,40 @@ class Visualizer:
                     self.pinned_chat_state = "idle"
                     self.pinned_chat_stored = None
 
-        if self.pinned_chat_alpha > 0.005 and self.pinned_chat_stored:
-            target_pin = self.pinned_chat_stored
+        if chat_messages:
+            self._cached_chat_messages = list(chat_messages)
+        display_msgs = chat_messages if chat_messages else self._cached_chat_messages
+
+        # Identify location of active question in the chat feed
+        target_pin = self.pinned_chat_stored
+        has_active_question = bool(self.pinned_chat_alpha > 0.005 and target_pin)
+        active_auth = (target_pin.get("author", "").strip().lower().lstrip("@")) if has_active_question else ""
+        active_msg = (target_pin.get("message", "").strip()) if has_active_question else ""
+
+        active_idx = -1
+        if has_active_question and display_msgs:
+            for i in range(len(display_msgs) - 1, -1, -1):
+                item_auth = display_msgs[i].get("author", "").strip().lower().lstrip("@")
+                item_msg = display_msgs[i].get("message", "").strip()
+                if item_auth == active_auth and item_msg == active_msg:
+                    active_idx = i
+                    break
+
+        # Feed capacity: how many normal messages fit vertically in the card
+        visible_feed_capacity = 5 if self.is_vertical else 4
+        msgs_after_active = (len(display_msgs) - 1 - active_idx) if active_idx != -1 else 999
+
+        # Pin at top if active question is pushed to the top (or off the top) by incoming messages
+        # When active_idx == -1 (not in feed list), it also pins at top if active
+        is_pinned_at_top = has_active_question and (active_idx == -1 or msgs_after_active >= (visible_feed_capacity - 1))
+
+        # ----------------------------------------------------------------------
+        # 4. RENDER TOP PINNED CONTAINER (When Docked at Top)
+        # ----------------------------------------------------------------------
+        if is_pinned_at_top and target_pin:
             pin_raw_auth = target_pin.get("author", "Viewer").strip().lstrip("@")
             pin_clean_auth = f"@{pin_raw_auth.replace(' ', '')}"
             pin_msg = target_pin.get("message", "").strip()
-            pinned_msg_text = pin_msg
             pin_is_sc = target_pin.get("is_superchat", False)
             pin_is_cast = target_pin.get("is_cast", False) or target_pin.get("author_type") == "cast"
             pin_amount = target_pin.get("amount", "")
@@ -1296,7 +1323,7 @@ class Visualizer:
                 border_radius=12,
             )
 
-            # Top right "PINNED / ANSWERING" badge pill inside pinned container
+            # Top right "PINNED QUESTION" badge pill inside pinned container
             pin_badge_tag = "PINNED QUESTION"
             pin_badge_txt = self.font_callout_tag.render(pin_badge_tag, True, (255, 215, 0))
             pin_badge_txt.set_alpha(pin_alpha_int)
@@ -1333,16 +1360,21 @@ class Visualizer:
             y_offset += int(pin_box_h * self.pinned_chat_alpha) + (14 if self.is_vertical else 10)
 
         # ----------------------------------------------------------------------
-        # 4. CHRONOLOGICAL RECENT CHAT MESSAGES
+        # 5. CHRONOLOGICAL LIVE CHAT MESSAGES (With In-Feed Row Highlight)
         # ----------------------------------------------------------------------
-        if chat_messages:
-            self._cached_chat_messages = list(chat_messages)
-        display_msgs = chat_messages if chat_messages else self._cached_chat_messages
+        if is_pinned_at_top:
+            # Exclude active question from lower scrolling area to prevent duplicate display
+            scrolling_msgs = [
+                m for m in display_msgs
+                if not (m.get("author", "").strip().lower().lstrip("@") == active_auth and m.get("message", "").strip() == active_msg)
+            ]
+            max_msgs = (3 if self.is_vertical else 2)
+            recent_chats = scrolling_msgs[-max_msgs:] if scrolling_msgs else []
+        else:
+            max_msgs = visible_feed_capacity
+            recent_chats = display_msgs[-max_msgs:] if display_msgs else []
 
-        max_msgs = (4 if self.is_vertical else 3) if pinned_message else (5 if self.is_vertical else 4)
-        recent_chats = display_msgs[-max_msgs:] if display_msgs else []
-
-        if not recent_chats and not pinned_message:
+        if not recent_chats and not is_pinned_at_top:
             empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
             empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (140, 165, 200))
             self.surf_chat_card.blit(empty_txt_sh, (pad_x + 1, y_offset + 1))
@@ -1356,8 +1388,16 @@ class Visualizer:
                 msg = item.get("message", "").strip()
                 amount = item.get("amount", "")
 
+                # Check if this item is the active question currently in-feed
+                is_active_row = bool(
+                    has_active_question
+                    and not is_pinned_at_top
+                    and raw_author.lower() == active_auth
+                    and msg == active_msg
+                )
+
                 # Text wrapping
-                max_text_w = card_w - (pad_x * 2 + 10)
+                max_text_w = card_w - (pad_x * 2 + (24 if is_active_row else 10))
                 words = msg.split(" ")
                 wrapped_lines = []
                 cur_l = ""
@@ -1373,39 +1413,93 @@ class Visualizer:
                     wrapped_lines.append(cur_l)
 
                 display_lines = wrapped_lines[:2] if wrapped_lines else [""]
-                item_h = auth_h + len(display_lines) * line_h + (8 if self.is_vertical else 4)
+                item_h = auth_h + len(display_lines) * line_h + (10 if is_active_row else (8 if self.is_vertical else 4))
 
                 if y_offset + item_h > max_content_y:
                     break
 
+                sc_badge_str = f" [{amount}]" if is_sc else ""
+
                 if is_sc:
                     author_color = (255, 215, 0)
                     msg_color = (255, 252, 245)
+                    row_border_col = (255, 215, 0)
                 elif is_cast:
                     author_color = (215, 140, 255)
                     msg_color = (245, 238, 255)
+                    row_border_col = (215, 140, 255)
                 else:
                     author_color = (0, 235, 255)
                     msg_color = (255, 255, 255)
+                    row_border_col = (0, 240, 255)
 
-                sc_badge_str = f" [{amount}]" if is_sc else ""
+                if is_active_row:
+                    # ----------------------------------------------------------
+                    # IN-FEED ACTIVE ROW HIGHLIGHT (Glowing glass container around row)
+                    # ----------------------------------------------------------
+                    row_w = card_w - (pad_x * 2)
+                    row_alpha = self.pinned_chat_alpha
+                    row_alpha_int = int(np.clip(row_alpha * 255, 0, 255))
+                    border_pulse = 0.85 + 0.15 * math.sin(self.time_elapsed * 5.0)
 
-                # Author row with dark drop-shadow for crisp edge definition
-                auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
-                auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
-                self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
+                    row_surf = pygame.Surface((row_w, item_h), pygame.SRCALPHA)
+                    pygame.draw.rect(row_surf, (14, 22, 42, int(220 * row_alpha)), (0, 0, row_w, item_h), border_radius=10)
+                    pygame.draw.rect(row_surf, (24, 40, 72, int(180 * row_alpha)), (2, 2, row_w - 4, item_h - 4), border_radius=8)
+                    pygame.draw.rect(
+                        row_surf,
+                        (*row_border_col, int(220 * border_pulse * row_alpha)),
+                        (0, 0, row_w, item_h),
+                        width=2,
+                        border_radius=10,
+                    )
 
-                # Message lines with bold typography and crisp drop shadow
-                msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
-                for line_idx, line_text in enumerate(display_lines):
-                    line_y = msg_start_y + line_idx * line_h
-                    line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                    self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
-                    line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                    self.surf_chat_card.blit(line_rend, (pad_x, line_y))
+                    # Pill badge "ACTIVE"
+                    badge_txt = self.font_callout_tag.render("ACTIVE", True, row_border_col)
+                    badge_txt.set_alpha(row_alpha_int)
+                    badge_w = badge_txt.get_width() + 14
+                    badge_h = 18 if self.is_vertical else 16
+                    badge_x = row_w - badge_w - 6
+                    badge_y = 5
+                    pygame.draw.rect(row_surf, (*row_border_col, int(40 * row_alpha)), (badge_x, badge_y, badge_w, badge_h), border_radius=4)
+                    pygame.draw.rect(row_surf, (*row_border_col, int(180 * row_alpha)), (badge_x, badge_y, badge_w, badge_h), width=1, border_radius=4)
+                    row_surf.blit(badge_txt, (badge_x + 7, badge_y + (1 if self.is_vertical else 0)))
 
-                y_offset += item_h + (12 if self.is_vertical else 10)
+                    # Author & Message lines inside row_surf
+                    auth_sh = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                    auth_sh.set_alpha(int(row_alpha_int * 0.9))
+                    auth_rend = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, author_color)
+                    auth_rend.set_alpha(row_alpha_int)
+                    row_surf.blit(auth_sh, (8 + sh_off, 4 + sh_off))
+                    row_surf.blit(auth_rend, (8, 4))
+
+                    msg_start_y = 4 + auth_h - (2 if self.is_vertical else 0)
+                    for line_idx, line_text in enumerate(display_lines):
+                        line_y = msg_start_y + line_idx * line_h
+                        line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
+                        line_sh.set_alpha(int(row_alpha_int * 0.9))
+                        line_rend = self.font_chat_msg.render(line_text, True, msg_color)
+                        line_rend.set_alpha(row_alpha_int)
+                        row_surf.blit(line_sh, (8 + sh_off, line_y + sh_off))
+                        row_surf.blit(line_rend, (8, line_y))
+
+                    self.surf_chat_card.blit(row_surf, (pad_x, y_offset))
+                    y_offset += item_h + (10 if self.is_vertical else 8)
+                else:
+                    # Standard unhighlighted chat row
+                    auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                    self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
+                    auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
+                    self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
+
+                    msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
+                    for line_idx, line_text in enumerate(display_lines):
+                        line_y = msg_start_y + line_idx * line_h
+                        line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
+                        self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
+                        line_rend = self.font_chat_msg.render(line_text, True, msg_color)
+                        self.surf_chat_card.blit(line_rend, (pad_x, line_y))
+
+                    y_offset += item_h + (12 if self.is_vertical else 10)
 
         self.screen.blit(self.surf_chat_card, (card_x, card_y))
 

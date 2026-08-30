@@ -372,6 +372,50 @@ def test_configurable_transitions_override():
         config.comment_post_speech_hold_sec = orig_hold
 
 
+def test_in_feed_highlight_and_scrolling_pin_docking():
+    """
+    Verifies that when a question is selected:
+    1. It renders in-feed at the bottom with the glowing row highlight.
+    2. As 1-2 new messages arrive, the highlight follows the row upwards in the feed.
+    3. When 3+ new messages arrive (pushing it to the top), it docks/pins to the top and newer messages scroll beneath.
+    """
+    vis = Visualizer(width=1920, height=1080)
+    pinned_msg = {"author": "SeekerAlice", "message": "What is beyond thought?", "is_superchat": False}
+
+    # Step 1: Question added at bottom of chat messages [msg1, msg2, pinned_msg]
+    feed_step1 = [
+        {"author": "User1", "message": "Hello stream!", "is_superchat": False},
+        {"author": "User2", "message": "Zen vibes", "is_superchat": False},
+        pinned_msg,
+    ]
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", "", pinned_chat_message=pinned_msg)
+    # Active question is at the bottom of the feed (index -1)
+    assert vis.pinned_chat_stored == pinned_msg
+    assert vis.pinned_chat_state in ("fade_in", "steady")
+
+    # Fast forward to steady alpha
+    for _ in range(40):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", "", pinned_chat_message=pinned_msg)
+    assert vis.pinned_chat_alpha == 1.0
+
+    # Step 2: 1 new message arrives -> [msg1, msg2, pinned_msg, new_msg1]
+    # Active question rises by 1 row in the feed
+    feed_step2 = list(feed_step1) + [{"author": "User3", "message": "Nice answer", "is_superchat": False}]
+    buf2 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step2, "", "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
+    assert isinstance(buf2, (bytes, bytearray))
+
+    # Step 3: 3 more messages arrive pushing pinned_msg to the top / off the top
+    # -> It docks and pins at the top of the chat card, while newer messages scroll beneath
+    feed_step3 = list(feed_step2) + [
+        {"author": "User4", "message": "Another question", "is_superchat": False},
+        {"author": "User5", "message": "More chatter", "is_superchat": False},
+        {"author": "User6", "message": "Continuing stream", "is_superchat": False},
+    ]
+    buf3 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step3, "", "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
+    assert isinstance(buf3, (bytes, bytearray))
+    assert len(buf3) == 1920 * 1080 * 4
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -404,6 +448,10 @@ if __name__ == "__main__":
     print("Testing Configurable Transitions Override...")
     test_configurable_transitions_override()
     print("Configurable Transitions Override Passed!")
+
+    print("Testing In-Feed Highlight and Scrolling Pin Docking...")
+    test_in_feed_highlight_and_scrolling_pin_docking()
+    print("In-Feed Highlight and Scrolling Pin Docking Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

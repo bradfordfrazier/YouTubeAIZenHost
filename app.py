@@ -860,14 +860,14 @@ class LocalCoHostApp:
                         concurrent_viewers=self.concurrent_viewers,
                     )
 
-                # 8. Post-Speech 10-Second Hold: Display comment & pinned chat for exactly 10.0s after speech ends, then fade out, unpin, and fade in motto
-                logger.info("⏳ [Post-Speech Hold] Holding Oracle comment & pinned question for 10.0s before motto transition...")
+                # 8. Post-Speech 15-Second Hold: Display comment & pinned chat for exactly 15.0s after speech ends, then fade out, unpin, pause 2s, and fade in motto
+                logger.info("⏳ [Post-Speech Hold] Holding Oracle comment & pinned question for 15.0s before motto transition...")
                 try:
-                    await asyncio.sleep(10.0)
+                    await asyncio.sleep(15.0)
                 except asyncio.CancelledError:
                     pass
 
-                logger.info("✨ [Motto Transition] 10s post-speech hold finished. Unpinning question and transitioning to motto.")
+                logger.info("✨ [Motto Transition] 15s post-speech hold finished. Unpinning question and transitioning to motto.")
                 self.current_pinned_chat = None
                 self.current_ai_subtitle = ""
                 self.visualizer.clear_subtitle()

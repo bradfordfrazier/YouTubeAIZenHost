@@ -482,6 +482,7 @@ class Visualizer:
         self.ai_text_alpha = 1.0          # Start with motto visible when there is nothing to display
         self.ai_text_state = "steady"
         self.ai_text_y_drift = 0.0
+        self.motto_pause_timer = 0.0
 
         # Pre-render high-resolution multi-layer radial corona / bloom sprites for all moods
         # Inside bright circle scaled to half size (~85px when scaled to 228px visualizer core)
@@ -585,10 +586,13 @@ class Visualizer:
         self.ai_text_target = motto
         if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05:
             self.ai_text_state = "fade_out"
+        elif self.ai_text_state == "motto_pause":
+            pass
         else:
-            self.ai_text_current = motto
-            self.ai_text_alpha = 1.0
-            self.ai_text_state = "steady"
+            self.ai_text_current = ""
+            self.ai_text_alpha = 0.0
+            self.ai_text_state = "motto_pause"
+            self.motto_pause_timer = 2.0
             self._active_pinned_message = None
         self.ai_text_y_drift = 0.0
         self.question_fade_alpha = 0.0
@@ -1547,16 +1551,22 @@ class Visualizer:
             desired_target = self.subtitle_target_text
 
         # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
-        if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in")):
+        if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in", "motto_pause")):
             self.ai_text_target = desired_target
             # If current statement is visible and different from desired target, fade it out first!
             if self.ai_text_current and self.ai_text_current != desired_target and self.ai_text_alpha > 0.05:
                 self.ai_text_state = "fade_out"
             elif desired_target:
-                self.ai_text_current = desired_target
-                self.ai_text_alpha = 0.0
-                self.ai_text_state = "fade_in"
-                self.ai_text_y_drift = 6.0
+                if desired_target == motto:
+                    self.ai_text_current = ""
+                    self.ai_text_alpha = 0.0
+                    self.ai_text_state = "motto_pause"
+                    self.motto_pause_timer = 2.0
+                else:
+                    self.ai_text_current = desired_target
+                    self.ai_text_alpha = 0.0
+                    self.ai_text_state = "fade_in"
+                    self.ai_text_y_drift = 6.0
             else:
                 self.ai_text_current = ""
                 self.ai_text_alpha = 0.0
@@ -1568,14 +1578,28 @@ class Visualizer:
             self.ai_text_y_drift = -4.0 * (1.0 - max(0.0, self.ai_text_alpha))
             if self.ai_text_alpha <= 0.0:
                 self.ai_text_alpha = 0.0
-                self.ai_text_current = self.ai_text_target
                 self.ai_text_y_drift = 6.0
-                if self.ai_text_current:
+                self._active_pinned_message = None
+                if self.ai_text_target == motto:
+                    self.ai_text_current = ""
+                    self.ai_text_state = "motto_pause"
+                    self.motto_pause_timer = 2.0
+                elif self.ai_text_target:
+                    self.ai_text_current = self.ai_text_target
                     self.ai_text_state = "fade_in"
                 else:
+                    self.ai_text_current = ""
                     self.ai_text_state = "idle_empty"
-                if not self.ai_text_current or self.ai_text_current == motto:
-                    self._active_pinned_message = None
+
+        elif self.ai_text_state == "motto_pause":
+            self.ai_text_alpha = 0.0
+            self.ai_text_y_drift = 0.0
+            self.motto_pause_timer -= dt
+            if self.motto_pause_timer <= 0.0:
+                self.ai_text_current = motto
+                self.ai_text_alpha = 0.0
+                self.ai_text_state = "fade_in"
+                self.ai_text_y_drift = 6.0
 
         elif self.ai_text_state == "fade_in":
             self.ai_text_alpha += dt * 2.2  # ~0.45s graceful emergence from nowhere

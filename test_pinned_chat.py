@@ -163,10 +163,71 @@ def test_zero_flash_subtitle_transitions():
     assert vis.ai_text_state == "fade_in"
 
 
+def test_question_fade_in_out_animation():
+    """Verifies that the chat question in center panel fades in, holds, and fades out cleanly."""
+    vis = Visualizer(width=1920, height=1080)
+    pinned_msg = {
+        "author": "Alice",
+        "message": "Do stars dream?",
+        "is_superchat": False,
+    }
+    audio_metrics = {"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}
+
+    # 1. Initial Frame: Question detected, starts fade_in
+    vis.render_frame(
+        audio_metrics=audio_metrics,
+        chat_messages=[],
+        host_transcript="",
+        ai_subtitle="",
+        pinned_chat_message=pinned_msg,
+    )
+    assert vis.question_fade_state in ("fade_in", "steady")
+    assert vis.question_fade_alpha > 0.0
+
+    # Step through frames to reach full steady state
+    for _ in range(30):
+        vis.render_frame(
+            audio_metrics=audio_metrics,
+            chat_messages=[],
+            host_transcript="",
+            ai_subtitle="",
+            pinned_chat_message=pinned_msg,
+        )
+    assert vis.question_fade_state == "steady"
+    assert vis.question_fade_alpha == 1.0
+
+    # 2. Fast-forward linger time and trigger speech -> starts fade_out
+    vis.active_question_start_time = 0.0  # Force elapsed > linger
+    vis.render_frame(
+        audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
+        chat_messages=[],
+        host_transcript="",
+        ai_subtitle="Stars are the dreaming eye of the universe.",
+        pinned_chat_message=pinned_msg,
+    )
+    assert vis.question_fade_state in ("fade_out", "idle")
+
+    # Step through frames until question fade_out completes
+    for _ in range(40):
+        vis.render_frame(
+            audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
+            chat_messages=[],
+            host_transcript="",
+            ai_subtitle="Stars are the dreaming eye of the universe.",
+            pinned_chat_message=pinned_msg,
+        )
+    assert vis.question_fade_state == "idle"
+    assert vis.question_fade_alpha == 0.0
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
     print("Visualizer Pinned Chat Rendering Passed!")
+
+    print("Testing Question Fade In / Out Animation...")
+    test_question_fade_in_out_animation()
+    print("Question Fade In / Out Animation Passed!")
 
     print("Testing Zero-Flash Subtitle Transitions...")
     test_zero_flash_subtitle_transitions()
@@ -175,4 +236,4 @@ if __name__ == "__main__":
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()
     print("App Turn Pinning Lifecycle Passed!")
-    print("\nALL PINNED CHAT & READABILITY TESTS PASSED 100%!")
+    print("\nALL PINNED CHAT, ANIMATION & READABILITY TESTS PASSED 100%!")

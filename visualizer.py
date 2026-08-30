@@ -470,6 +470,9 @@ class Visualizer:
         self.is_empty_hold = False
         self.active_question_text = ""
         self.active_question_start_time = 0.0
+        self.question_fade_alpha = 0.0
+        self.question_fade_state = "idle"  # "fade_in", "steady", "fade_out", "idle"
+        self.question_y_drift = 0.0
 
         # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
         self.ai_text_current = ""
@@ -581,6 +584,11 @@ class Visualizer:
         self.ai_text_alpha = 0.0
         self.ai_text_state = "idle_empty"
         self.ai_text_y_drift = 0.0
+        self.question_fade_alpha = 0.0
+        self.question_fade_state = "idle"
+        self.question_y_drift = 0.0
+        self.active_question_text = ""
+        self.active_question_start_time = 0.0
         if hasattr(self, "surf_ai_text"):
             self.surf_ai_text.fill((0, 0, 0, 0))
 
@@ -1382,45 +1390,75 @@ class Visualizer:
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
 
-        # Track active question timestamp to ensure comfortable linger duration
+        # 1. Track active question arrival and reading linger duration
+        dt = 1.0 / self.fps
         if pinned_chat_message and isinstance(pinned_chat_message, dict):
             curr_q_msg = pinned_chat_message.get("message", "").strip()
             if curr_q_msg and curr_q_msg != self.active_question_text:
                 self.active_question_text = curr_q_msg
                 self.active_question_start_time = time.time()
+                self.question_fade_alpha = 0.0
+                self.question_fade_state = "fade_in"
+                self.question_y_drift = 6.0
                 # Purge old speech text from buffer to prevent flashing of previous comment
                 self.ai_text_current = ""
                 self.ai_text_target = ""
                 self.ai_text_alpha = 0.0
                 self.ai_text_state = "idle_empty"
         else:
-            self.active_question_text = ""
-            self.active_question_start_time = 0.0
+            if self.question_fade_state not in ("fade_out", "idle"):
+                self.question_fade_state = "fade_out"
+            if self.question_fade_state == "idle":
+                self.active_question_text = ""
+                self.active_question_start_time = 0.0
 
         # Calculate word-count-based reading duration (min 3.5s, up to 7.0s)
         q_words = len(self.active_question_text.split()) if self.active_question_text else 0
         min_q_linger = max(3.5, min(7.0, 2.0 + q_words * 0.35))
         q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
 
-        # Check if we should display the incoming question preview before Oracle speech begins
+        # 2. Update Question Fade In / Steady / Fade Out State Machine
+        if self.question_fade_state == "fade_in":
+            self.question_fade_alpha += dt * 2.5  # ~0.40s graceful fade-in emergence
+            self.question_y_drift = 6.0 * (1.0 - min(1.0, self.question_fade_alpha))
+            if self.question_fade_alpha >= 1.0:
+                self.question_fade_alpha = 1.0
+                self.question_y_drift = 0.0
+                self.question_fade_state = "steady"
+
+        elif self.question_fade_state == "steady":
+            self.question_fade_alpha = 1.0
+            self.question_y_drift = 0.0
+            # If the Oracle is ready to speak or speaking AND the question has lingered long enough, trigger fade_out
+            if (is_speaking or self.subtitle_target_text) and q_time_elapsed >= (min_q_linger - 0.35):
+                self.question_fade_state = "fade_out"
+            elif not pinned_chat_message:
+                self.question_fade_state = "fade_out"
+
+        elif self.question_fade_state == "fade_out":
+            self.question_fade_alpha -= dt * 2.8  # ~0.35s graceful fade-out dissolution
+            self.question_y_drift = -4.0 * (1.0 - max(0.0, self.question_fade_alpha))
+            if self.question_fade_alpha <= 0.0:
+                self.question_fade_alpha = 0.0
+                self.question_fade_state = "idle"
+                self.question_y_drift = 0.0
+
         showing_question_preview = bool(
-            pinned_chat_message
-            and isinstance(pinned_chat_message, dict)
-            and self.active_question_text
-            and (not is_speaking or q_time_elapsed < min_q_linger)
-            and (not self.subtitle_target_text or q_time_elapsed < min_q_linger)
+            self.active_question_text
+            and self.question_fade_state in ("fade_in", "steady", "fade_out")
+            and self.question_fade_alpha > 0.005
         )
 
         if showing_question_preview:
             # ------------------------------------------------------------------
             # QUESTION PREVIEW: Display question formatted visually like chat
             # ------------------------------------------------------------------
-            raw_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@")
+            raw_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@") if pinned_chat_message else "Viewer"
             clean_author = f"@{raw_author}"
-            is_sc = pinned_chat_message.get("is_superchat", False)
-            is_cast = pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast"
-            amount = pinned_chat_message.get("amount", "")
-            msg = pinned_chat_message.get("message", "").strip()
+            is_sc = pinned_chat_message.get("is_superchat", False) if pinned_chat_message else False
+            is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast") if pinned_chat_message else False
+            amount = pinned_chat_message.get("amount", "") if pinned_chat_message else ""
+            msg = self.active_question_text or (pinned_chat_message.get("message", "").strip() if pinned_chat_message else "")
 
             cast_tag = getattr(self.cfg, "cast_tag", "CAST")
             cast_badge_str = f" [{cast_tag}]" if is_cast else ""
@@ -1460,9 +1498,9 @@ class Visualizer:
                 y_start = (card_h - total_content_h) // 2
             else:
                 y_start = 14
+            y_start += self.question_y_drift
 
-            # Subtle breathing alpha indicating contemplation
-            pulse_a = int(220 + 35 * math.sin(self.time_elapsed * 4.0))
+            alpha_int = int(np.clip(self.question_fade_alpha * 255, 0, 255))
 
             # 1. Author Header line (Centered horizontally)
             auth_str = f"💬 {clean_author}{sc_badge_str}:"
@@ -1488,7 +1526,7 @@ class Visualizer:
                 line_rend = self.font_ai_subtitle.render(line_txt, True, (255, 255, 255))
                 self.surf_ai_text.blit(line_rend, (line_x, line_y))
 
-            self.surf_ai_text.set_alpha(min(255, pulse_a))
+            self.surf_ai_text.set_alpha(alpha_int)
             self.surf_subtitle_card.blit(self.surf_ai_text, (0, 0))
             self.screen.blit(self.surf_subtitle_card, (card_x, card_y))
             return

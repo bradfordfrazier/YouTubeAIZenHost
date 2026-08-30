@@ -760,21 +760,26 @@ class LocalCoHostApp:
         elif event.event_type in ("chat", "superchat", "direct_mention", "cast", "greeting"):
             m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
             author_name = m_auth.group(1) if m_auth else ""
-            m_q = re.search(r"['\"]([^'\"]+)['\"]", event.prompt_trigger)
-            q_text = m_q.group(1) if m_q else event.prompt_trigger
-
             matched = None
             if author_name:
                 for ch in reversed(self.chat_history):
-                    if ch.get("author", "").lower().lstrip("@") == author_name.lower():
+                    if ch.get("author", "").strip().lower().lstrip("@") == author_name.lower().lstrip("@"):
                         matched = ch
                         break
-            self.current_pinned_chat = matched or {
-                "author": author_name or "Viewer",
-                "message": q_text,
-                "is_cast": (event.event_type == "cast"),
-                "is_superchat": (event.event_type == "superchat"),
-            }
+            if matched:
+                self.current_pinned_chat = matched
+            else:
+                q_text = event.prompt_trigger
+                if ": '" in event.prompt_trigger:
+                    q_text = event.prompt_trigger.split(": '", 1)[1].rstrip("'\"").strip()
+                elif ': "' in event.prompt_trigger:
+                    q_text = event.prompt_trigger.split(': "', 1)[1].rstrip("'\"").strip()
+                self.current_pinned_chat = {
+                    "author": author_name or "Viewer",
+                    "message": q_text,
+                    "is_cast": (event.event_type == "cast"),
+                    "is_superchat": (event.event_type == "superchat"),
+                }
         else:
             self.current_pinned_chat = None
 
@@ -784,10 +789,11 @@ class LocalCoHostApp:
             p_msg = self.current_pinned_chat.get("message", "").strip()
             if not any(
                 e.get("author", "").strip().lower().lstrip("@") == p_author.lower().lstrip("@")
-                and e.get("message", "").strip() == p_msg
+                and (e.get("message", "").strip() == p_msg or p_msg in e.get("message", "").strip() or e.get("message", "").strip() in p_msg)
                 for e in self.chat_history
             ):
                 self.chat_history.append(dict(self.current_pinned_chat))
+                self._save_cached_chat()
 
         # Calculate minimum reading duration for the question if present
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
@@ -1685,7 +1691,7 @@ class LocalCoHostApp:
                     prefix = f"Host @{author} in chat" if is_host_author else f"Chat message from @{author}"
                     prio = 1 if is_host_author else (3 if "direct_mention" in reason else 5)
                     ev_type = "host" if is_host_author else ("direct_mention" if "direct_mention" in reason else "chat")
-                    self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'", event_type=ev_type, priority=prio)
+                    self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
             except (KeyboardInterrupt, asyncio.CancelledError):
                 self.stop()
@@ -1740,7 +1746,7 @@ class LocalCoHostApp:
             if is_sc or should_trigger:
                 prio = 2 if is_sc else (3 if "direct_mention" in reason else 5)
                 ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
-                self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio)
+                self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
     async def cast_scheduler_task(self):
         """

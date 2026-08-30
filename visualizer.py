@@ -1222,7 +1222,23 @@ class Visualizer:
         pin_fade_out_rate = 1.0 / comment_fade_out_sec
 
         if pinned_message and isinstance(pinned_message, dict):
+            # Check if this is a newly selected pinned message
+            is_new_pin = False
+            if not self.pinned_chat_stored:
+                is_new_pin = True
+            else:
+                old_a = self.pinned_chat_stored.get("author", "").strip().lower().lstrip("@")
+                old_m = self.pinned_chat_stored.get("message", "").strip()
+                new_a = pinned_message.get("author", "").strip().lower().lstrip("@")
+                new_m = pinned_message.get("message", "").strip()
+                if old_a != new_a or old_m != new_m:
+                    is_new_pin = True
+
             self.pinned_chat_stored = pinned_message
+            if is_new_pin:
+                self.pinned_chat_state = "fade_in"
+                self.pinned_chat_alpha = 0.0
+
             if self.pinned_chat_state != "steady":
                 self.pinned_chat_state = "fade_in"
                 self.pinned_chat_alpha = min(1.0, self.pinned_chat_alpha + dt * pin_fade_in_rate)
@@ -1241,7 +1257,7 @@ class Visualizer:
 
         if chat_messages:
             self._cached_chat_messages = list(chat_messages)
-        display_msgs = chat_messages if chat_messages else self._cached_chat_messages
+        display_msgs = list(chat_messages) if chat_messages else list(self._cached_chat_messages)
 
         # Identify location of active question in the chat feed
         target_pin = self.pinned_chat_stored
@@ -1254,17 +1270,21 @@ class Visualizer:
             for i in range(len(display_msgs) - 1, -1, -1):
                 item_auth = display_msgs[i].get("author", "").strip().lower().lstrip("@")
                 item_msg = display_msgs[i].get("message", "").strip()
-                if item_auth == active_auth and item_msg == active_msg:
+                if item_auth == active_auth and (item_msg == active_msg or active_msg in item_msg or item_msg in active_msg):
                     active_idx = i
                     break
 
+        # If active question was not found in display_msgs, append it to bottom so it's guaranteed to appear immediately!
+        if has_active_question and active_idx == -1 and target_pin:
+            display_msgs.append(target_pin)
+            active_idx = len(display_msgs) - 1
+
         # Feed capacity: how many normal messages fit vertically in the card
         visible_feed_capacity = 5 if self.is_vertical else 4
-        msgs_after_active = (len(display_msgs) - 1 - active_idx) if active_idx != -1 else 999
+        msgs_after_active = (len(display_msgs) - 1 - active_idx) if active_idx != -1 else 0
 
-        # Pin at top if active question is pushed to the top (or off the top) by incoming messages
-        # When active_idx == -1 (not in feed list), it also pins at top if active
-        is_pinned_at_top = has_active_question and (active_idx == -1 or msgs_after_active >= (visible_feed_capacity - 1))
+        # Pin at top once incoming messages push it to the top of visible card (or off the top)
+        is_pinned_at_top = has_active_question and (msgs_after_active >= (visible_feed_capacity - 1))
 
         # ----------------------------------------------------------------------
         # 4. RENDER TOP PINNED CONTAINER (When Docked at Top)

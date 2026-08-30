@@ -467,6 +467,28 @@ def test_queue_aware_hold_and_direct_turn_transitions():
     asyncio.run(_test())
 
 
+def test_strict_fifo_chat_ordering():
+    """Verifies that all live chat messages are scheduled in strict FIFO arrival order, while Superchats jump ahead."""
+    app = LocalCoHostApp()
+    app.comment_queue.clear()
+    app.running = True
+
+    # 1. Chat 1 arrives
+    app._trigger_ai_turn("Chat message from @ViewerA: 'Message 1'", event_type="chat", chat_item={"author": "ViewerA", "message": "Message 1"})
+    # 2. Direct mention 2 arrives
+    app._trigger_ai_turn("Chat message from @ViewerB: '@ZenHost Message 2'", event_type="direct_mention", chat_item={"author": "ViewerB", "message": "@ZenHost Message 2"})
+    # 3. New chatter greeting arrives
+    app._trigger_ai_turn("[NEW_CHATTER_GREETING] @ViewerC: 'Message 3'", event_type="greeting", chat_item={"author": "ViewerC", "message": "Message 3"})
+    # 4. Cast member question arrives
+    app._trigger_ai_turn("Cast member @ExistentialDave asks: 'Message 4'", event_type="cast", chat_item={"author": "ExistentialDave", "message": "Message 4"})
+    # 5. Superchat arrives
+    app._trigger_ai_turn("Superchat from @VIP: '$10 Message 5'", event_type="superchat", priority=2, chat_item={"author": "VIP", "message": "$10 Message 5"})
+
+    # Verify queue order
+    authors_in_order = [e.chat_item["author"] for e in app.comment_queue]
+    assert authors_in_order == ["VIP", "ViewerA", "ViewerB", "ViewerC", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -507,6 +529,10 @@ if __name__ == "__main__":
     print("Testing Queue-Aware Hold and Direct Turn Transitions...")
     test_queue_aware_hold_and_direct_turn_transitions()
     print("Queue-Aware Hold and Direct Turn Transitions Passed!")
+
+    print("Testing Strict FIFO Chat Ordering...")
+    test_strict_fifo_chat_ordering()
+    print("Strict FIFO Chat Ordering Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

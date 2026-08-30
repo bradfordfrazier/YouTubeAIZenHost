@@ -377,14 +377,18 @@ def fetch_youtube_live_chat_backlog(video_id: str, api_key: str) -> List[Dict]:
         return []
 
 
+_EVENT_COUNTER = 0
+
+
 @dataclass
 class CommentEvent:
     """Encapsulates an incoming comment trigger with priority and lifespan."""
     prompt_trigger: str
-    event_type: str = "chat"  # "host", "superchat", "direct_mention", "greeting", "chat", "spontaneous"
-    priority: int = 5         # Lower number = higher priority (1: Host, 2: Superchat, 3: Direct Mention, 4: Greeting, 5: Chat, 10: Spontaneous)
+    event_type: str = "chat"  # "host", "superchat", "direct_mention", "greeting", "chat", "cast", "spontaneous"
+    priority: int = 5         # Lower number = higher priority (1: Host, 2: Superchat, 5: Chat/Cast, 10: Spontaneous)
     created_at: float = field(default_factory=time.time)
-    max_age_sec: float = 35.0
+    seq_id: int = 0
+    max_age_sec: float = 90.0
     force: bool = False
     chat_item: Optional[Dict[str, Any]] = None
 
@@ -628,14 +632,18 @@ class LocalCoHostApp:
         if not prompt_trigger or not self.running:
             return
 
-        # Default priorities & TTLs based on event type
+        # Default priorities & TTLs based on event type:
+        # Tier 1: Host direct mic voice commands (Priority 1) -> Real-time human interrupt
+        # Tier 2: Superchats / Memberships (Priority 2) -> Paid audience acknowledgment
+        # Tier 3: Live Chat / Greetings / Direct Mentions / Cast (Priority 5) -> Strict FIFO chronological order matching live chat feed
+        # Tier 4: Spontaneous Reflections (Priority 10) -> Idle fallback
         priority_map = {
             "host": (1, 120.0),
             "superchat": (2, 180.0),
-            "direct_mention": (3, 90.0),
-            "greeting": (4, 60.0),
+            "direct_mention": (5, 90.0),
+            "greeting": (5, 90.0),
             "chat": (5, 90.0),
-            "cast": (6, 90.0),
+            "cast": (5, 90.0),
             "spontaneous": (10, 30.0),
         }
         def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 90.0))
@@ -655,11 +663,15 @@ class LocalCoHostApp:
                 logger.debug("Suppressing spontaneous commentary: stream or AI queue is active.")
                 return
 
+        global _EVENT_COUNTER
+        _EVENT_COUNTER += 1
+
         event = CommentEvent(
             prompt_trigger=prompt_trigger,
             event_type=event_type,
             priority=prio,
             created_at=time.time(),
+            seq_id=_EVENT_COUNTER,
             max_age_sec=ttl,
             force=force,
             chat_item=chat_item,
@@ -675,8 +687,8 @@ class LocalCoHostApp:
             logger.info(f"⚡ [Forced AI Turn] Dispatched immediate interrupt for: '{prompt_trigger[:60]}...'")
             return
 
-        # Backpressure & Queue Overflow Management (Max 3 pending items)
-        max_queue = 3
+        # Backpressure & Queue Overflow Management (Max queue size)
+        max_queue = int(getattr(self.cfg, "max_comment_queue_size", 5))
         if len(self.comment_queue) >= max_queue:
             # Find lowest-priority (highest numerical value) item in queue
             lowest_prio_idx = max(range(len(self.comment_queue)), key=lambda i: self.comment_queue[i].priority)
@@ -693,11 +705,12 @@ class LocalCoHostApp:
         else:
             self.comment_queue.append(event)
 
-        # Sort queue by priority first (1=highest), then arrival time (oldest first)
-        self.comment_queue.sort(key=lambda x: (x.priority, x.created_at))
+        # Sort queue by priority first (1=Host, 2=Superchat, 5=Live Chat / Cast, 10=Spontaneous),
+        # then strictly by sequence arrival order (seq_id) to guarantee 100% FIFO order matching the chat feed.
+        self.comment_queue.sort(key=lambda x: (x.priority, x.seq_id))
         if self.new_comment_signal:
             self.new_comment_signal.set()
-        logger.info(f"📥 [Queued Comment] Added '{event_type}' (Pri: {prio}, Queue: {len(self.comment_queue)}): '{prompt_trigger[:60]}...'")
+        logger.info(f"📥 [Queued Comment] Added '{event_type}' (Pri: {prio}, Seq: {_EVENT_COUNTER}, Queue: {len(self.comment_queue)}): '{prompt_trigger[:60]}...'")
 
     async def comment_queue_scheduler_task(self):
         """
@@ -760,20 +773,33 @@ class LocalCoHostApp:
         elif event.event_type in ("chat", "superchat", "direct_mention", "cast", "greeting"):
             m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
             author_name = m_auth.group(1) if m_auth else ""
+            q_text = event.prompt_trigger
+            if ": '" in event.prompt_trigger:
+                q_text = event.prompt_trigger.split(": '", 1)[1].rstrip("'\"").strip()
+            elif ': "' in event.prompt_trigger:
+                q_text = event.prompt_trigger.split(': "', 1)[1].rstrip("'\"").strip()
+
             matched = None
             if author_name:
-                for ch in reversed(self.chat_history):
-                    if ch.get("author", "").strip().lower().lstrip("@") == author_name.lower().lstrip("@"):
-                        matched = ch
-                        break
+                # First pass: match both author and message in chronological order (FIFO)
+                for ch in self.chat_history:
+                    ch_auth = ch.get("author", "").strip().lower().lstrip("@")
+                    if ch_auth == author_name.lower().lstrip("@"):
+                        ch_msg = ch.get("message", "").strip()
+                        if q_text and (q_text in ch_msg or ch_msg in q_text):
+                            matched = ch
+                            break
+                # Second pass fallback: match author in chronological order (FIFO)
+                if not matched:
+                    for ch in self.chat_history:
+                        ch_auth = ch.get("author", "").strip().lower().lstrip("@")
+                        if ch_auth == author_name.lower().lstrip("@"):
+                            matched = ch
+                            break
+
             if matched:
                 self.current_pinned_chat = matched
             else:
-                q_text = event.prompt_trigger
-                if ": '" in event.prompt_trigger:
-                    q_text = event.prompt_trigger.split(": '", 1)[1].rstrip("'\"").strip()
-                elif ': "' in event.prompt_trigger:
-                    q_text = event.prompt_trigger.split(': "', 1)[1].rstrip("'\"").strip()
                 self.current_pinned_chat = {
                     "author": author_name or "Viewer",
                     "message": q_text,
@@ -1375,45 +1401,7 @@ class LocalCoHostApp:
                                 clean_handle = f"@{author_name.lstrip('@')}"
                                 self.brain.update_channel_identity(clean_handle, author_name, self.cfg.host_streamer_name)
 
-                        # 1. Membership / Subscription events
-                        is_member_event = (
-                            author_type in ("sponsor", "member", "new_sponsor")
-                            or "welcome to membership" in msg_lower
-                            or "became a member" in msg_lower
-                            or "joined as a member" in msg_lower
-                            or "subscribed" in msg_lower
-                        )
-                        if is_member_event:
-                            logger.info(f"🌟 [YT Event] Membership / Subscription: @{author_name} ({msg})")
-                            self.visualizer.trigger_celebration(duration=6.0)
-                            await self.trigger_obs_fx(duration_sec=6.0)
-                            if self.cfg.thank_subscribers:
-                                ev_kind = "membership" if ("member" in msg_lower or "sponsor" in author_type) else "subscription"
-                                msg_ctx = f" Message: '{msg}'." if msg else ""
-                                prompt = (
-                                    f"[NEW_MEMBER] @{author_name} just became a channel member!{msg_ctx} "
-                                    f"Give @{author_name} an enthusiastic shoutout and welcome them to the cosmic family!"
-                                    if ev_kind == "membership"
-                                    else f"[NEW_SUBSCRIBER] @{author_name} just subscribed!{msg_ctx} Shout out and thank @{author_name}!"
-                                )
-                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
-
-                        # 2. Celebration trigger in live chat
-                        is_celebrate_cmd = (
-                            msg_lower in ("celebrate!", "celebrate", "!celebrate", "party!", "let's celebrate", "lets celebrate")
-                            or msg_lower.startswith("celebrate!")
-                        )
-                        if is_celebrate_cmd:
-                            logger.info(f"🎉 [Chat Celebration Command] from @{author_name}: '{msg}'")
-                            self.visualizer.trigger_celebration(duration=5.0)
-                            await self.trigger_obs_fx(duration_sec=5.0)
-                            self._trigger_ai_turn(
-                                prompt_trigger=f"[CELEBRATION] Host @{author_name} called for a celebration: '{msg}'. Hyped celebration response!",
-                                event_type="superchat",
-                                priority=2,
-                            )
-
-                        # Record chat entry
+                        # Record chat entry immediately
                         now_ts = time.time()
                         self.chat_timestamps.append(now_ts)
                         if not is_channel_owner:
@@ -1460,6 +1448,45 @@ class LocalCoHostApp:
 
                         self._update_engagement_state()
 
+                        # 1. Membership / Subscription events
+                        is_member_event = (
+                            author_type in ("sponsor", "member", "new_sponsor")
+                            or "welcome to membership" in msg_lower
+                            or "became a member" in msg_lower
+                            or "joined as a member" in msg_lower
+                            or "subscribed" in msg_lower
+                        )
+                        if is_member_event:
+                            logger.info(f"🌟 [YT Event] Membership / Subscription: @{author_name} ({msg})")
+                            self.visualizer.trigger_celebration(duration=6.0)
+                            await self.trigger_obs_fx(duration_sec=6.0)
+                            if self.cfg.thank_subscribers:
+                                ev_kind = "membership" if ("member" in msg_lower or "sponsor" in author_type) else "subscription"
+                                msg_ctx = f" Message: '{msg}'." if msg else ""
+                                prompt = (
+                                    f"[NEW_MEMBER] @{author_name} just became a channel member!{msg_ctx} "
+                                    f"Give @{author_name} an enthusiastic shoutout and welcome them to the cosmic family!"
+                                    if ev_kind == "membership"
+                                    else f"[NEW_SUBSCRIBER] @{author_name} just subscribed!{msg_ctx} Shout out and thank @{author_name}!"
+                                )
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2, chat_item=chat_entry)
+
+                        # 2. Celebration trigger in live chat
+                        is_celebrate_cmd = (
+                            msg_lower in ("celebrate!", "celebrate", "!celebrate", "party!", "let's celebrate", "lets celebrate")
+                            or msg_lower.startswith("celebrate!")
+                        )
+                        if is_celebrate_cmd:
+                            logger.info(f"🎉 [Chat Celebration Command] from @{author_name}: '{msg}'")
+                            self.visualizer.trigger_celebration(duration=5.0)
+                            await self.trigger_obs_fx(duration_sec=5.0)
+                            self._trigger_ai_turn(
+                                prompt_trigger=f"[CELEBRATION] Host @{author_name} called for a celebration: '{msg}'. Hyped celebration response!",
+                                event_type="superchat",
+                                priority=2,
+                                chat_item=chat_entry,
+                            )
+
                         # First-time chatter tracking (never greet own handle / channel as a new chatter)
                         is_new_chatter = False
                         if not is_own_handle and author_clean:
@@ -1489,12 +1516,12 @@ class LocalCoHostApp:
                                     f"[NEW_CHATTER_GREETING] @{author_name.lstrip('@')} just sent their very first message: '{msg}'. "
                                     f"Greet @{author_name.lstrip('@')} warmly and wittily by name while responding to their comment!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4, chat_item=chat_entry)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=5, chat_item=chat_entry)
                         else:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
                                 prefix = f"Chat message from @{author_name.lstrip('@')}"
-                                prio = 2 if is_superchat else (3 if "direct_mention" in reason else 5)
+                                prio = 2 if is_superchat else 5
                                 ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
                                 self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
                             else:
@@ -1710,7 +1737,7 @@ class LocalCoHostApp:
                 should_trigger, reason = self.brain.should_trigger_response(message, is_host=is_host_author)
                 if should_trigger:
                     prefix = f"Host @{author} in chat" if is_host_author else f"Chat message from @{author}"
-                    prio = 1 if is_host_author else (3 if "direct_mention" in reason else 5)
+                    prio = 1 if is_host_author else 5
                     ev_type = "host" if is_host_author else ("direct_mention" if "direct_mention" in reason else "chat")
                     self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
@@ -1765,7 +1792,7 @@ class LocalCoHostApp:
 
             should_trigger, reason = self.brain.should_trigger_response(message, is_host=False)
             if is_sc or should_trigger:
-                prio = 2 if is_sc else (3 if "direct_mention" in reason else 5)
+                prio = 2 if is_sc else 5
                 ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
                 self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
@@ -1855,7 +1882,7 @@ class LocalCoHostApp:
                         )
 
                     prompt = f"Cast member @{persona.handle} ({persona.archetype_title}) asks: '{question}'"
-                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=6, chat_item=chat_entry)
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=5, chat_item=chat_entry)
 
             except asyncio.CancelledError:
                 break

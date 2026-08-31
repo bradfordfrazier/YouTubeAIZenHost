@@ -584,6 +584,27 @@ class Visualizer:
             self.target_mood = m_lower
             self.mood_lerp_factor = 0.0
 
+    def fade_out_for_turn(self):
+        """
+        Immediately initiates smooth fade-out of whatever is currently on screen
+        (motto or previous comment) to prepare a clean canvas for an incoming speech turn.
+        Unlike clear_subtitle(), this transitions directly to idle_empty once faded out,
+        preventing any motto pause or re-emergence before speech starts.
+        """
+        self.is_empty_hold = False
+        self.subtitle_target_text = ""
+        self.ai_text_target = ""
+        if self.ai_text_current and self.ai_text_alpha > 0.01:
+            self.ai_text_state = "fade_out"
+            self.pinned_chat_state = "fade_out"
+        elif self.ai_text_state == "fade_out":
+            pass
+        else:
+            self.ai_text_current = ""
+            self.ai_text_alpha = 0.0
+            self.ai_text_state = "idle_empty"
+            self._active_pinned_message = None
+
     def clear_subtitle(self):
         """Resets subtitle text to motto, initiating smooth synchronized dissolution of Oracle comment & pinned question."""
         self.is_empty_hold = False
@@ -595,6 +616,9 @@ class Visualizer:
             self.pinned_chat_state = "fade_out"
         elif self.ai_text_state in ("motto_pause", "fade_out"):
             pass
+        elif self.ai_text_current == motto and self.ai_text_alpha > 0.01:
+            self.ai_text_state = "steady"
+            self.ai_text_alpha = 1.0
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
@@ -612,13 +636,12 @@ class Visualizer:
         self.is_empty_hold = False
         if clean != self.subtitle_target_text:
             self.subtitle_target_text = clean
-            # When switching to a new utterance, ensure no old text flashes
-            if not self.ai_text_current or self.ai_text_state in ("idle_empty", "fade_out") or self.ai_text_current != clean:
-                self.ai_text_current = clean
-                self.ai_text_target = clean
-                self.ai_text_alpha = 0.0
-                self.ai_text_state = "fade_in"
-                self.ai_text_y_drift = 6.0
+            # When switching to a new utterance, start cleanly from alpha 0.0
+            self.ai_text_current = clean
+            self.ai_text_target = clean
+            self.ai_text_alpha = 0.0
+            self.ai_text_state = "fade_in"
+            self.ai_text_y_drift = 6.0
 
     def _update_palette_lerp(self, dt: float):
         """Smoothly interpolate colors toward target mood."""
@@ -1704,13 +1727,15 @@ class Visualizer:
         # ORACLE SPOKEN STATEMENT / IDLE MOTTO MANIFESTATION
         # ----------------------------------------------------------------------
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
-        if not self.subtitle_target_text:
+        if self.subtitle_target_text:
+            desired_target = self.subtitle_target_text
+        elif self.ai_text_target == motto:
             desired_target = motto
         else:
-            desired_target = self.subtitle_target_text
+            desired_target = self.ai_text_target or ""
 
         # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
-        if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in", "motto_pause")):
+        if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in", "motto_pause", "idle_empty")):
             self.ai_text_target = desired_target
             # If current statement is visible and different from desired target, fade it out first!
             if self.ai_text_current and self.ai_text_current != desired_target and self.ai_text_alpha > 0.05:

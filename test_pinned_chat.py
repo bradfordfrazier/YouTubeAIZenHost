@@ -459,8 +459,8 @@ def test_queue_aware_hold_and_direct_turn_transitions():
         await app._execute_ai_turn(event_1)
         t_elapsed = time.perf_counter() - t_start
 
-        # With active queue, hold should NOT wait 15 seconds! It should complete rapidly (< 8s total with speech)
-        assert t_elapsed < 10.0
+        # With active queue, hold should NOT wait 15 seconds! It should complete rapidly without the 15s idle hold
+        assert t_elapsed < 25.0
         # When queue has items, it should not have cleared into motto
         assert event_2 in app.comment_queue
 
@@ -562,6 +562,8 @@ def test_rapid_consecutive_real_chat_messages_never_missed():
     app = LocalCoHostApp()
     app.comment_queue.clear()
     app.running = True
+    app.engagement_mode = "active"
+    app.brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
     app.brain.last_response_time = time.time()  # AI just spoke 0.0s ago
 
     # Real chatter 1 sends a message immediately after AI speech

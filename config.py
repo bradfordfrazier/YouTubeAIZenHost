@@ -328,7 +328,7 @@ class AppConfig:
     # --------------------------------------------------------------------------
     # 13. Intelligence Leverage & Dynamic Thinking Budget (D1-D3)
     # --------------------------------------------------------------------------
-    gemini_fast_thinking_budget: int = int(os.getenv("GEMINI_FAST_THINKING_BUDGET", "64"))
+    gemini_fast_thinking_budget: int = int(os.getenv("GEMINI_FAST_THINKING_BUDGET", "0"))
     gemini_deep_thinking_budget: int = int(os.getenv("GEMINI_DEEP_THINKING_BUDGET", "512"))
     gemini_deep_model: Optional[str] = os.getenv("GEMINI_DEEP_MODEL", None)
     reflection_cache_enabled: bool = os.getenv("REFLECTION_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")

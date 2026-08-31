@@ -544,7 +544,8 @@ class LocalCoHostApp:
                     f"Do not ask for chat comments or plead for engagement."
                 )
             logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
-            self._trigger_ai_turn(prompt_trigger=prompt, event_type="system", priority=10, force=False)
+            self.visualizer.fade_out_for_turn()
+            self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=2, force=False)
         else:
             logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Room transitioned to ACTIVE.")
 
@@ -773,8 +774,8 @@ class LocalCoHostApp:
         t_start = time.perf_counter()
         logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
 
-        # 1. Clear previous subtitle card and setup pinned question highlight
-        self.visualizer.clear_subtitle()
+        # 1. Clear previous subtitle card / fade out motto and setup pinned question highlight
+        self.visualizer.fade_out_for_turn()
         self.current_ai_subtitle = ""
 
         # Set active pinned chat question during turn

@@ -345,19 +345,19 @@ class AIBrain:
             level_str = "HIGH"
             total_max_tokens = max(text_tokens, 2048)
         else:
-            budget = getattr(self.cfg, "gemini_fast_thinking_budget", 64)
+            budget = getattr(self.cfg, "gemini_fast_thinking_budget", 0)
             level_str = getattr(self.cfg, "gemini_thinking_level", "LOW").upper()
             total_max_tokens = max(text_tokens, 1024)
 
         # Build thinking configuration
         thinking_cfg = None
-        if budget is not None and budget > 0:
+        if budget is not None:
             try:
                 thinking_cfg = genai_types.ThinkingConfig(thinking_budget=budget)
             except Exception:
                 thinking_cfg = None
 
-        if thinking_cfg is None:
+        if thinking_cfg is None and (budget is None or budget > 0):
             try:
                 thinking_level_enum = getattr(genai_types.ThinkingLevel, level_str, genai_types.ThinkingLevel.LOW)
                 thinking_cfg = genai_types.ThinkingConfig(thinking_level=thinking_level_enum)
@@ -594,11 +594,11 @@ class AIBrain:
             if is_peer:
                 return False, peer_reason
 
-        # 4. Eco Mode Gating: In Eco mode, only suppress spam/noise, allow real human chatters
+        # 4. Eco Mode Gating: In Eco mode (0 viewers), suppress generic chat keywords to preserve tokens, allow direct mentions and new chatters
         is_eco = (self.engagement_mode == "eco") and getattr(self.cfg, "eco_mode_enabled", False)
         if is_eco and not is_host:
-            if not is_new_chatter and len(text_lower) < 2 and not any(t in text_lower for t in direct_triggers):
-                return False, "eco_mode_suppressed (empty or noise chat)"
+            if not is_new_chatter and not any(t in text_lower for t in direct_triggers):
+                return False, "eco_mode_suppressed (generic chat keyword in eco mode)"
 
         # 5. Chat direct questions (contains '?')
         if not is_host and "?" in text_lower:
@@ -843,7 +843,9 @@ class AIBrain:
         full_context = self._build_context_prompt(prompt_trigger)
         is_deep = self._classify_prompt_depth(prompt_trigger)
         target_model = getattr(self.cfg, "gemini_deep_model", None) if is_deep and getattr(self.cfg, "gemini_deep_model", None) else self.model_name
-        depth_label = "DEEP (512 Reasoning)" if is_deep else "FAST (64 Reasoning)"
+        fast_b = getattr(self.cfg, "gemini_fast_thinking_budget", 0)
+        deep_b = getattr(self.cfg, "gemini_deep_thinking_budget", 512)
+        depth_label = f"DEEP ({deep_b} Reasoning)" if is_deep else f"FAST ({fast_b} Reasoning)"
         logger.info(f"Triggering Gemini stream [{depth_label}] ({target_model}) for {self.cohost_name}...")
 
         # If no active client (no API key configured), run dynamic simulated stream

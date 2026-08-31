@@ -1575,15 +1575,22 @@ class Visualizer:
             curr_q_msg = pinned_chat_message.get("message", "").strip()
             if curr_q_msg and curr_q_msg != self.active_question_text:
                 self.active_question_text = curr_q_msg
-                self.active_question_start_time = time.time()
-                self.question_fade_alpha = 0.0
-                self.question_fade_state = "fade_in"
-                self.question_y_drift = 6.0
-                # Purge old speech text from buffer to prevent flashing of previous comment
-                self.ai_text_current = ""
-                self.ai_text_target = ""
-                self.ai_text_alpha = 0.0
-                self.ai_text_state = "idle_empty"
+                motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+                # If prior spoken comment/greeting is actively visible, let it finish dissolving before fading question in
+                if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05:
+                    self.ai_text_state = "fade_out"
+                    self.ai_text_target = ""
+                    self.question_fade_alpha = 0.0
+                    self.question_fade_state = "waiting_for_dissolve"
+                else:
+                    self.active_question_start_time = time.time()
+                    self.question_fade_alpha = 0.0
+                    self.question_fade_state = "fade_in"
+                    self.question_y_drift = 6.0
+                    self.ai_text_current = ""
+                    self.ai_text_target = ""
+                    self.ai_text_alpha = 0.0
+                    self.ai_text_state = "idle_empty"
         else:
             if self.question_fade_state not in ("fade_out", "idle"):
                 self.question_fade_state = "fade_out"
@@ -1765,7 +1772,15 @@ class Visualizer:
                 self.ai_text_alpha = 0.0
                 self.ai_text_y_drift = 6.0
                 self._active_pinned_message = None
-                if self.ai_text_target == motto:
+                if self.question_fade_state == "waiting_for_dissolve":
+                    self.ai_text_current = ""
+                    self.ai_text_target = ""
+                    self.ai_text_state = "idle_empty"
+                    self.question_fade_state = "fade_in"
+                    self.question_fade_alpha = 0.0
+                    self.question_y_drift = 6.0
+                    self.active_question_start_time = time.time()
+                elif self.ai_text_target == motto:
                     self.ai_text_current = ""
                     self.ai_text_state = "motto_pause"
                     self.motto_pause_timer = comment_pause_sec

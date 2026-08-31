@@ -200,6 +200,47 @@ def test_greeting_fade_out_to_motto_lifecycle():
     assert vis.ai_text_alpha > 0.5
 
 
+def test_greeting_dissolves_smoothly_when_next_chat_question_arrives():
+    """Verifies that when a chat question arrives during/after greeting, the greeting is NOT cut off and dissolves smoothly."""
+    vis = Visualizer(width=1920, height=1080)
+
+    greeting = "Welcome, traveler! Drop your luggage and ask whatever is on your mind."
+    vis.set_subtitle(greeting)
+    vis.ai_text_current = greeting
+    vis.ai_text_target = greeting
+    vis.ai_text_alpha = 1.0
+    vis.ai_text_state = "steady"
+
+    # New chat question arrives as pinned chat
+    question_item = {"author": "ExistentialDave", "message": "Who submits the Jira ticket?"}
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+
+    # Greeting must NOT be instantly cleared! It must be in fade_out while question waits
+    assert vis.ai_text_current == greeting, "Expected greeting text to remain visible during fade_out"
+    assert vis.ai_text_state == "fade_out", "Expected greeting state to be fade_out"
+    assert vis.ai_text_alpha > 0.9, "Expected greeting alpha to still be high on initial fade frame"
+    assert vis.question_fade_state == "waiting_for_dissolve", "Expected question to wait for greeting dissolve"
+
+    # Render frames through the greeting fade-out (30 frames)
+    alphas = []
+    for _ in range(30):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+        alphas.append(vis.ai_text_alpha)
+
+    # Verify smooth downward trend without sudden cutoffs
+    for i in range(len(alphas) - 1):
+        assert alphas[i] >= alphas[i+1], f"Alpha jumped unexpectedly: {alphas[i]} -> {alphas[i+1]}"
+
+    # Finish greeting fade-out until alpha reaches 0.0
+    for _ in range(50):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+
+    # Now greeting is completely dissolved and question card is fading in
+    assert vis.ai_text_alpha == 0.0
+    assert vis.question_fade_state in ("fade_in", "steady")
+    assert vis.active_question_text == "Who submits the Jira ticket?"
+
+
 if __name__ == "__main__":
     print("Running test_motto_smooth_fade_out_for_turn...")
     test_motto_smooth_fade_out_for_turn()
@@ -213,4 +254,6 @@ if __name__ == "__main__":
     test_fast_thinking_budget_for_viewer_join()
     print("Running test_greeting_fade_out_to_motto_lifecycle...")
     test_greeting_fade_out_to_motto_lifecycle()
+    print("Running test_greeting_dissolves_smoothly_when_next_chat_question_arrives...")
+    test_greeting_dissolves_smoothly_when_next_chat_question_arrives()
     print("\nALL VIEWER JOIN & MOTTO TRANSITION TESTS PASSED 100%!")

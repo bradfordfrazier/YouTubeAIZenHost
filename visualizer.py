@@ -1431,8 +1431,8 @@ class Visualizer:
                 wrapped_lines.append(cur_l)
 
             display_lines = wrapped_lines[:2] if wrapped_lines else [""]
-            item_h = auth_h + len(display_lines) * line_h + (10 if is_active_row else (8 if self.is_vertical else 4))
-            gap = (10 if self.is_vertical else 8) if is_active_row else (12 if self.is_vertical else 10)
+            item_h = auth_h + len(display_lines) * line_h + (8 if self.is_vertical else 4)
+            gap = 12 if self.is_vertical else 10
 
             needed_h = item_h + (gap if prepared_chats else 0)
             if accumulated_h + needed_h > available_height and prepared_chats:
@@ -1487,69 +1487,37 @@ class Visualizer:
                     msg_color = (255, 255, 255)
                     row_border_col = (0, 240, 255)
 
-                if is_active_row:
-                    # ----------------------------------------------------------
-                    # IN-FEED ACTIVE ROW HIGHLIGHT (Glowing glass container around row)
-                    # ----------------------------------------------------------
-                    row_w = card_w - (pad_x * 2)
+                # ----------------------------------------------------------
+                # IN-FEED ACTIVE ROW HIGHLIGHT (Soft glowing background fade, no border)
+                # ----------------------------------------------------------
+                if is_active_row and self.pinned_chat_alpha > 0.005:
+                    row_w = card_w - (pad_x * 2) + 12
                     row_alpha = self.pinned_chat_alpha
-                    row_alpha_int = int(np.clip(row_alpha * 255, 0, 255))
-                    border_pulse = 0.85 + 0.15 * math.sin(self.time_elapsed * 5.0)
+                    bg_x = pad_x - 6
+                    bg_y = y_offset - 4
+                    bg_h = item_h + 8
 
-                    row_surf = pygame.Surface((row_w, item_h), pygame.SRCALPHA)
-                    pygame.draw.rect(row_surf, (14, 22, 42, int(220 * row_alpha)), (0, 0, row_w, item_h), border_radius=10)
-                    pygame.draw.rect(row_surf, (24, 40, 72, int(180 * row_alpha)), (2, 2, row_w - 4, item_h - 4), border_radius=8)
-                    pygame.draw.rect(
-                        row_surf,
-                        (*row_border_col, int(220 * border_pulse * row_alpha)),
-                        (0, 0, row_w, item_h),
-                        width=2,
-                        border_radius=10,
-                    )
+                    bg_surf = pygame.Surface((row_w, bg_h), pygame.SRCALPHA)
+                    # Soft ethereal glassmorphic glow behind text
+                    pygame.draw.rect(bg_surf, (14, 26, 52, int(150 * row_alpha)), (0, 0, row_w, bg_h), border_radius=8)
+                    pygame.draw.rect(bg_surf, (*row_border_col, int(35 * row_alpha)), (0, 0, row_w, bg_h), border_radius=8)
+                    self.surf_chat_card.blit(bg_surf, (bg_x, bg_y))
 
-                    # Pill badge "ACTIVE"
-                    badge_txt = self.font_callout_tag.render("ACTIVE", True, row_border_col)
-                    badge_txt.set_alpha(row_alpha_int)
-                    badge_w = badge_txt.get_width() + 14
-                    badge_h = 18 if self.is_vertical else 16
-                    badge_x = row_w - badge_w - 6
-                    badge_y = 5
-                    pygame.draw.rect(row_surf, (*row_border_col, int(40 * row_alpha)), (badge_x, badge_y, badge_w, badge_h), border_radius=4)
-                    pygame.draw.rect(row_surf, (*row_border_col, int(180 * row_alpha)), (badge_x, badge_y, badge_w, badge_h), width=1, border_radius=4)
-                    row_surf.blit(badge_txt, (badge_x + 7, badge_y + (1 if self.is_vertical else 0)))
+                # Standard & Active text rendering at exact same fixed coordinates
+                auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
+                auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
+                self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
 
-                    # Author & Message lines inside row_surf (100% opaque text)
-                    auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                    auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
-                    row_surf.blit(auth_sh, (8 + sh_off, 4 + sh_off))
-                    row_surf.blit(auth_rend, (8, 4))
+                msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
+                for line_idx, line_text in enumerate(display_lines):
+                    line_y = msg_start_y + line_idx * line_h
+                    line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
+                    self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
+                    line_rend = self.font_chat_msg.render(line_text, True, msg_color)
+                    self.surf_chat_card.blit(line_rend, (pad_x, line_y))
 
-                    msg_start_y = 4 + auth_h - (2 if self.is_vertical else 0)
-                    for line_idx, line_text in enumerate(display_lines):
-                        line_y = msg_start_y + line_idx * line_h
-                        line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                        line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                        row_surf.blit(line_sh, (8 + sh_off, line_y + sh_off))
-                        row_surf.blit(line_rend, (8, line_y))
-
-                    self.surf_chat_card.blit(row_surf, (pad_x, y_offset))
-                    y_offset += item_h + (10 if self.is_vertical else 8)
-                else:
-                    # Standard unhighlighted chat row
-                    auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                    self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
-                    auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
-                    self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
-
-                    msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
-                    for line_idx, line_text in enumerate(display_lines):
-                        line_y = msg_start_y + line_idx * line_h
-                        line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
-                        self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
-                        line_rend = self.font_chat_msg.render(line_text, True, msg_color)
-                        self.surf_chat_card.blit(line_rend, (pad_x, line_y))
-
-                    y_offset += item_h + (12 if self.is_vertical else 10)
+                y_offset += item_h + (12 if self.is_vertical else 10)
 
         self.screen.blit(self.surf_chat_card, (card_x, card_y))
 

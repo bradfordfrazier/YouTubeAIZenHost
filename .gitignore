@@ -12,5 +12,7 @@ __pycache__/
 !.env.*.example
 test_output/
 chat_cache.json
+data/*_cache.json
+youtube_cookies.txt
 *.tmp
 logs/

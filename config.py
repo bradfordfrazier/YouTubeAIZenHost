@@ -97,6 +97,13 @@ class AppConfig:
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
     chat_idle_timeout_sec: float = _get_float("CHAT_IDLE_TIMEOUT_SEC", 120.0)
 
+    # YouTube Shorts Related Video Updater
+    update_shorts_related_video: bool = os.getenv("UPDATE_SHORTS_RELATED_VIDEO", "false").lower() in ("true", "1", "yes")
+    shorts_update_strategy: str = os.getenv("SHORTS_UPDATE_STRATEGY", "studio_api")  # "studio_api", "description_link", or "both"
+    youtube_studio_cookies: str = os.getenv("YOUTUBE_STUDIO_COOKIES", "")
+    youtube_cookies_file: str = os.getenv("YOUTUBE_COOKIES_FILE", "youtube_cookies.txt")
+    shorts_max_batch_size: int = _get_int("SHORTS_MAX_BATCH_SIZE", 50)
+
     # --------------------------------------------------------------------------
     # 4. Gemini AI Brain & Co-Host Persona
     # --------------------------------------------------------------------------

@@ -457,6 +457,10 @@ class LocalCoHostApp:
         self.ndi_audio_thread: Optional[threading.Thread] = None
         self.ndi_audio_running: bool = False
 
+        # YouTube Shorts Related Video Updater Tracking
+        self.shorts_updated_for_stream: Optional[str] = None
+        self.shorts_updater_task_running: bool = False
+
 
     def _load_cached_chat(self):
         """Restores recent chat history from disk so visualizer resumes seamlessly on restart without commenting."""
@@ -1238,7 +1242,32 @@ class LocalCoHostApp:
             await asyncio.sleep(0.3)
 
     # --------------------------------------------------------------------------
-    # 5. YouTube Live Chat Poller & Mock Generator
+    # 5. YouTube Shorts Related Video Link Updater Task
+    # --------------------------------------------------------------------------
+    async def _run_shorts_updater_task(self, stream_video_id: str):
+        """Asynchronously updates all channel Shorts to link Related Video to the live stream."""
+        if not getattr(self.cfg, "update_shorts_related_video", False):
+            return
+        if not stream_video_id or self.shorts_updated_for_stream == stream_video_id:
+            return
+        if self.shorts_updater_task_running:
+            return
+
+        self.shorts_updater_task_running = True
+        try:
+            from shorts_updater import run_startup_shorts_update
+            logger.info(f"📱 [Shorts Updater] Initiating background update for channel Shorts -> Stream '{stream_video_id}'...")
+            res = await run_startup_shorts_update(stream_video_id, self.cfg)
+            if res.get("status") != "disabled":
+                self.shorts_updated_for_stream = stream_video_id
+                logger.info(f"📱 [Shorts Updater] Background update finished: {res.get('updated', 0)} updated, {res.get('skipped', 0)} skipped.")
+        except Exception as e:
+            logger.warning(f"⚠️ [Shorts Updater] Background update failed with error: {e}")
+        finally:
+            self.shorts_updater_task_running = False
+
+    # --------------------------------------------------------------------------
+    # 6. YouTube Live Chat Poller
     # --------------------------------------------------------------------------
     async def youtube_chat_task(self):
         """Polls YouTube Live Chat via pytchat or runs simulated stream chat."""
@@ -1290,6 +1319,10 @@ class LocalCoHostApp:
                 chat = pytchat.create(video_id=video_id)
                 self.active_video_id = video_id
                 logger.info(f"🎉 Connected to YouTube Live Chat for Video '{video_id}'!")
+
+                # Trigger background YouTube Shorts Related Video updater if enabled
+                if getattr(self.cfg, "update_shorts_related_video", False) and video_id:
+                    asyncio.create_task(self._run_shorts_updater_task(video_id), name="shorts_updater")
 
                 api_key = self.cfg.youtube_api_key
 

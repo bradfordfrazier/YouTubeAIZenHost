@@ -560,12 +560,9 @@ class AIBrain:
             return False, rate_reason
 
         text_lower = text.lower().strip()
-        elapsed_since_last = now - self.last_response_time
 
         # 0. New chatter greetings have immediate high priority
         if is_new_chatter and getattr(self.cfg, "greet_new_chatters", True):
-            if elapsed_since_last < 0.5:
-                return False, "cooldown_active (0.5s)"
             return True, "new_chatter_greeting"
 
         # 1. Direct address triggers (Chat or Host explicitly mentions AI / God / Co-Host / Channel Handle)
@@ -584,15 +581,11 @@ class AIBrain:
             direct_triggers.append(h_c.replace(" ", ""))
         for trigger in direct_triggers:
             if trigger and trigger in text_lower:
-                if elapsed_since_last < 0.5:
-                    return False, "cooldown_active (0.5s)"
                 return True, f"direct_mention: '{trigger}'"
 
         # 2. Host asks a direct question or prompt
         if is_host:
             if text_lower.endswith("?") or any(w in text_lower for w in ["what do you think", "your thoughts", "right i am", "tell them", "roast"]):
-                if elapsed_since_last < 1.0:
-                    return False, "cooldown_active (1.0s)"
                 return True, "host_question"
 
         # 3. Check for member-to-member direct replies to preserve viewer entanglement
@@ -601,25 +594,18 @@ class AIBrain:
             if is_peer:
                 return False, peer_reason
 
-        # 4. Eco Mode Gating: In Eco/Throttled mode (quiet chat / low viewers), allow direct mentions & questions
-        is_eco = (self.engagement_mode == "eco") and self.cfg.eco_mode_enabled
+        # 4. Eco Mode Gating: In Eco mode, only suppress spam/noise, allow real human chatters
+        is_eco = (self.engagement_mode == "eco") and getattr(self.cfg, "eco_mode_enabled", False)
         if is_eco and not is_host:
-            if "?" not in text_lower and not any(t in text_lower for t in direct_triggers):
-                return False, "eco_mode_suppressed (quiet chat - direct mention or question required)"
+            if not is_new_chatter and len(text_lower) < 2 and not any(t in text_lower for t in direct_triggers):
+                return False, "eco_mode_suppressed (empty or noise chat)"
 
         # 5. Chat direct questions (contains '?')
         if not is_host and "?" in text_lower:
-            if elapsed_since_last < 1.0:
-                rem = 1.0 - elapsed_since_last
-                return False, f"cooldown_active ({rem:.1f}s remaining)"
             return True, "chat_question"
 
-        # 6. General Chat interactive keywords & spontaneous chat banter (Active mode only)
+        # 6. General Chat interactive keywords & spontaneous chat banter (Active mode)
         if not is_host:
-            if elapsed_since_last < self.cfg.min_interjection_interval_sec:
-                rem = self.cfg.min_interjection_interval_sec - elapsed_since_last
-                return False, f"cooldown_active ({rem:.1f}s remaining)"
-
             chat_keywords = [
                 "roast", "how", "why", "who", "what", "when", "where", "opinion", "thoughts",
                 "explain", "tell", "think", "agree", "disagree", "consciousness", "source",
@@ -631,9 +617,9 @@ class AIBrain:
             if matched_keywords:
                 return True, f"chat_interaction: '{matched_keywords[0]}'"
 
-            import random
-            if random.random() < self.cfg.auto_chat_response_probability:
-                return True, "random_chat_banter"
+            # In active live chat, default to engaging with incoming chat comments
+            if getattr(self.cfg, "auto_chat_response_probability", 1.0) >= 0.5:
+                return True, "live_chat_interaction"
 
         return False, "no_trigger_keywords"
 

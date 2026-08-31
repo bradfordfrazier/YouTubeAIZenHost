@@ -390,10 +390,10 @@ class Visualizer:
             self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 30, bold=True)
             self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_god_badge = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
-            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 38, bold=True)
-            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
-            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 20, bold=True)
-            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
+            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
+            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 20, bold=True)
+            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18, bold=True)
+            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 30, bold=True)
         else:
             self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22)
@@ -404,10 +404,10 @@ class Visualizer:
             self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
             self.font_chat_msg = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22, bold=True)
             self.font_god_badge = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
-            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 36, bold=True)
-            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22, bold=True)
-            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18, bold=True)
-            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 32, bold=True)
+            self.font_callout_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 30, bold=True)
+            self.font_callout_sub = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18, bold=True)
+            self.font_callout_tag = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 16, bold=True)
+            self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
 
         # Ambient Particle System (optimally tuned for 60+ FPS on Intel Core i5 / UHD 630 Graphics)
         self.num_particles = getattr(self.cfg, "visualizer_particle_count", 70)
@@ -527,7 +527,7 @@ class Visualizer:
         host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
         chat_w, chat_h = (940, 580) if self.is_vertical else (380, 490)
         sub_w, sub_h = (940, 380) if self.is_vertical else (880, 360)
-        promo_w, promo_h = (840, 175) if self.is_vertical else (760, 146)
+        promo_w, promo_h = (940, 190) if self.is_vertical else (840, 160)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
         self.surf_chat_card = pygame.Surface((chat_w, chat_h), pygame.SRCALPHA)
@@ -1157,15 +1157,15 @@ class Visualizer:
     def _draw_live_chat_card(self, chat_messages: List[Dict], pinned_message: Optional[Dict] = None):
         """
         Draws YouTube Live Chat transparent overlay panel with support for pinned active question highlight:
-        16:9 Landscape: Left column below center (w=380, h=490, x=60, y=461).
-        9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1182, up to 5 items).
+        16:9 Landscape: Left column below center (w=380, h=490, x=60, y=482).
+        9:16 Vertical: Bottom tier below AI Host (w=940, h=580, y=1205, up to 5 items).
         """
         if self.is_vertical:
             card_w, card_h = 940, 580
-            card_x, card_y = (self.width - card_w) // 2, 1182
+            card_x, card_y = (self.width - card_w) // 2, 1205
         else:
             card_w, card_h = 380, 490
-            card_x, card_y = 60, 461
+            card_x, card_y = 60, 482
 
         self.surf_chat_card.fill((0, 0, 0, 0))
 
@@ -1570,11 +1570,11 @@ class Visualizer:
         """
         if self.is_vertical:
             card_w, card_h = 940, 380
-            card_x, card_y = (self.width - card_w) // 2, 726
+            card_x, card_y = (self.width - card_w) // 2, 749
         else:
             card_w, card_h = 880, 360
             card_x = self.core_cx - (card_w // 2)
-            card_y = self.core_cy + 224
+            card_y = self.core_cy + 245
 
         self.surf_subtitle_card.fill((0, 0, 0, 0))
 
@@ -1928,7 +1928,7 @@ class Visualizer:
             return
 
         if self.is_vertical:
-            card_w, card_h = 860, 175
+            card_w, card_h = 940, 190
             target_x = (self.width - card_w) // 2
             target_y = self.core_cy - (card_h // 2)
             start_y = target_y - 40
@@ -1937,7 +1937,7 @@ class Visualizer:
             if self.promo_state == "display":
                 cur_y += int(math.sin(self.time_elapsed * 2.8) * 4.0)
         else:
-            card_w, card_h = 760, 146
+            card_w, card_h = 840, 160
             target_x = self.core_cx - (card_w // 2)
             target_y = self.core_cy - (card_h // 2)
             start_x = -card_w - 60
@@ -1978,33 +1978,33 @@ class Visualizer:
 
         # 2. Top Pill Tag: "ORACLE INQUIRY" (Centered)
         tag_txt = self.font_callout_tag.render("ORACLE INQUIRY", True, (0, 240, 255))
-        tag_w = tag_txt.get_width() + (40 if self.is_vertical else 34)
-        tag_h = 28 if self.is_vertical else 22
+        tag_w = tag_txt.get_width() + (36 if self.is_vertical else 30)
+        tag_h = 26 if self.is_vertical else 22
         tag_x = (w - tag_w) // 2
-        tag_y = 14 if self.is_vertical else 12
+        tag_y = 16 if self.is_vertical else 12
 
         pygame.draw.rect(surf, (0, 200, 255, min(255, int(50 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), border_radius=tag_h // 2)
         pygame.draw.rect(surf, (0, 240, 255, min(255, int(180 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), width=1, border_radius=tag_h // 2)
 
         # Pulsating Live Cyan Dot
         dot_a = min(255, int((160 + 95 * math.sin(t * 6.0)) * alpha_mult))
-        dot_r = 5 if self.is_vertical else 4
-        pygame.draw.circle(surf, (0, 255, 200, dot_a), (tag_x + 14, tag_y + tag_h // 2), dot_r)
-        surf.blit(tag_txt, (tag_x + (26 if self.is_vertical else 22), tag_y + (3 if self.is_vertical else 2)))
+        dot_r = 4 if self.is_vertical else 4
+        pygame.draw.circle(surf, (0, 255, 200, dot_a), (tag_x + 12, tag_y + tag_h // 2), dot_r)
+        surf.blit(tag_txt, (tag_x + (22 if self.is_vertical else 20), tag_y + (2 if self.is_vertical else 1)))
 
         # 3. Middle Title Row: Celestial Question Badge + Title (Centered Lockup)
         title_str = "Ask I AM Anything"
         title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
         sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
 
-        badge_r = 21 if self.is_vertical else 17
+        badge_r = 19 if self.is_vertical else 16
         lockup_gap = 14
         total_title_w = (badge_r * 2 + 8) + lockup_gap + title_rend.get_width()
         lockup_x = (w - total_title_w) // 2
         badge_cx = lockup_x + badge_r + 4
-        badge_cy = 70 if self.is_vertical else 58
+        badge_cy = 76 if self.is_vertical else 62
         title_x = lockup_x + (badge_r * 2 + 8) + lockup_gap
-        title_y = 51 if self.is_vertical else 41
+        title_y = 57 if self.is_vertical else 45
 
         # Rotating halo rays around question badge
         ray_angle_base = t * 1.6
@@ -2029,11 +2029,12 @@ class Visualizer:
         surf.blit(sh_rend, (title_x + 2, title_y + 2))
         surf.blit(title_rend, (title_x, title_y))
 
-        # 4. Bottom Subtitle Row (Centered)
-        sub_str = "Questions of reality, existence, or absurdities • Serious or ridiculous, I answer both"
+        # 4. Bottom Subtitle Row (Centered & fully visible)
+        sub_str = "Questions of reality, existence, or absurdities • Serious or strange, I answer all"
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
-        sub_x = (w - sub_rend.get_width()) // 2
-        sub_y = 118 if self.is_vertical else 96
+        sub_w = sub_rend.get_width()
+        sub_x = max(20, (w - sub_w) // 2)
+        sub_y = 130 if self.is_vertical else 106
         sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
@@ -2078,49 +2079,49 @@ class Visualizer:
 
         # 2. Top Pill Tag: "STREAM CONTINUITY" (Centered)
         tag_txt = self.font_callout_tag.render("STREAM CONTINUITY", True, (255, 100, 130))
-        tag_w = tag_txt.get_width() + (40 if self.is_vertical else 34)
-        tag_h = 28 if self.is_vertical else 22
+        tag_w = tag_txt.get_width() + (36 if self.is_vertical else 30)
+        tag_h = 26 if self.is_vertical else 22
         tag_x = (w - tag_w) // 2
-        tag_y = 14 if self.is_vertical else 12
+        tag_y = 16 if self.is_vertical else 12
 
         pygame.draw.rect(surf, (255, 40, 80, min(255, int(50 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), border_radius=tag_h // 2)
         pygame.draw.rect(surf, (255, 60, 100, min(255, int(180 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), width=1, border_radius=tag_h // 2)
 
         # Pulsating Live Red Dot
         dot_a = min(255, int((160 + 95 * math.sin(t * 6.0)) * alpha_mult))
-        dot_r = 5 if self.is_vertical else 4
-        pygame.draw.circle(surf, (255, 50, 90, dot_a), (tag_x + 14, tag_y + tag_h // 2), dot_r)
-        surf.blit(tag_txt, (tag_x + (26 if self.is_vertical else 22), tag_y + (3 if self.is_vertical else 2)))
+        dot_r = 4 if self.is_vertical else 4
+        pygame.draw.circle(surf, (255, 50, 90, dot_a), (tag_x + 12, tag_y + tag_h // 2), dot_r)
+        surf.blit(tag_txt, (tag_x + (22 if self.is_vertical else 20), tag_y + (2 if self.is_vertical else 1)))
 
         # 3. Middle Title Row: YouTube & Bell Badge + Title (Centered Lockup)
         title_str = "Subscribing Changes Nothing."
         title_rend = self.font_callout_title.render(title_str, True, (255, 245, 245))
         sh_rend = self.font_callout_title.render(title_str, True, (160, 20, 50))
 
-        pill_w, pill_h = (54, 34) if self.is_vertical else (44, 28)
-        badge_area_w = pill_w + (18 if self.is_vertical else 14)
+        pill_w, pill_h = (48, 30) if self.is_vertical else (40, 26)
+        badge_area_w = pill_w + (16 if self.is_vertical else 12)
         lockup_gap = 14
         total_title_w = badge_area_w + lockup_gap + title_rend.get_width()
         lockup_x = (w - total_title_w) // 2
 
         # YouTube Red Squircle Pill
         pill_x = lockup_x
-        pill_y = 54 if self.is_vertical else 44
+        pill_y = 60 if self.is_vertical else 48
         pygame.draw.rect(surf, (255, 20, 50, min(255, int(240 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), border_radius=8)
         pygame.draw.rect(surf, (255, 255, 255, min(255, int(180 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), width=1, border_radius=8)
 
         # White play triangle inside pill
         if self.is_vertical:
             tri_pts = [
-                (pill_x + 20, pill_y + 9),
-                (pill_x + 20, pill_y + 25),
-                (pill_x + 37, pill_y + 17),
+                (pill_x + 18, pill_y + 8),
+                (pill_x + 18, pill_y + 22),
+                (pill_x + 33, pill_y + 15),
             ]
         else:
             tri_pts = [
-                (pill_x + 16, pill_y + 7),
-                (pill_x + 16, pill_y + 21),
-                (pill_x + 30, pill_y + 14),
+                (pill_x + 15, pill_y + 7),
+                (pill_x + 15, pill_y + 19),
+                (pill_x + 28, pill_y + 13),
             ]
         pygame.draw.polygon(surf, (255, 255, 255, min(255, int(250 * alpha_mult))), tri_pts)
 
@@ -2129,41 +2130,42 @@ class Visualizer:
         bell_cy = pill_y + pill_h - 2
         swing = math.sin(t * 8.0)
         clapper_x = int(bell_cx + swing * 3.5)
-        bell_r = 16 if self.is_vertical else 13
+        bell_r = 14 if self.is_vertical else 12
 
         # Bell pill background
         pygame.draw.circle(surf, (35, 15, 25, min(255, int(240 * alpha_mult))), (bell_cx, bell_cy), bell_r)
         pygame.draw.circle(surf, (255, 200, 50, min(255, int(220 * alpha_mult))), (bell_cx, bell_cy), bell_r, 1)
 
         # Bell Dome
-        dome_w = 8 if self.is_vertical else 6
-        dome_h = 7 if self.is_vertical else 5
+        dome_w = 7 if self.is_vertical else 5
+        dome_h = 6 if self.is_vertical else 4
         bell_pts = [
-            (bell_cx - dome_w, bell_cy + 4),
-            (bell_cx - 4, bell_cy - dome_h),
-            (bell_cx + 4, bell_cy - dome_h),
-            (bell_cx + dome_w, bell_cy + 4),
+            (bell_cx - dome_w, bell_cy + 3),
+            (bell_cx - 3, bell_cy - dome_h),
+            (bell_cx + 3, bell_cy - dome_h),
+            (bell_cx + dome_w, bell_cy + 3),
         ]
         pygame.draw.polygon(surf, (255, 215, 0, min(255, int(245 * alpha_mult))), bell_pts)
-        pygame.draw.circle(surf, (255, 240, 120, min(255, int(250 * alpha_mult))), (clapper_x, bell_cy + 6), 3)
+        pygame.draw.circle(surf, (255, 240, 120, min(255, int(250 * alpha_mult))), (clapper_x, bell_cy + 5), 2)
 
         # Sound arcs around ringing bell
         if abs(swing) > 0.35:
             arc_a = min(255, int(abs(swing) * 210 * alpha_mult))
-            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx - 14, bell_cy - 7, 8, 13), math.pi * 0.6, math.pi * 1.4, 2)
-            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx + 6, bell_cy - 7, 8, 13), -math.pi * 0.4, math.pi * 0.4, 2)
+            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx - 12, bell_cy - 6, 7, 11), math.pi * 0.6, math.pi * 1.4, 2)
+            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx + 5, bell_cy - 6, 7, 11), -math.pi * 0.4, math.pi * 0.4, 2)
 
         # Title Blit
         title_x = lockup_x + badge_area_w + lockup_gap
-        title_y = 51 if self.is_vertical else 41
+        title_y = 57 if self.is_vertical else 45
         surf.blit(sh_rend, (title_x + 2, title_y + 2))
         surf.blit(title_rend, (title_x, title_y))
 
-        # 4. Bottom Subtitle Row (Centered)
+        # 4. Bottom Subtitle Row (Centered & fully visible)
         sub_str = "It is, however, appreciated • Ring bell for live alerts"
         sub_rend = self.font_callout_sub.render(sub_str, True, (255, 220, 205))
-        sub_x = (w - sub_rend.get_width()) // 2
-        sub_y = 118 if self.is_vertical else 96
+        sub_w = sub_rend.get_width()
+        sub_x = max(20, (w - sub_w) // 2)
+        sub_y = 130 if self.is_vertical else 106
         sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))

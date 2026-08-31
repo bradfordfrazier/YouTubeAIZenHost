@@ -484,9 +484,13 @@ def test_strict_fifo_chat_ordering():
     # 5. Superchat arrives
     app._trigger_ai_turn("Superchat from @VIP: '$10 Message 5'", event_type="superchat", priority=2, chat_item={"author": "VIP", "message": "$10 Message 5"})
 
-    # Verify queue order
+    # Verify queue order:
+    # Tier 2: Superchat (VIP)
+    # Tier 3: Direct Mention (ViewerB)
+    # Tier 4: Real Live Chat / Greetings in FIFO arrival order (ViewerA, ViewerC)
+    # Tier 5: Synthetic Cast (ExistentialDave)
     authors_in_order = [e.chat_item["author"] for e in app.comment_queue]
-    assert authors_in_order == ["VIP", "ViewerA", "ViewerB", "ViewerC", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
+    assert authors_in_order == ["VIP", "ViewerB", "ViewerA", "ViewerC", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
 
 
 def test_system_prompt_never_pinned_or_added_to_chat_history():
@@ -553,6 +557,47 @@ def test_bottom_anchored_chat_rendering_with_many_messages():
     assert vis.pinned_chat_stored == active_question
 
 
+def test_rapid_consecutive_real_chat_messages_never_missed():
+    """Verifies that multiple rapid real chat comments arriving within seconds are all queued and never dropped."""
+    app = LocalCoHostApp()
+    app.comment_queue.clear()
+    app.running = True
+    app.brain.last_response_time = time.time()  # AI just spoke 0.0s ago
+
+    # Real chatter 1 sends a message immediately after AI speech
+    trigger_1, reason_1 = app.brain.should_trigger_response("What is reality?", is_host=False)
+    assert trigger_1 is True, f"First real chat message was unexpectedly dropped! Reason: {reason_1}"
+    app._trigger_ai_turn(f"Chat message from @Viewer1: 'What is reality?'", event_type="chat", chat_item={"author": "Viewer1", "message": "What is reality?"})
+
+    # Real chatter 2 sends a message 0.2s later
+    trigger_2, reason_2 = app.brain.should_trigger_response("I want to know too", is_host=False)
+    assert trigger_2 is True, f"Second real chat message was unexpectedly dropped! Reason: {reason_2}"
+    app._trigger_ai_turn(f"Chat message from @Viewer2: 'I want to know too'", event_type="chat", chat_item={"author": "Viewer2", "message": "I want to know too"})
+
+    # Verify both comments are queued in strict FIFO order
+    assert len(app.comment_queue) == 2
+    assert app.comment_queue[0].chat_item["author"] == "Viewer1"
+    assert app.comment_queue[1].chat_item["author"] == "Viewer2"
+
+
+def test_real_chat_evicts_pending_synthetic_cast():
+    """Verifies that incoming real human chat comments take priority and evict pending synthetic cast questions."""
+    app = LocalCoHostApp()
+    app.comment_queue.clear()
+    app.running = True
+
+    # Queue 2 synthetic cast questions
+    app._trigger_ai_turn("Cast member @ExistentialDave asks: 'Jira ticket?'", event_type="cast", priority=6, chat_item={"author": "ExistentialDave", "message": "Jira ticket?"})
+    app._trigger_ai_turn("Cast member @SpeedrunnerKyle asks: 'Any% route?'", event_type="cast", priority=6, chat_item={"author": "SpeedrunnerKyle", "message": "Any% route?"})
+
+    # Real human chat arrives -> Pruning synthetic cast queue
+    app.comment_queue = [ev for ev in app.comment_queue if ev.event_type not in ("cast", "spontaneous", "system")]
+    app._trigger_ai_turn("Chat message from @RealHuman: 'Hello Oracle!'", event_type="chat", priority=4, chat_item={"author": "RealHuman", "message": "Hello Oracle!"})
+
+    assert len(app.comment_queue) == 1
+    assert app.comment_queue[0].chat_item["author"] == "RealHuman"
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -605,6 +650,14 @@ if __name__ == "__main__":
     print("Testing Bottom-Anchored Chat Rendering with Long History...")
     test_bottom_anchored_chat_rendering_with_many_messages()
     print("Bottom-Anchored Chat Rendering with Long History Passed!")
+
+    print("Testing Rapid Consecutive Real Chat Messages Never Missed...")
+    test_rapid_consecutive_real_chat_messages_never_missed()
+    print("Rapid Consecutive Real Chat Messages Never Missed Passed!")
+
+    print("Testing Real Chat Evicts Pending Synthetic Cast...")
+    test_real_chat_evicts_pending_synthetic_cast()
+    print("Real Chat Evicts Pending Synthetic Cast Passed!")
 
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()

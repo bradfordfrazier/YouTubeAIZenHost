@@ -638,23 +638,26 @@ class LocalCoHostApp:
         # Default priorities & TTLs based on event type:
         # Tier 1: Host direct mic voice commands (Priority 1) -> Real-time human interrupt
         # Tier 2: Superchats / Memberships (Priority 2) -> Paid audience acknowledgment
-        # Tier 3: Live Chat / Greetings / Direct Mentions / Cast (Priority 5) -> Strict FIFO chronological order matching live chat feed
-        # Tier 4: Spontaneous Reflections (Priority 10) -> Idle fallback
+        # Tier 3: Real Viewer Direct Mentions (Priority 3) -> High-priority viewer engagement
+        # Tier 4: Real Live Chat / Greetings (Priority 4) -> Strict FIFO human chat feed
+        # Tier 5: Synthetic Cast Ensembles (Priority 6) -> Idle ensemble filler (yields to humans)
+        # Tier 6: Spontaneous Reflections (Priority 10) -> Idle background reflections
         priority_map = {
             "host": (1, 120.0),
             "superchat": (2, 180.0),
-            "direct_mention": (5, 90.0),
-            "greeting": (5, 90.0),
-            "chat": (5, 90.0),
-            "cast": (5, 90.0),
+            "direct_mention": (3, 90.0),
+            "greeting": (4, 90.0),
+            "chat": (4, 90.0),
+            "cast": (6, 90.0),
             "spontaneous": (10, 30.0),
+            "system": (10, 30.0),
         }
-        def_pri, def_ttl = priority_map.get(event_type.lower(), (5, 90.0))
+        def_pri, def_ttl = priority_map.get(event_type.lower(), (4, 90.0))
         prio = priority if priority is not None else def_pri
         ttl = max_age_sec if max_age_sec is not None else def_ttl
 
         # Spontaneous Gating: Never queue spontaneous reflections if AI is busy speaking, generating, or queue is active
-        if event_type == "spontaneous":
+        if event_type in ("spontaneous", "system"):
             is_busy = (
                 self.brain.is_generating
                 or self.tts.is_speaking
@@ -697,8 +700,8 @@ class LocalCoHostApp:
             lowest_prio_idx = max(range(len(self.comment_queue)), key=lambda i: self.comment_queue[i].priority)
             lowest_item = self.comment_queue[lowest_prio_idx]
 
-            if prio < lowest_item.priority:
-                # Evict lower priority item to make room for this higher priority event
+            # Real human events (prio <= 4) always evict synthetic cast (prio >= 6) or idle reflections
+            if prio < lowest_item.priority or (prio <= 4 and lowest_item.priority >= 6):
                 evicted = self.comment_queue.pop(lowest_prio_idx)
                 logger.info(f"⚠️ [Queue Eviction] Evicted lower-priority '{evicted.event_type}' request to prioritize incoming '{event_type}'.")
                 self.comment_queue.append(event)
@@ -708,7 +711,7 @@ class LocalCoHostApp:
         else:
             self.comment_queue.append(event)
 
-        # Sort queue by priority first (1=Host, 2=Superchat, 5=Live Chat / Cast, 10=Spontaneous),
+        # Sort queue by priority first (1=Host, 2=Superchat, 3=Mention, 4=Chat, 6=Cast, 10=Spontaneous),
         # then strictly by sequence arrival order (seq_id) to guarantee 100% FIFO order matching the chat feed.
         self.comment_queue.sort(key=lambda x: (x.priority, x.seq_id))
         if self.new_comment_signal:
@@ -1407,6 +1410,10 @@ class LocalCoHostApp:
                         self.chat_timestamps.append(now_ts)
                         if not is_channel_owner:
                             self.last_chat_received_time = now_ts
+                            # Inform CastEngine that real chat arrived so synthetic cast pauses
+                            self.cast.last_cast_time = now_ts
+                            # Prune any pending synthetic cast / spontaneous idle items from queue so real human is answered immediately
+                            self.comment_queue = [ev for ev in self.comment_queue if ev.event_type not in ("cast", "spontaneous", "system")]
                         if len(self.chat_timestamps) > 300:
                             self.chat_timestamps = self.chat_timestamps[-200:]
 
@@ -1507,7 +1514,7 @@ class LocalCoHostApp:
                             spoken_text = f"Superchat from @{author_name.lstrip('@')} for {item.amountString}! {msg}" if is_superchat else f"@{author_name.lstrip('@')} says, {msg}"
                             mood = "hyped" if is_superchat else "energetic"
                             self.visualizer.set_mood(mood)
-                            self.current_ai_subtitle = f"💬 @{author_name.lstrip('@')}: {msg}"
+                            self.current_ai_subtitle = f"@{author_name.lstrip('@')}: {msg}"
                             self.visualizer.set_subtitle(self.current_ai_subtitle)
                             asyncio.create_task(self.tts.queue_speech(spoken_text))
                         elif is_new_chatter and self.cfg.greet_new_chatters:
@@ -1517,12 +1524,12 @@ class LocalCoHostApp:
                                     f"[NEW_CHATTER_GREETING] @{author_name.lstrip('@')} just sent their very first message: '{msg}'. "
                                     f"Greet @{author_name.lstrip('@')} warmly and wittily by name while responding to their comment!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=5, chat_item=chat_entry)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4, chat_item=chat_entry)
                         else:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
                             if is_superchat or should_trigger:
                                 prefix = f"Chat message from @{author_name.lstrip('@')}"
-                                prio = 2 if is_superchat else 5
+                                prio = 2 if is_superchat else (3 if "direct_mention" in reason else 4)
                                 ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
                                 self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
                             else:
@@ -1793,7 +1800,7 @@ class LocalCoHostApp:
 
             should_trigger, reason = self.brain.should_trigger_response(message, is_host=False)
             if is_sc or should_trigger:
-                prio = 2 if is_sc else 5
+                prio = 2 if is_sc else (3 if "direct_mention" in reason else 4)
                 ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
                 self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
@@ -1883,7 +1890,7 @@ class LocalCoHostApp:
                         )
 
                     prompt = f"Cast member @{persona.handle} ({persona.archetype_title}) asks: '{question}'"
-                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=5, chat_item=chat_entry)
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="cast", priority=6, chat_item=chat_entry)
 
             except asyncio.CancelledError:
                 break

@@ -4,12 +4,49 @@ Handles environment variables and system settings for single-PC operation on the
 """
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
 # Load .env if present
 load_dotenv(override=True)
+
+
+def _get_float(key: str, default: float) -> float:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    val_str = str(val).strip()
+    if "#" in val_str:
+        val_str = val_str.split("#", 1)[0].strip()
+    if "\t" in val_str:
+        val_str = val_str.split("\t", 1)[0].strip()
+    if " " in val_str:
+        val_str = val_str.split(" ", 1)[0].strip()
+    val_str = re.sub(r"[sS](ec(onds?)?)?$", "", val_str).strip()
+    try:
+        return float(val_str)
+    except (ValueError, TypeError):
+        return default
+
+
+def _get_int(key: str, default: int) -> int:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    val_str = str(val).strip()
+    if "#" in val_str:
+        val_str = val_str.split("#", 1)[0].strip()
+    if "\t" in val_str:
+        val_str = val_str.split("\t", 1)[0].strip()
+    if " " in val_str:
+        val_str = val_str.split(" ", 1)[0].strip()
+    val_str = re.sub(r"[sS](ec(onds?)?)?$", "", val_str).strip()
+    try:
+        return int(float(val_str))
+    except (ValueError, TypeError):
+        return default
 
 
 @dataclass
@@ -35,16 +72,16 @@ class AppConfig:
     # 2. OBS Studio Integration (Local obs-websocket v5 protocol)
     # --------------------------------------------------------------------------
     obs_ws_host: str = os.getenv("OBS_WS_HOST", "localhost")
-    obs_ws_port: int = int(os.getenv("OBS_WS_PORT", "4455"))
+    obs_ws_port: int = _get_int("OBS_WS_PORT", 4455)
     obs_ws_password: str = os.getenv("OBS_WS_PASSWORD", "")
     obs_transcript_source_name: str = os.getenv("OBS_TRANSCRIPT_SOURCE", "Guest Transcript")
-    obs_stream_status_poll_interval: float = float(os.getenv("OBS_STREAM_POLL_INTERVAL", "2.0"))
-    obs_connect_timeout: float = float(os.getenv("OBS_CONNECT_TIMEOUT", "0.2"))
-    obs_retry_interval_sec: float = float(os.getenv("OBS_RETRY_INTERVAL", "5.0"))
+    obs_stream_status_poll_interval: float = _get_float("OBS_STREAM_POLL_INTERVAL", 2.0)
+    obs_connect_timeout: float = _get_float("OBS_CONNECT_TIMEOUT", 0.2)
+    obs_retry_interval_sec: float = _get_float("OBS_RETRY_INTERVAL", 5.0)
 
     # OBS FX & Celebration
     obs_celebrate_source_name: str = os.getenv("OBS_CELEBRATE_SOURCE", "Celebration FX")
-    obs_celebrate_duration_sec: float = float(os.getenv("OBS_CELEBRATE_DURATION", "5.0"))
+    obs_celebrate_duration_sec: float = _get_float("OBS_CELEBRATE_DURATION", 5.0)
     obs_celebrate_filter_name: str = os.getenv("OBS_CELEBRATE_FILTER", "")
 
     # Local transcript file fallback (e.g., LocalVocal or Whisper output text/SRT)
@@ -56,10 +93,10 @@ class AppConfig:
     youtube_api_key: str = os.getenv("YOUTUBE_API_KEY", "")
     youtube_video_id: str = os.getenv("YOUTUBE_VIDEO_ID", "")
     mock_chat_enabled: bool = os.getenv("MOCK_CHAT_ENABLED", "false").lower() in ("true", "1", "yes")
-    chat_poll_interval: float = float(os.getenv("CHAT_POLL_INTERVAL", "0.5"))
-    viewer_count_poll_interval: float = float(os.getenv("VIEWER_POLL_INTERVAL", "20.0"))
+    chat_poll_interval: float = _get_float("CHAT_POLL_INTERVAL", 0.5)
+    viewer_count_poll_interval: float = _get_float("VIEWER_POLL_INTERVAL", 20.0)
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
-    chat_idle_timeout_sec: float = float(os.getenv("CHAT_IDLE_TIMEOUT_SEC", "120.0"))
+    chat_idle_timeout_sec: float = _get_float("CHAT_IDLE_TIMEOUT_SEC", 120.0)
 
     # --------------------------------------------------------------------------
     # 4. Gemini AI Brain & Co-Host Persona
@@ -67,10 +104,10 @@ class AppConfig:
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
     gemini_thinking_level: str = os.getenv("GEMINI_THINKING_LEVEL", "LOW")
-    gemini_thinking_budget: int = int(os.getenv("GEMINI_THINKING_BUDGET", "128"))
-    gemini_max_output_tokens: int = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
-    gemini_temperature: float = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
-    gemini_top_p: float = float(os.getenv("GEMINI_TOP_P", "0.9"))
+    gemini_thinking_budget: int = _get_int("GEMINI_THINKING_BUDGET", 128)
+    gemini_max_output_tokens: int = _get_int("GEMINI_MAX_OUTPUT_TOKENS", 1024)
+    gemini_temperature: float = _get_float("GEMINI_TEMPERATURE", 0.7)
+    gemini_top_p: float = _get_float("GEMINI_TOP_P", 0.9)
     ai_cohost_name: str = os.getenv("AI_COHOST_NAME", "I Am")
     ai_system_prompt: str = os.getenv(
         "AI_SYSTEM_PROMPT",
@@ -111,31 +148,31 @@ class AppConfig:
     celebrate_aliases: List[str] = field(
         default_factory=lambda: ["celebrate!", "celebrate", "!celebrate", "party!", "let's celebrate", "lets celebrate"]
     )
-    min_interjection_interval_sec: float = float(os.getenv("MIN_INTERJECTION_INTERVAL_SEC", "5.0"))
-    auto_chat_response_probability: float = float(os.getenv("AUTO_CHAT_RESPONSE_PROB", "0.60"))
+    min_interjection_interval_sec: float = _get_float("MIN_INTERJECTION_INTERVAL_SEC", 5.0)
+    auto_chat_response_probability: float = _get_float("AUTO_CHAT_RESPONSE_PROB", 0.60)
     chat_reader_mode: bool = os.getenv("CHAT_READER_MODE", "false").lower() in ("true", "1", "yes")
     ignore_peer_replies: bool = os.getenv("IGNORE_PEER_REPLIES", "true").lower() in ("true", "1", "yes")
     greet_new_chatters: bool = os.getenv("GREET_NEW_CHATTERS", "true").lower() in ("true", "1", "yes")
     greet_viewer_joins: bool = os.getenv("GREET_VIEWER_JOINS", "false").lower() in ("true", "1", "yes")
-    viewer_join_cooldown_sec: float = float(os.getenv("VIEWER_JOIN_COOLDOWN_SEC", "120.0"))
+    viewer_join_cooldown_sec: float = _get_float("VIEWER_JOIN_COOLDOWN_SEC", 120.0)
     chat_encouragement_enabled: bool = os.getenv("CHAT_ENCOURAGEMENT_ENABLED", "false").lower() in ("true", "1", "yes")
-    chat_encouragement_interval_sec: float = float(os.getenv("CHAT_ENCOURAGEMENT_INTERVAL_SEC", "300.0"))
+    chat_encouragement_interval_sec: float = _get_float("CHAT_ENCOURAGEMENT_INTERVAL_SEC", 300.0)
     thank_subscribers: bool = os.getenv("THANK_SUBSCRIBERS", "true").lower() in ("true", "1", "yes")
 
     # --------------------------------------------------------------------------
     # 5. Token Efficiency & Engagement State Controls
     # --------------------------------------------------------------------------
     obs_require_stream_active: bool = os.getenv("OBS_REQUIRE_STREAM_ACTIVE", "false").lower() in ("true", "1", "yes")
-    min_concurrent_viewers_active: int = int(os.getenv("MIN_CONCURRENT_VIEWERS_ACTIVE", "1"))
+    min_concurrent_viewers_active: int = _get_int("MIN_CONCURRENT_VIEWERS_ACTIVE", 1)
     eco_mode_enabled: bool = os.getenv("ECO_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
-    max_responses_per_minute: int = int(os.getenv("MAX_RESPONSES_PER_MINUTE", "12"))
-    max_responses_per_hour: int = int(os.getenv("MAX_RESPONSES_PER_HOUR", "120"))
+    max_responses_per_minute: int = _get_int("MAX_RESPONSES_PER_MINUTE", 12)
+    max_responses_per_hour: int = _get_int("MAX_RESPONSES_PER_HOUR", 120)
 
     # Spontaneous Idle Commentary & Adaptive Backoff
     spontaneous_commentary_enabled: bool = os.getenv("SPONTANEOUS_COMMENTARY_ENABLED", "true").lower() in ("true", "1", "yes")
-    idle_silence_threshold_sec: float = float(os.getenv("IDLE_SILENCE_THRESHOLD_SEC", "45.0"))
-    spontaneous_min_interval_sec: float = float(os.getenv("SPONTANEOUS_MIN_INTERVAL_SEC", "60.0"))
-    spontaneous_max_backoff_sec: float = float(os.getenv("SPONTANEOUS_MAX_BACKOFF_SEC", "600.0"))
+    idle_silence_threshold_sec: float = _get_float("IDLE_SILENCE_THRESHOLD_SEC", 45.0)
+    spontaneous_min_interval_sec: float = _get_float("SPONTANEOUS_MIN_INTERVAL_SEC", 60.0)
+    spontaneous_max_backoff_sec: float = _get_float("SPONTANEOUS_MAX_BACKOFF_SEC", 600.0)
     motto_phrase: str = os.getenv("MOTTO_PHRASE", "Everything is perfect.")
 
     # --------------------------------------------------------------------------
@@ -144,9 +181,9 @@ class AppConfig:
     tts_backend: str = os.getenv("TTS_BACKEND", "chatterbox")  # "chatterbox" | "edge"
     tts_server_url: str = os.getenv("TTS_SERVER_URL", "http://192.168.0.115:8123")
     tts_reference_voice: str = os.getenv("TTS_REFERENCE_VOICE", "cohost.wav")
-    tts_request_timeout_floor: float = float(os.getenv("TTS_REQUEST_TIMEOUT_FLOOR", "5.0"))
-    tts_request_timeout_ceiling: float = float(os.getenv("TTS_REQUEST_TIMEOUT_CEILING", "30.0"))
-    tts_exaggeration_default: float = float(os.getenv("TTS_EXAGGERATION_DEFAULT", "0.5"))
+    tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 5.0)
+    tts_request_timeout_ceiling: float = _get_float("TTS_REQUEST_TIMEOUT_CEILING", 30.0)
+    tts_exaggeration_default: float = _get_float("TTS_EXAGGERATION_DEFAULT", 0.5)
     tts_mood_exaggeration_map: Dict[str, float] = field(
         default_factory=lambda: {
             "hyped": 0.8,
@@ -168,7 +205,7 @@ class AppConfig:
     # Legacy Edge-TTS fallback settings (used when tts_backend='edge' or on chatterbox failover)
     tts_engine: str = os.getenv("TTS_ENGINE", "edge-tts")
     tts_voice: str = os.getenv("TTS_VOICE", "en-US-ChristopherNeural")
-    tts_sample_rate: int = int(os.getenv("TTS_SAMPLE_RATE", "48000"))
+    tts_sample_rate: int = _get_int("TTS_SAMPLE_RATE", 48000)
     tts_pitch: str = os.getenv("TTS_PITCH", "+0Hz")
     tts_rate: str = os.getenv("TTS_RATE", "+5%")
 
@@ -176,26 +213,26 @@ class AppConfig:
     # 7. Visualizer Settings (Supports 16:9 1920x1080 and 9:16 1080x1920)
     # --------------------------------------------------------------------------
     visualizer_aspect_ratio: str = os.getenv("VISUALIZER_ASPECT_RATIO", "16:9")
-    visualizer_width: int = int(os.getenv("VISUALIZER_WIDTH", "1080" if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else "1920"))
-    visualizer_height: int = int(os.getenv("VISUALIZER_HEIGHT", "1920" if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else "1080"))
-    visualizer_window_width: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_WIDTH")) if os.getenv("VISUALIZER_WINDOW_WIDTH") else None
-    visualizer_window_height: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_HEIGHT")) if os.getenv("VISUALIZER_WINDOW_HEIGHT") else None
-    visualizer_window_x: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_X")) if os.getenv("VISUALIZER_WINDOW_X") else None
-    visualizer_window_y: Optional[int] = int(os.getenv("VISUALIZER_WINDOW_Y")) if os.getenv("VISUALIZER_WINDOW_Y") else None
+    visualizer_width: int = _get_int("VISUALIZER_WIDTH", 1080 if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else 1920)
+    visualizer_height: int = _get_int("VISUALIZER_HEIGHT", 1920 if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else 1080)
+    visualizer_window_width: Optional[int] = _get_int("VISUALIZER_WINDOW_WIDTH", 0) or None
+    visualizer_window_height: Optional[int] = _get_int("VISUALIZER_WINDOW_HEIGHT", 0) or None
+    visualizer_window_x: Optional[int] = _get_int("VISUALIZER_WINDOW_X", 0) if os.getenv("VISUALIZER_WINDOW_X") else None
+    visualizer_window_y: Optional[int] = _get_int("VISUALIZER_WINDOW_Y", 0) if os.getenv("VISUALIZER_WINDOW_Y") else None
     visualizer_native_window: bool = os.getenv("VISUALIZER_NATIVE_WINDOW", "false").lower() in ("true", "1", "yes")
-    visualizer_fps: int = int(os.getenv("VISUALIZER_FPS", "60"))
+    visualizer_fps: int = _get_int("VISUALIZER_FPS", 60)
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
     visualizer_borderless: bool = os.getenv("VISUALIZER_BORDERLESS", "false").lower() in ("true", "1", "yes")
     show_host_transcript_card: bool = os.getenv("SHOW_HOST_TRANSCRIPT_CARD", "false").lower() in ("true", "1", "yes")
 
     # Comment Panel & Visualizer Transition Timings
-    comment_fade_in_sec: float = float(os.getenv("COMMENT_FADE_IN_SEC", "0.6"))
-    comment_fade_out_sec: float = float(os.getenv("COMMENT_FADE_OUT_SEC", "1.2"))
-    comment_post_speech_hold_sec: float = float(os.getenv("COMMENT_POST_SPEECH_HOLD_SEC", "15.0"))
-    comment_active_queue_hold_sec: float = float(os.getenv("COMMENT_ACTIVE_QUEUE_HOLD_SEC", "2.5"))
-    comment_pause_sec: float = float(os.getenv("COMMENT_PAUSE_SEC", "2.0"))
-    motto_fade_in_sec: float = float(os.getenv("MOTTO_FADE_IN_SEC", "1.4"))
-    motto_fade_out_sec: float = float(os.getenv("MOTTO_FADE_OUT_SEC", "0.6"))
+    comment_fade_in_sec: float = _get_float("COMMENT_FADE_IN_SEC", 0.6)
+    comment_fade_out_sec: float = _get_float("COMMENT_FADE_OUT_SEC", 1.2)
+    comment_post_speech_hold_sec: float = _get_float("COMMENT_POST_SPEECH_HOLD_SEC", 15.0)
+    comment_active_queue_hold_sec: float = _get_float("COMMENT_ACTIVE_QUEUE_HOLD_SEC", 2.5)
+    comment_pause_sec: float = _get_float("COMMENT_PAUSE_SEC", 2.0)
+    motto_fade_in_sec: float = _get_float("MOTTO_FADE_IN_SEC", 1.4)
+    motto_fade_out_sec: float = _get_float("MOTTO_FADE_OUT_SEC", 0.6)
 
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()

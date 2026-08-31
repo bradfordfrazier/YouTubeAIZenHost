@@ -1582,8 +1582,8 @@ class Visualizer:
             if curr_q_msg and curr_q_msg != self.active_question_text:
                 self.active_question_text = curr_q_msg
                 motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
-                # If prior spoken comment/greeting is actively visible, let it finish dissolving before fading question in
-                if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05:
+                # If prior spoken comment/greeting or motto is actively visible, let it finish dissolving before fading question in
+                if self.ai_text_current and self.ai_text_alpha > 0.005:
                     self.ai_text_state = "fade_out"
                     self.ai_text_target = ""
                     self.question_fade_alpha = 0.0
@@ -1752,7 +1752,7 @@ class Visualizer:
         if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in", "motto_pause", "idle_empty")):
             self.ai_text_target = desired_target
             # If current statement is visible and different from desired target, fade it out first!
-            if self.ai_text_current and self.ai_text_current != desired_target and self.ai_text_alpha > 0.05:
+            if self.ai_text_current and self.ai_text_current != desired_target and self.ai_text_alpha > 0.005:
                 self.ai_text_state = "fade_out"
             elif desired_target:
                 if desired_target == motto:
@@ -1804,7 +1804,9 @@ class Visualizer:
                         self.ai_text_y_drift = 6.0
                 elif self.ai_text_target:
                     self.ai_text_current = self.ai_text_target
+                    self.ai_text_alpha = 0.0
                     self.ai_text_state = "fade_in"
+                    self.ai_text_y_drift = 6.0
                 else:
                     self.ai_text_current = ""
                     self.ai_text_state = "idle_empty"

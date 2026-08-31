@@ -241,6 +241,46 @@ def test_greeting_dissolves_smoothly_when_next_chat_question_arrives():
     assert vis.active_question_text == "Who submits the Jira ticket?"
 
 
+def test_motto_dissolves_smoothly_when_next_chat_question_arrives():
+    """Verifies that when a chat question arrives while motto is displayed, the motto is NOT cut off and dissolves smoothly."""
+    vis = Visualizer(width=1920, height=1080)
+
+    motto = config.motto_phrase
+    vis.ai_text_current = motto
+    vis.ai_text_target = motto
+    vis.ai_text_alpha = 1.0
+    vis.ai_text_state = "steady"
+
+    # New chat question arrives as pinned chat
+    question_item = {"author": "ExistentialDave", "message": "Who submits the Jira ticket?"}
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+
+    # Motto must NOT be instantly cleared or snapped to alpha 0! It must be in fade_out while question waits
+    assert vis.ai_text_current == motto, "Expected motto text to remain visible during fade_out"
+    assert vis.ai_text_state == "fade_out", "Expected motto state to be fade_out"
+    assert vis.ai_text_alpha > 0.9, "Expected motto alpha to still be high on initial fade frame"
+    assert vis.question_fade_state == "waiting_for_dissolve", "Expected question to wait for motto dissolve"
+
+    # Render frames through the motto fade-out (25 frames)
+    alphas = []
+    for _ in range(25):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+        alphas.append(vis.ai_text_alpha)
+
+    # Verify smooth downward trend without sudden cutoffs
+    for i in range(len(alphas) - 1):
+        assert alphas[i] >= alphas[i+1], f"Motto alpha jumped unexpectedly: {alphas[i]} -> {alphas[i+1]}"
+
+    # Finish motto fade-out until alpha reaches 0.0
+    for _ in range(50):
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=question_item)
+
+    # Now motto is completely dissolved and question card is fading in
+    assert vis.ai_text_alpha == 0.0
+    assert vis.question_fade_state in ("fade_in", "steady")
+    assert vis.active_question_text == "Who submits the Jira ticket?"
+
+
 def test_motto_delay_configurable():
     """Verifies that motto_pre_fade_in_sec (MOTTO_PRE_FADE_IN_SEC) accurately controls the pause duration before motto display."""
     orig_delay = getattr(config, "motto_pre_fade_in_sec", 2.0)
@@ -322,6 +362,8 @@ if __name__ == "__main__":
     test_greeting_fade_out_to_motto_lifecycle()
     print("Running test_greeting_dissolves_smoothly_when_next_chat_question_arrives...")
     test_greeting_dissolves_smoothly_when_next_chat_question_arrives()
+    print("Running test_motto_dissolves_smoothly_when_next_chat_question_arrives...")
+    test_motto_dissolves_smoothly_when_next_chat_question_arrives()
     print("Running test_motto_delay_configurable...")
     test_motto_delay_configurable()
     print("\nALL VIEWER JOIN & MOTTO TRANSITION TESTS PASSED 100%!")

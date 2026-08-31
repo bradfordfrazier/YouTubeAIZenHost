@@ -228,7 +228,7 @@ def test_question_fade_in_out_animation():
     }
     audio_metrics = {"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}
 
-    # 1. Initial Frame: Question detected, starts fade_in
+    # 1. Initial Frame: Question detected, dissolves previous state / starts fade_in
     vis.render_frame(
         audio_metrics=audio_metrics,
         chat_messages=[],
@@ -236,11 +236,10 @@ def test_question_fade_in_out_animation():
         ai_subtitle="",
         pinned_chat_message=pinned_msg,
     )
-    assert vis.question_fade_state in ("fade_in", "steady")
-    assert vis.question_fade_alpha > 0.0
+    assert vis.question_fade_state in ("waiting_for_dissolve", "fade_in", "steady")
 
-    # Step through frames to reach full steady state (0.6s fade_in = 36 frames at 60fps)
-    for _ in range(45):
+    # Step through frames to dissolve motto and reach full steady state
+    for _ in range(80):
         vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=[],

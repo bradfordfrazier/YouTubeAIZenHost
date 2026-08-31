@@ -1729,10 +1729,10 @@ class Visualizer:
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
         if self.subtitle_target_text:
             desired_target = self.subtitle_target_text
-        elif self.ai_text_target == motto:
-            desired_target = motto
+        elif self.ai_text_state in ("idle_empty", "fade_out") and self.ai_text_target == "":
+            desired_target = ""
         else:
-            desired_target = self.ai_text_target or ""
+            desired_target = motto
 
         # State Machine: Ethereal Emergence from Nowhere and Dissolution into Nowhere
         if desired_target != self.ai_text_target or (self.ai_text_current != desired_target and self.ai_text_state not in ("fade_out", "fade_in", "motto_pause", "idle_empty")):
@@ -1949,7 +1949,7 @@ class Visualizer:
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Ask I AM Anything' oracle inquiry callout card:
+        Draws the 'Ask Anything' oracle inquiry callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
         - Top centered 'ORACLE INQUIRY' badge tag
         - Centered title row with celestial sunbeam question glyph + bold title

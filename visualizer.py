@@ -622,8 +622,14 @@ class Visualizer:
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
-            self.ai_text_state = "motto_pause"
-            self.motto_pause_timer = 2.0
+            motto_delay = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", getattr(self.cfg, "comment_pause_sec", 2.0)))))
+            if motto_delay > 0.0:
+                self.ai_text_state = "motto_pause"
+                self.motto_pause_timer = motto_delay
+            else:
+                self.ai_text_current = motto
+                self.ai_text_state = "fade_in"
+                self.ai_text_y_drift = 6.0
             self._active_pinned_message = None
 
     def set_subtitle(self, text: str):
@@ -1607,6 +1613,7 @@ class Visualizer:
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
         comment_pause_sec = max(0.0, getattr(self.cfg, "comment_pause_sec", 2.0))
+        motto_pre_fade_in_sec = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", getattr(self.cfg, "comment_pause_sec", 2.0)))))
         motto_fade_in_sec = max(0.05, getattr(self.cfg, "motto_fade_in_sec", 1.4))
         motto_fade_out_sec = max(0.05, getattr(self.cfg, "motto_fade_out_sec", 0.6))
 
@@ -1751,8 +1758,13 @@ class Visualizer:
                 if desired_target == motto:
                     self.ai_text_current = ""
                     self.ai_text_alpha = 0.0
-                    self.ai_text_state = "motto_pause"
-                    self.motto_pause_timer = comment_pause_sec
+                    if motto_pre_fade_in_sec > 0.0:
+                        self.ai_text_state = "motto_pause"
+                        self.motto_pause_timer = motto_pre_fade_in_sec
+                    else:
+                        self.ai_text_current = motto
+                        self.ai_text_state = "fade_in"
+                        self.ai_text_y_drift = 6.0
                 else:
                     self.ai_text_current = desired_target
                     self.ai_text_alpha = 0.0
@@ -1782,8 +1794,14 @@ class Visualizer:
                     self.active_question_start_time = time.time()
                 elif self.ai_text_target == motto:
                     self.ai_text_current = ""
-                    self.ai_text_state = "motto_pause"
-                    self.motto_pause_timer = comment_pause_sec
+                    if motto_pre_fade_in_sec > 0.0:
+                        self.ai_text_state = "motto_pause"
+                        self.motto_pause_timer = motto_pre_fade_in_sec
+                    else:
+                        self.ai_text_current = motto
+                        self.ai_text_alpha = 0.0
+                        self.ai_text_state = "fade_in"
+                        self.ai_text_y_drift = 6.0
                 elif self.ai_text_target:
                     self.ai_text_current = self.ai_text_target
                     self.ai_text_state = "fade_in"

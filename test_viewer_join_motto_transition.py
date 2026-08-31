@@ -241,6 +241,72 @@ def test_greeting_dissolves_smoothly_when_next_chat_question_arrives():
     assert vis.active_question_text == "Who submits the Jira ticket?"
 
 
+def test_motto_delay_configurable():
+    """Verifies that motto_pre_fade_in_sec (MOTTO_PRE_FADE_IN_SEC) accurately controls the pause duration before motto display."""
+    orig_delay = getattr(config, "motto_pre_fade_in_sec", 2.0)
+    orig_fade_in = config.comment_fade_in_sec
+    orig_fade_out = config.comment_fade_out_sec
+
+    try:
+        # 1. Test custom 3.0s delay
+        config.motto_pre_fade_in_sec = 3.0
+        config.comment_fade_in_sec = 0.1
+        config.comment_fade_out_sec = 0.1
+
+        vis = Visualizer(width=1920, height=1080)
+        vis.set_subtitle("Testing custom motto delay.")
+        for _ in range(10):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Testing custom motto delay.", pinned_chat_message=None)
+        assert vis.ai_text_state == "steady"
+
+        vis.clear_subtitle()
+        assert vis.ai_text_state == "fade_out"
+
+        # Fade out takes ~6 frames at 60fps
+        for _ in range(10):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+
+        # Should be in motto_pause with ~3.0s timer remaining
+        assert vis.ai_text_state == "motto_pause"
+        assert 2.5 <= vis.motto_pause_timer <= 3.0
+        assert vis.ai_text_alpha == 0.0
+
+        # Advance 60 frames (1.0s at 60fps) -> still in motto_pause with ~1.9s remaining
+        for _ in range(60):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        assert vis.ai_text_state == "motto_pause"
+        assert 1.5 <= vis.motto_pause_timer <= 2.0
+
+        # Advance another 130 frames (~2.16s) -> pause expires, motto enters fade_in
+        for _ in range(130):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        assert vis.ai_text_state in ("fade_in", "steady")
+        assert vis.ai_text_current == config.motto_phrase
+
+        # 2. Test 0.0s delay (immediate transition into motto fade_in)
+        config.motto_pre_fade_in_sec = 0.0
+        vis2 = Visualizer(width=1920, height=1080)
+        vis2.set_subtitle("Testing zero motto delay.")
+        for _ in range(10):
+            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Testing zero motto delay.", pinned_chat_message=None)
+        assert vis2.ai_text_state == "steady"
+
+        vis2.clear_subtitle()
+        assert vis2.ai_text_state == "fade_out"
+
+        # Step through fade_out frames
+        for _ in range(10):
+            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+
+        # With 0.0s delay, motto immediately transitions to fade_in/steady without hanging in motto_pause
+        assert vis2.ai_text_state in ("fade_in", "steady")
+        assert vis2.ai_text_current == config.motto_phrase
+    finally:
+        config.motto_pre_fade_in_sec = orig_delay
+        config.comment_fade_in_sec = orig_fade_in
+        config.comment_fade_out_sec = orig_fade_out
+
+
 if __name__ == "__main__":
     print("Running test_motto_smooth_fade_out_for_turn...")
     test_motto_smooth_fade_out_for_turn()
@@ -256,4 +322,6 @@ if __name__ == "__main__":
     test_greeting_fade_out_to_motto_lifecycle()
     print("Running test_greeting_dissolves_smoothly_when_next_chat_question_arrives...")
     test_greeting_dissolves_smoothly_when_next_chat_question_arrives()
+    print("Running test_motto_delay_configurable...")
+    test_motto_delay_configurable()
     print("\nALL VIEWER JOIN & MOTTO TRANSITION TESTS PASSED 100%!")

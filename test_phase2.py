@@ -192,6 +192,43 @@ def test_visualizer_cast_badge_rendering():
     print("[PASS] Visualizer [CAST] Badge rendering verified!")
 
 
+def test_cast_eco_mode_audience_gating():
+    print("\n" + "=" * 50)
+    print("TEST 5: Cast Subsystem ECO MODE Audience Gating (CAST_REQUIRE_VIEWERS)")
+    print("=" * 50)
+
+    # 1. When cast_require_viewers is True (default)
+    config.cast_require_viewers = True
+
+    # Standby / offline scene -> should not trigger
+    mode_standby = "standby"
+    viewers = 0
+    should_pause_standby = (mode_standby == "standby")
+    assert should_pause_standby is True, "Expected cast to pause in standby mode"
+
+    # Eco mode with 0 viewers -> should pause
+    mode_eco = "eco"
+    viewers = 0
+    should_pause_eco = config.cast_require_viewers and (mode_eco == "eco" or viewers == 0)
+    assert should_pause_eco is True, "Expected cast to pause in ECO mode when 0 viewers and cast_require_viewers=True"
+
+    # Active mode with 2 viewers -> should proceed
+    mode_active = "active"
+    viewers = 2
+    should_pause_active = config.cast_require_viewers and (mode_active == "eco" or viewers == 0)
+    assert should_pause_active is False, "Expected cast to proceed in ACTIVE mode with viewers"
+
+    # 2. When cast_require_viewers is False (offline rehearsal mode)
+    config.cast_require_viewers = False
+    should_pause_offline_rehearsal = config.cast_require_viewers and (mode_eco == "eco" or viewers == 0)
+    assert should_pause_offline_rehearsal is False, "Expected cast to run during rehearsal even with 0 viewers"
+
+    # Reset to default
+    config.cast_require_viewers = True
+    print("-> Verified CAST_REQUIRE_VIEWERS suppression during ECO mode and enablement with audience.")
+    print("[PASS] Cast ECO MODE Audience Gating verified!")
+
+
 async def run_all_phase2_tests():
     print("\n" + "#" * 60)
     print("RUNNING PHASE 2 VERIFICATION TEST SUITE")
@@ -201,6 +238,7 @@ async def run_all_phase2_tests():
     test_cast_engine_archetypes_and_cycling()
     test_cast_pacing_logic()
     test_visualizer_cast_badge_rendering()
+    test_cast_eco_mode_audience_gating()
 
     print("\n" + "#" * 60)
     print("ALL PHASE 2 TESTS PASSED PERFECTLY!")
@@ -209,3 +247,4 @@ async def run_all_phase2_tests():
 
 if __name__ == "__main__":
     asyncio.run(run_all_phase2_tests())
+

@@ -92,7 +92,6 @@ class AppConfig:
     # --------------------------------------------------------------------------
     youtube_api_key: str = os.getenv("YOUTUBE_API_KEY", "")
     youtube_video_id: str = os.getenv("YOUTUBE_VIDEO_ID", "")
-    mock_chat_enabled: bool = os.getenv("MOCK_CHAT_ENABLED", "false").lower() in ("true", "1", "yes")
     chat_poll_interval: float = _get_float("CHAT_POLL_INTERVAL", 0.5)
     viewer_count_poll_interval: float = _get_float("VIEWER_POLL_INTERVAL", 20.0)
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
@@ -314,6 +313,7 @@ class AppConfig:
     # 12. The Cast Subsystem (B1-B4: Synthetic Asker Archetypes)
     # --------------------------------------------------------------------------
     cast_enabled: bool = os.getenv("CAST_ENABLED", "true").lower() in ("true", "1", "yes")
+    cast_require_viewers: bool = os.getenv("CAST_REQUIRE_VIEWERS", "true").lower() in ("true", "1", "yes")
     cast_min_interval_sec: float = float(os.getenv("CAST_MIN_INTERVAL_SEC", "75.0"))
     cast_max_interval_sec: float = float(os.getenv("CAST_MAX_INTERVAL_SEC", "160.0"))
     cast_quiet_chat_threshold_sec: float = float(os.getenv("CAST_QUIET_CHAT_THRESHOLD_SEC", "45.0"))

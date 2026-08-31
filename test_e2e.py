@@ -18,7 +18,6 @@ async def run_e2e_test():
     print("=" * 65)
 
     config.visualizer_headless = True
-    config.mock_chat_enabled = False
 
     app = LocalCoHostApp()
     app.running = True

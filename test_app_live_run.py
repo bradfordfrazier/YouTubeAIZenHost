@@ -15,7 +15,6 @@ async def main():
 
     config.visualizer_headless = True
     config.local_audio_enabled = False
-    config.mock_chat_enabled = True
 
     app = LocalCoHostApp()
 

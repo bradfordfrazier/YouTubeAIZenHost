@@ -1248,11 +1248,6 @@ class LocalCoHostApp:
             or getattr(self.cfg, "host_streamer_handle", "").strip()
         )
 
-        if self.cfg.mock_chat_enabled:
-            logger.info("Using Mock Chat Generator (MOCK_CHAT_ENABLED=true)")
-            await self._run_mock_chat_generator()
-            return
-
         if not raw_input:
             logger.warning(
                 "YouTube Chat Poller IDLE: No YOUTUBE_VIDEO_ID or YOUTUBE_CHANNEL_HANDLE configured in .env.\n"
@@ -1585,10 +1580,6 @@ class LocalCoHostApp:
                             if self.concurrent_viewers > 0:
                                 logger.info("🌙 [Chat Inactive] No recent chat activity; resetting viewer count to 0 (ECO mode).")
                                 self._on_viewer_count_update(0, 0)
-                else:
-                    if self.cfg.mock_chat_enabled:
-                        simulated_viewers = max(5, chat_velocity * 3)
-                        self._on_viewer_count_update(simulated_viewers, chat_velocity)
 
             except Exception as e:
                 logger.debug(f"Viewer poller cycle note: {e}")
@@ -1756,67 +1747,21 @@ class LocalCoHostApp:
                 logger.debug(f"Console input error: {e}")
                 await asyncio.sleep(0.5)
 
-    async def _run_mock_chat_generator(self):
-        """Generates realistic stream chat messages for testing and offline rehearsal."""
-        host_name = self.cfg.host_streamer_name
-        cohost_name = self.cfg.ai_cohost_name
-        mock_viewers = [
-            ("CyberViper", f"Hey {host_name} & {cohost_name}! Ready for the stream!"),
-            ("NeonGamer99", f"{cohost_name} what do you think about the new update?"),
-            ("PixelPanda", "LMAO that was crazy!!"),
-            ("RetroByte", "W streamer + W AI cohost"),
-            ("ShadowRider", f"Hey {cohost_name}, can you roast the host real quick?"),
-            ("AeroBlade", "That clutch play was 10/10"),
-            ("GlitchCat", "Super stoked for today's live build"),
-            ("QuantumTech", f"{cohost_name}, what is the nature of consciousness?"),
-            ("Valkyrie", "Let's goooo! 🔥🔥🔥"),
-            ("CodeSamurai", "All local architecture is blazing fast!"),
-        ]
-
-        while self.running:
-            await asyncio.sleep(random.uniform(4.0, 8.0))
-            author, message = random.choice(mock_viewers)
-            is_sc = random.random() < 0.08
-            sc_amount = "$5.00" if is_sc else ""
-
-            now_ts = time.time()
-            self.chat_timestamps.append(now_ts)
-
-            chat_entry = {
-                "author": author,
-                "author_type": "member" if is_sc else "viewer",
-                "message": message,
-                "is_superchat": is_sc,
-                "amount": sc_amount,
-                "timestamp": now_ts,
-            }
-            self.chat_history.append(chat_entry)
-            self._save_cached_chat()
-            self.brain.add_chat_message(author, message, is_sc, sc_amount)
-            self.last_activity_time = now_ts
-            self.last_chat_time = now_ts
-
-            logger.info(f"💬 [Simulated Chat] @{author}: {message} {f'({sc_amount})' if is_sc else ''}")
-
-            should_trigger, reason = self.brain.should_trigger_response(message, is_host=False)
-            if is_sc or should_trigger:
-                prio = 2 if is_sc else (3 if "direct_mention" in reason else 4)
-                ev_type = "superchat" if is_sc else ("direct_mention" if "direct_mention" in reason else "chat")
-                self._trigger_ai_turn(prompt_trigger=f"Chat message from @{author}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
-
     async def cast_scheduler_task(self):
         """
         The Cast Subsystem Pacing Task (B1-B4).
-        During quiet stream intervals, injects structured questions from the openly-fictional
-        cast ensemble (@ExistentialDave, @SpeedrunnerKyle, @AstralBrenda, @TrollChad, @HeartfeltSarah, @CuriousTimmy).
+        During quiet stream intervals with an active audience, injects structured questions
+        from the openly-fictional cast ensemble (@ExistentialDave, @SpeedrunnerKyle, @AstralBrenda,
+        @TrollChad, @HeartfeltSarah, @CuriousTimmy).
         Yields immediately whenever real human chatters or host speech is detected.
+        Pauses in ECO MODE (0 viewers) when cast_require_viewers is enabled.
         """
         if not getattr(self.cfg, "cast_enabled", True):
             return
 
         logger.info(
             f"🎭 [Cast Scheduler] Synthetic Cast ensemble active (Interval: {self.cfg.cast_min_interval_sec}-{self.cfg.cast_max_interval_sec}s, "
-            f"Quiet threshold: {self.cfg.cast_quiet_chat_threshold_sec}s)"
+            f"Quiet threshold: {self.cfg.cast_quiet_chat_threshold_sec}s, Require Viewers: {getattr(self.cfg, 'cast_require_viewers', True)})"
         )
         # Stagger initial start
         await asyncio.sleep(15.0)
@@ -1827,7 +1772,12 @@ class LocalCoHostApp:
                 if not getattr(self.cfg, "cast_enabled", True):
                     continue
 
+                self._update_engagement_state()
+
                 if self.engagement_mode == "standby":
+                    continue
+
+                if getattr(self.cfg, "cast_require_viewers", True) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
                     continue
 
                 now = time.time()
@@ -2210,9 +2160,6 @@ class LocalCoHostApp:
         if getattr(self.cfg, "reflection_cache_enabled", True) and hasattr(self.brain, "reflection_cache"):
             self.tasks.append(asyncio.create_task(self.brain.reflection_cache.replenish_worker(self.brain), name="reflection_cache_worker"))
 
-        if getattr(self.cfg, "mock_chat_enabled", False):
-            self.tasks.append(asyncio.create_task(self._run_mock_chat_generator(), name="mock_chat"))
-
         try:
             results = await asyncio.gather(*self.tasks, return_exceptions=True)
             for task, res in zip(self.tasks, results):
@@ -2313,7 +2260,6 @@ def main():
     parser.add_argument("--window-pos", type=int, nargs=2, metavar=("X", "Y"), default=None, help="Explicit visualizer desktop window screen position (e.g. --window-pos 40 40)")
     parser.add_argument("--borderless", action="store_true", help="Launch visualizer in borderless window mode without titlebar/borders")
     parser.add_argument("--headless", action="store_true", help="Run visualizer in offscreen headless mode")
-    parser.add_argument("--mock-chat", action="store_true", help="Enable simulated YouTube live chat")
     parser.add_argument("--no-local-audio", action="store_true", help="Disable local Windows audio output (NDI audio only)")
     parser.add_argument("--audio-device", "-ad", type=str, default=None, help="Target Windows audio output device (name substring or index)")
     parser.add_argument("--no-ndi-audio", action="store_true", help="Disable NDI audio stream (video only)")
@@ -2358,8 +2304,6 @@ def main():
         config.visualizer_borderless = True
     if args.headless:
         config.visualizer_headless = True
-    if args.mock_chat:
-        config.mock_chat_enabled = True
     if args.no_local_audio:
         config.local_audio_enabled = False
     if args.audio_device is not None:

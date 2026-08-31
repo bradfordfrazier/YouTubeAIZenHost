@@ -1358,8 +1358,8 @@ class Visualizer:
 
             # Author line inside pinned container (100% opaque text)
             pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
-            auth_sh = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
-            auth_rend = self.font_chat_author.render(f"📌 {pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
+            auth_sh = self.font_chat_author.render(f"{pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
+            auth_rend = self.font_chat_author.render(f"{pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
             pin_surf.blit(auth_rend, (10, 6))
 
@@ -1519,8 +1519,8 @@ class Visualizer:
                     row_surf.blit(badge_txt, (badge_x + 7, badge_y + (1 if self.is_vertical else 0)))
 
                     # Author & Message lines inside row_surf (100% opaque text)
-                    auth_sh = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, (0, 0, 0))
-                    auth_rend = self.font_chat_author.render(f"💬 {clean_author}{sc_badge_str}:", True, author_color)
+                    auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                    auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
                     row_surf.blit(auth_sh, (8 + sh_off, 4 + sh_off))
                     row_surf.blit(auth_rend, (8, 4))
 
@@ -1700,7 +1700,7 @@ class Visualizer:
             alpha_int = int(np.clip(self.question_fade_alpha * 255, 0, 255))
 
             # 1. Author Header line (Centered horizontally)
-            auth_str = f"💬 {clean_author}{sc_badge_str}:"
+            auth_str = f"{clean_author}{sc_badge_str}:"
             auth_w = self.font_chat_author.size(auth_str)[0]
             auth_x = (card_w - auth_w) // 2
             sh_off = 2 if self.is_vertical else 1

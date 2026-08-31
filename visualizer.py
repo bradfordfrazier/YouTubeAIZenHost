@@ -1986,7 +1986,7 @@ class Visualizer:
         surf.blit(tag_txt, (tag_x + (22 if self.is_vertical else 20), tag_y + (2 if self.is_vertical else 1)))
 
         # 3. Middle Title Row: Celestial Question Badge + Title (Centered Lockup)
-        title_str = "Ask I AM Anything"
+        title_str = "Ask Anything"
         title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
         sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
 

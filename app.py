@@ -826,11 +826,11 @@ class LocalCoHostApp:
                     self.chat_history.append(dict(self.current_pinned_chat))
                     self._save_cached_chat()
 
-        # Calculate minimum reading duration for the question if present
+        # Calculate minimum reading duration for the question if present (natural human reading speed ~200-250 WPM)
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:
             word_count = len(question_text.split())
-            min_question_read_sec = max(3.5, min(6.5, 2.0 + word_count * 0.35))
+            min_question_read_sec = max(1.5, min(4.5, 0.8 + word_count * 0.22))
         else:
             min_question_read_sec = 0.0
 

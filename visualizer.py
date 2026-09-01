@@ -1625,12 +1625,15 @@ class Visualizer:
                 self.active_question_text = ""
                 self.active_question_start_time = 0.0
 
-        # Calculate word-count-based reading duration (min 3.5s, up to 7.0s)
+        # Calculate word-count-based reading duration for natural human reading speed (~200-250 WPM)
         q_words = len(self.active_question_text.split()) if self.active_question_text else 0
-        min_q_linger = max(3.5, min(7.0, 2.0 + q_words * 0.35))
+        min_q_linger = max(1.5, min(4.5, 0.8 + q_words * 0.22))
         q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
 
         # 2. Update Question Fade In / Steady / Fade Out State Machine
+        q_fade_in_rate = 1.0 / 0.35
+        q_fade_out_rate = 1.0 / 0.35
+
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
         comment_pause_sec = max(0.0, getattr(self.cfg, "comment_pause_sec", 2.0))
@@ -1644,7 +1647,7 @@ class Visualizer:
         motto_fade_out_rate = 1.0 / motto_fade_out_sec
 
         if self.question_fade_state == "fade_in":
-            self.question_fade_alpha += dt * comment_fade_in_rate
+            self.question_fade_alpha += dt * q_fade_in_rate
             self.question_y_drift = 6.0 * (1.0 - min(1.0, self.question_fade_alpha))
             if self.question_fade_alpha >= 1.0:
                 self.question_fade_alpha = 1.0
@@ -1655,13 +1658,13 @@ class Visualizer:
             self.question_fade_alpha = 1.0
             self.question_y_drift = 0.0
             # If the Oracle is ready to speak or speaking AND the question has lingered long enough, trigger fade_out
-            if (is_speaking or self.subtitle_target_text) and q_time_elapsed >= (min_q_linger - 0.35):
+            if (is_speaking or self.subtitle_target_text) and q_time_elapsed >= (min_q_linger - 0.15):
                 self.question_fade_state = "fade_out"
             elif not pinned_chat_message:
                 self.question_fade_state = "fade_out"
 
         elif self.question_fade_state == "fade_out":
-            self.question_fade_alpha -= dt * comment_fade_out_rate
+            self.question_fade_alpha -= dt * q_fade_out_rate
             self.question_y_drift = -4.0 * (1.0 - max(0.0, self.question_fade_alpha))
             if self.question_fade_alpha <= 0.0:
                 self.question_fade_alpha = 0.0

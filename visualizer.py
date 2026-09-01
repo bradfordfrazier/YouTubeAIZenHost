@@ -1982,8 +1982,8 @@ class Visualizer:
         if self.is_vertical:
             card_w, card_h = 940, 190
             target_x = (self.width - card_w) // 2
-            # Position shifted up another line of text (cy + 144)
-            target_y = self.core_cy + 144
+            # Position adjusted so the promo bottom aligns closer to the bottom of the I AM badge (cy + 168)
+            target_y = self.core_cy + 168
             start_y = target_y - 40
             cur_x = target_x
             cur_y = int(start_y + (target_y - start_y) * self.promo_slide_factor)
@@ -1992,8 +1992,8 @@ class Visualizer:
         else:
             card_w, card_h = 840, 160
             target_x = (self.width - card_w) // 2
-            # Position shifted up another line of text (cy + 152)
-            target_y = self.core_cy + 152
+            # Position adjusted so the promo bottom aligns closer to the bottom of the I AM badge (cy + 168)
+            target_y = self.core_cy + 168
             start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
             hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0
@@ -2010,9 +2010,8 @@ class Visualizer:
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Ask Anything' oracle inquiry callout card:
+        Draws the 'Ask Anything' inquiry callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
-        - Top centered 'ORACLE INQUIRY' badge tag
         - Centered title row with celestial sunbeam question glyph + bold title
         - Centered high-legibility subtitle
         - Shimmering specular rim sweep & corner glints
@@ -2030,23 +2029,7 @@ class Visualizer:
         # Top rim specular sheen
         pygame.draw.line(surf, (255, 255, 255, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
 
-        # 2. Top Pill Tag: "ORACLE INQUIRY" (Centered)
-        tag_txt = self.font_callout_tag.render("ORACLE INQUIRY", True, (0, 240, 255))
-        tag_w = tag_txt.get_width() + (36 if self.is_vertical else 30)
-        tag_h = 26 if self.is_vertical else 22
-        tag_x = (w - tag_w) // 2
-        tag_y = 16 if self.is_vertical else 12
-
-        pygame.draw.rect(surf, (0, 200, 255, min(255, int(50 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), border_radius=tag_h // 2)
-        pygame.draw.rect(surf, (0, 240, 255, min(255, int(180 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), width=1, border_radius=tag_h // 2)
-
-        # Pulsating Live Cyan Dot
-        dot_a = min(255, int((160 + 95 * math.sin(t * 6.0)) * alpha_mult))
-        dot_r = 4 if self.is_vertical else 4
-        pygame.draw.circle(surf, (0, 255, 200, dot_a), (tag_x + 12, tag_y + tag_h // 2), dot_r)
-        surf.blit(tag_txt, (tag_x + (22 if self.is_vertical else 20), tag_y + (2 if self.is_vertical else 1)))
-
-        # 3. Middle Title Row: Celestial Question Badge + Title (Centered Lockup)
+        # 2. Centered Title Row: Celestial Question Badge + Title (Centered Lockup)
         title_str = "Ask Anything"
         title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
         sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
@@ -2056,9 +2039,9 @@ class Visualizer:
         total_title_w = (badge_r * 2 + 8) + lockup_gap + title_rend.get_width()
         lockup_x = (w - total_title_w) // 2
         badge_cx = lockup_x + badge_r + 4
-        badge_cy = 76 if self.is_vertical else 62
+        badge_cy = 68 if self.is_vertical else 54
         title_x = lockup_x + (badge_r * 2 + 8) + lockup_gap
-        title_y = 57 if self.is_vertical else 45
+        title_y = 48 if self.is_vertical else 38
 
         # Rotating halo rays around question badge
         ray_angle_base = t * 1.6
@@ -2083,12 +2066,12 @@ class Visualizer:
         surf.blit(sh_rend, (title_x + 2, title_y + 2))
         surf.blit(title_rend, (title_x, title_y))
 
-        # 4. Bottom Subtitle Row (Centered & fully visible)
+        # 3. Bottom Subtitle Row (Centered & fully visible)
         sub_str = "Questions of reality, existence, or absurdities • Serious or strange, I answer all"
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)
-        sub_y = 130 if self.is_vertical else 106
+        sub_y = 120 if self.is_vertical else 98
         sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))

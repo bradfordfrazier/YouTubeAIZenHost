@@ -97,12 +97,6 @@ class AppConfig:
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
     chat_idle_timeout_sec: float = _get_float("CHAT_IDLE_TIMEOUT_SEC", 120.0)
 
-    # YouTube Shorts Related Video Updater
-    update_shorts_related_video: bool = os.getenv("UPDATE_SHORTS_RELATED_VIDEO", "false").lower() in ("true", "1", "yes")
-    shorts_update_strategy: str = os.getenv("SHORTS_UPDATE_STRATEGY", "studio_api")  # "studio_api", "description_link", or "both"
-    youtube_studio_cookies: str = os.getenv("YOUTUBE_STUDIO_COOKIES", "")
-    youtube_cookies_file: str = os.getenv("YOUTUBE_COOKIES_FILE", "youtube_cookies.txt")
-    shorts_max_batch_size: int = _get_int("SHORTS_MAX_BATCH_SIZE", 50)
 
     # --------------------------------------------------------------------------
     # 4. Gemini AI Brain & Co-Host Persona
@@ -229,6 +223,7 @@ class AppConfig:
     visualizer_fps: int = _get_int("VISUALIZER_FPS", 60)
     visualizer_headless: bool = os.getenv("VISUALIZER_HEADLESS", "false").lower() in ("true", "1", "yes")
     visualizer_borderless: bool = os.getenv("VISUALIZER_BORDERLESS", "false").lower() in ("true", "1", "yes")
+    show_top_status_bar: bool = os.getenv("SHOW_TOP_STATUS_BAR", "false").lower() in ("true", "1", "yes")
     show_host_transcript_card: bool = os.getenv("SHOW_HOST_TRANSCRIPT_CARD", "false").lower() in ("true", "1", "yes")
 
     # Comment Panel & Visualizer Transition Timings

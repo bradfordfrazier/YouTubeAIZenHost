@@ -465,6 +465,7 @@ class Visualizer:
 
         self.time_elapsed = 0.0
         self.light_rotation = 0.0
+        self.speech_intensity = 0.0  # Smooth continuous speech excitation envelope (0.0=idle, 1.0=speaking)
         self.subtitle_display_text = ""
         self.subtitle_target_text = ""
         self.typewriter_index = 0
@@ -697,6 +698,13 @@ class Visualizer:
         spectrum = audio_metrics.get("spectrum", np.zeros(32, dtype=np.float32))
         is_speaking = audio_metrics.get("is_speaking", False)
 
+        # Smooth speech excitation envelope tracking (fast attack, organic smooth decay)
+        target_intensity = 1.0 if is_speaking else 0.0
+        if is_speaking:
+            self.speech_intensity += (target_intensity - self.speech_intensity) * min(1.0, dt * 10.0)
+        else:
+            self.speech_intensity += (target_intensity - self.speech_intensity) * min(1.0, dt * 3.5)
+
         # 1. Background Gradient & Wave Ribbons
         self._draw_dynamic_background(rms)
 
@@ -712,13 +720,14 @@ class Visualizer:
         self._draw_celebration_fx(dt)
 
         # 5. Glassmorphism HUD Overlays
-        self._draw_top_header(
-            host_connected=host_connected,
-            obs_connected=obs_connected,
-            engagement_mode=engagement_mode,
-            concurrent_viewers=concurrent_viewers,
-            is_stream_live=is_stream_live,
-        )
+        if getattr(self.cfg, "show_top_status_bar", False):
+            self._draw_top_header(
+                host_connected=host_connected,
+                obs_connected=obs_connected,
+                engagement_mode=engagement_mode,
+                concurrent_viewers=concurrent_viewers,
+                is_stream_live=is_stream_live,
+            )
         self._draw_host_transcript_card(host_transcript)
 
         # Maintain active pinned message in chat panel until Oracle response completely dissolves
@@ -870,7 +879,7 @@ class Visualizer:
         """
         cx, cy = self.core_cx, self.core_cy
         dt = 1.0 / self.fps
-        self.light_rotation += 0.003 + (rms * 0.04 if is_speaking else 0.0)
+        self.light_rotation += 0.003 + (rms * 0.04 * self.speech_intensity)
 
         c_prim = tuple(int(c) for c in self.c_primary)
         c_sec = tuple(int(c) for c in self.c_secondary)
@@ -878,8 +887,11 @@ class Visualizer:
         c_pure_white = (255, 255, 255)
         c_gold_white = (255, 250, 230)
 
-        # Speaking intensity factor for exaggerated reactivity
-        speak_boost = (rms * 2.5 + 0.3) if is_speaking else (rms * 1.0)
+        # Smooth speech excitation factor:
+        # On active words: scales with RMS audio power
+        # In between words while speaking: sits at comfortable baseline (0.3)
+        # When speech finishes: smoothly decays from 0.3 down to 0.0 over ~0.7s without any step discontinuities
+        speak_boost = (rms * (1.0 + self.speech_intensity * 1.5)) + (self.speech_intensity * 0.3)
 
         # ----------------------------------------------------------------------
         # 1. Concentric Celestial God Circles (Complete Circle & Inner Circle)
@@ -923,7 +935,9 @@ class Visualizer:
         # A. Primary 4 Cardinal Diamond Needle Spikes
         for i in range(4):
             ang = self.light_rotation + (i * math.pi / 2.0)
-            shimmer = (0.84 + 0.16 * math.sin(self.time_elapsed * 8.5 + i * 1.57)) if is_speaking else (0.94 + 0.06 * math.sin(self.time_elapsed * 3.5 + i * 1.57))
+            active_shimmer = 0.84 + 0.16 * math.sin(self.time_elapsed * 8.5 + i * 1.57)
+            idle_shimmer = 0.94 + 0.06 * math.sin(self.time_elapsed * 3.5 + i * 1.57)
+            shimmer = idle_shimmer * (1.0 - self.speech_intensity) + active_shimmer * self.speech_intensity
             spike_len = min(half_box - 15, base_flare_len * shimmer)
             waist_w = 4.0 + speak_boost * 3.5
             waist_dist = spike_len * 0.12
@@ -950,7 +964,9 @@ class Visualizer:
         diag_base_len = base_flare_len * 0.65
         for i in range(4):
             ang = self.light_rotation + (math.pi / 4.0) + (i * math.pi / 2.0)
-            shimmer = (0.82 + 0.18 * math.cos(self.time_elapsed * 9.5 + i * 2.1)) if is_speaking else (0.94 + 0.06 * math.cos(self.time_elapsed * 3.8 + i * 2.1))
+            active_diag_shimmer = 0.82 + 0.18 * math.cos(self.time_elapsed * 9.5 + i * 2.1)
+            idle_diag_shimmer = 0.94 + 0.06 * math.cos(self.time_elapsed * 3.8 + i * 2.1)
+            shimmer = idle_diag_shimmer * (1.0 - self.speech_intensity) + active_diag_shimmer * self.speech_intensity
             spike_len = min(half_box - 15, diag_base_len * shimmer)
             waist_w = 2.5 + speak_boost * 2.5
             waist_dist = spike_len * 0.14
@@ -971,7 +987,8 @@ class Visualizer:
         tert_base_len = base_flare_len * 0.35
         for i in range(8):
             ang = self.light_rotation + (math.pi / 8.0) + (i * math.pi / 4.0)
-            shimmer = (0.75 + 0.25 * math.sin(self.time_elapsed * 11.0 + i * 1.8)) if is_speaking else 1.0
+            active_tert_shimmer = 0.75 + 0.25 * math.sin(self.time_elapsed * 11.0 + i * 1.8)
+            shimmer = 1.0 * (1.0 - self.speech_intensity) + active_tert_shimmer * self.speech_intensity
             spike_len = min(half_box - 15, tert_base_len * shimmer)
             tip = (lx + int(spike_len * math.cos(ang)), ly + int(spike_len * math.sin(ang)))
             pygame.draw.line(self.surf_flare, (*c_high, int(70 + speak_boost * 45)), (lx, ly), tip, 1)
@@ -1021,7 +1038,7 @@ class Visualizer:
             local_sy = sy - box_y
             if 0 <= local_sx < self.box_size and 0 <= local_sy < self.box_size:
                 s_alpha = spk.get_alpha(rms)
-                s_size = int(spk.size + (rms * 2.0 if is_speaking else 0.0))
+                s_size = int(spk.size + (rms * 2.0 * self.speech_intensity))
                 pygame.draw.circle(self.surf_flare, (*c_high, s_alpha), (local_sx, local_sy), s_size)
                 pygame.draw.circle(self.surf_flare, (*c_pure_white, min(255, s_alpha + 40)), (local_sx, local_sy), max(1, s_size // 2))
 
@@ -1031,7 +1048,9 @@ class Visualizer:
         # 3. Ultra-Bright Center Singularity (Intense Photosphere Core)
         # ----------------------------------------------------------------------
         idle_core_pulse = 0.5 * math.sin(self.time_elapsed * 2.0)
-        r_singularity = int(9 + speak_boost * 8 + (idle_core_pulse if not is_speaking else 2.5 * math.sin(self.time_elapsed * 8.0)))
+        active_core_pulse = 2.5 * math.sin(self.time_elapsed * 8.0)
+        blended_pulse = idle_core_pulse * (1.0 - self.speech_intensity) + active_core_pulse * self.speech_intensity
+        r_singularity = int(9 + speak_boost * 8 + blended_pulse)
         pygame.draw.circle(self.screen, c_pure_white, (cx, cy), r_singularity)
         cross_len = r_singularity + 10
         pygame.draw.line(self.screen, c_pure_white, (cx - cross_len, cy), (cx + cross_len, cy), 2)
@@ -1090,6 +1109,8 @@ class Visualizer:
         is_stream_live: bool = True,
     ):
         """Draws broadcast status bar at top of screen directly on canvas."""
+        if not getattr(self.cfg, "show_top_status_bar", False):
+            return
         bar_h = 70 if self.is_vertical else 60
         txt_y = 20 if self.is_vertical else 22
         dot_y = 35 if self.is_vertical else 30

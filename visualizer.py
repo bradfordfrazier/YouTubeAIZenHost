@@ -1982,8 +1982,8 @@ class Visualizer:
         if self.is_vertical:
             card_w, card_h = 940, 190
             target_x = (self.width - card_w) // 2
-            # Position adjusted so the promo bottom aligns closer to the bottom of the I AM badge (cy + 168)
-            target_y = self.core_cy + 168
+            # Center-aligned with chat feed (chat_y=1205, chat_h=580 -> target_y = 1205 + (580 - 190) // 2 = 1400)
+            target_y = 1205 + (580 - card_h) // 2
             start_y = target_y - 40
             cur_x = target_x
             cur_y = int(start_y + (target_y - start_y) * self.promo_slide_factor)
@@ -1992,8 +1992,8 @@ class Visualizer:
         else:
             card_w, card_h = 840, 160
             target_x = (self.width - card_w) // 2
-            # Position adjusted so the promo bottom aligns closer to the bottom of the I AM badge (cy + 168)
-            target_y = self.core_cy + 168
+            # Center-aligned with chat feed (chat_y=482, chat_h=490 -> target_y = 482 + (490 - 160) // 2 = 647)
+            target_y = 482 + (490 - card_h) // 2
             start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
             hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0

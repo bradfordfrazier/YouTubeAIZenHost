@@ -1982,8 +1982,8 @@ class Visualizer:
         if self.is_vertical:
             card_w, card_h = 940, 190
             target_x = (self.width - card_w) // 2
-            target_y = 115
-            start_y = target_y - 40
+            target_y = 1140
+            start_y = target_y + 40
             cur_x = target_x
             cur_y = int(start_y + (target_y - start_y) * self.promo_slide_factor)
             if self.promo_state == "display":
@@ -1991,7 +1991,7 @@ class Visualizer:
         else:
             card_w, card_h = 840, 160
             target_x = (self.width - card_w) // 2
-            target_y = 55
+            target_y = 875
             start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
             hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0

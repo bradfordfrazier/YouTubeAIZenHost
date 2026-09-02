@@ -839,17 +839,23 @@ class LocalCoHostApp:
                     self.chat_history.append(dict(self.current_pinned_chat))
                     self._save_cached_chat()
 
-        # Calculate minimum reading duration for the question if present (natural human reading speed ~200-250 WPM)
+        # Calculate total display lifecycle duration for question (fade in + steady hold + fade out + pause)
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:
             word_count = len(question_text.split())
-            min_sec = getattr(self.cfg, "question_read_min_sec", 2.8)
-            max_sec = getattr(self.cfg, "question_read_max_sec", 5.0)
-            base_sec = getattr(self.cfg, "question_read_base_sec", 2.0)
-            rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.16)
-            min_question_read_sec = max(min_sec, min(max_sec, base_sec + word_count * rate_sec))
+            min_display_sec = getattr(self.cfg, "question_min_display_sec", getattr(self.cfg, "question_read_min_sec", 2.0))
+            rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.25)
+            display_sec = max(min_display_sec, word_count * rate_sec)
+            q_fade_in_sec = getattr(self.cfg, "question_fade_in_sec", 0.80)
+            q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.80)
+            pause_qa = getattr(self.cfg, "question_to_answer_pause_sec", 0.60)
+            total_question_display_sec = q_fade_in_sec + display_sec + q_fade_out_sec + pause_qa
         else:
-            min_question_read_sec = 0.0
+            total_question_display_sec = 0.0
+            display_sec = 0.0
+            q_fade_in_sec = 0.0
+            q_fade_out_sec = 0.0
+            pause_qa = 0.0
 
         t_question_shown = time.perf_counter()
 
@@ -879,21 +885,15 @@ class LocalCoHostApp:
                 and len(words) >= 3
                 and clean_speech[-1] in ".!?\"'”’)"
             ):
-                # Ensure the question preview has lingered on screen long enough for audience readability before speaking
-                if min_question_read_sec > 0:
+                # Ensure the full question lifecycle (fade in + steady hold + fade out + pause) has completed
+                if total_question_display_sec > 0:
                     elapsed = time.perf_counter() - t_question_shown
-                    remaining_linger = min_question_read_sec - elapsed
-                    if remaining_linger > 0.05:
-                        logger.info(f"⏳ [Question Linger] Holding question preview on screen for {remaining_linger:.2f}s for audience comprehension...")
-                        await asyncio.sleep(remaining_linger)
-
-                # Graceful transition from Question to Answer: let question dissolve softly, then provide a contemplative breath
-                if question_text and hasattr(self.visualizer, "fade_out_question"):
+                    remaining = total_question_display_sec - elapsed
+                    if remaining > 0.05:
+                        logger.info(f"⏳ [Question Display] Holding for {remaining:.2f}s (Fade In: {q_fade_in_sec:.2f}s, Hold: {display_sec:.2f}s, Fade Out: {q_fade_out_sec:.2f}s, Pause: {pause_qa:.2f}s)...")
+                        await asyncio.sleep(remaining)
+                elif question_text and hasattr(self.visualizer, "fade_out_question"):
                     self.visualizer.fade_out_question()
-                    q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.85)
-                    pause_qa = getattr(self.cfg, "question_to_answer_pause_sec", 0.6)
-                    logger.info(f"✨ [Question Transition] Dissolving question preview ({q_fade_out_sec:.2f}s fade + {pause_qa:.2f}s breath before answer)...")
-                    await asyncio.sleep(q_fade_out_sec + pause_qa)
 
                 logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
                 await self.tts.queue_speech(clean_speech)

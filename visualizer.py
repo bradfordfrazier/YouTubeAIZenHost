@@ -471,8 +471,10 @@ class Visualizer:
         self.typewriter_index = 0
         self.is_empty_hold = False
         self.active_question_text = ""
+        self.last_completed_question_text = ""
         self.active_question_start_time = 0.0
         self.question_fade_alpha = 0.0
+        self.question_fade_timer = 0.0
         self.question_fade_state = "idle"  # "fade_in", "steady", "fade_out", "idle"
         self.question_y_drift = 0.0
         self._active_pinned_message: Optional[Dict] = None
@@ -613,6 +615,7 @@ class Visualizer:
         """Initiates smooth graceful fade-out of the active question preview in the main comment card."""
         if self.question_fade_state in ("fade_in", "steady"):
             self.question_fade_state = "fade_out"
+            self.question_fade_timer = 0.0
 
     def clear_subtitle(self):
         """Resets subtitle text to motto, initiating smooth synchronized dissolution of Oracle comment & pinned question."""
@@ -1608,7 +1611,7 @@ class Visualizer:
         dt = 1.0 / self.fps
         if pinned_chat_message and isinstance(pinned_chat_message, dict):
             curr_q_msg = pinned_chat_message.get("message", "").strip()
-            if curr_q_msg and curr_q_msg != self.active_question_text:
+            if curr_q_msg and curr_q_msg != self.active_question_text and curr_q_msg != self.last_completed_question_text:
                 self.active_question_text = curr_q_msg
                 motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
                 # If prior spoken comment/greeting or motto is actively visible, let it finish dissolving before fading question in
@@ -1616,10 +1619,12 @@ class Visualizer:
                     self.ai_text_state = "fade_out"
                     self.ai_text_target = ""
                     self.question_fade_alpha = 0.0
+                    self.question_fade_timer = 0.0
                     self.question_fade_state = "waiting_for_dissolve"
                 else:
                     self.active_question_start_time = time.time()
                     self.question_fade_alpha = 0.0
+                    self.question_fade_timer = 0.0
                     self.question_fade_state = "fade_in"
                     self.question_y_drift = 6.0
                     self.ai_text_current = ""
@@ -1627,26 +1632,23 @@ class Visualizer:
                     self.ai_text_alpha = 0.0
                     self.ai_text_state = "idle_empty"
         else:
-            if self.question_fade_state not in ("fade_out", "idle"):
+            if self.question_fade_state in ("fade_in", "steady"):
                 self.question_fade_state = "fade_out"
-            if self.question_fade_state == "idle":
-                self.active_question_text = ""
+                self.question_fade_timer = 0.0
+            elif self.question_fade_state == "idle":
+                if self.active_question_text:
+                    self.last_completed_question_text = self.active_question_text
+                    self.active_question_text = ""
                 self.active_question_start_time = 0.0
 
-        # Calculate word-count-based reading duration for natural human reading speed (~200-250 WPM)
-        q_words = len(self.active_question_text.split()) if self.active_question_text else 0
-        min_sec = getattr(self.cfg, "question_read_min_sec", 2.8)
-        max_sec = getattr(self.cfg, "question_read_max_sec", 5.0)
-        base_sec = getattr(self.cfg, "question_read_base_sec", 2.0)
-        rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.16)
-        min_q_linger = max(min_sec, min(max_sec, base_sec + q_words * rate_sec))
-        q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
+        # 2. Timing Parameters & Calculations
+        q_fade_in_sec = max(0.05, getattr(self.cfg, "question_fade_in_sec", 0.80))
+        q_fade_out_sec = max(0.05, getattr(self.cfg, "question_fade_out_sec", 0.80))
+        min_display_sec = max(0.1, getattr(self.cfg, "question_min_display_sec", getattr(self.cfg, "question_read_min_sec", 2.0)))
+        word_rate_sec = max(0.01, getattr(self.cfg, "question_read_word_rate_sec", 0.25))
 
-        # 2. Update Question Fade In / Steady / Fade Out State Machine
-        q_fade_in_sec = max(0.05, getattr(self.cfg, "question_fade_in_sec", 0.75))
-        q_fade_out_sec = max(0.05, getattr(self.cfg, "question_fade_out_sec", 0.85))
-        q_fade_in_rate = 1.0 / q_fade_in_sec
-        q_fade_out_rate = 1.0 / q_fade_out_sec
+        q_words = len(self.active_question_text.split()) if self.active_question_text else 0
+        display_duration = max(min_display_sec, q_words * word_rate_sec)
 
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
@@ -1660,30 +1662,39 @@ class Visualizer:
         motto_fade_in_rate = 1.0 / motto_fade_in_sec
         motto_fade_out_rate = 1.0 / motto_fade_out_sec
 
+        # 3. Discrete Phase Execution: fade_in -> steady display hold -> fade_out -> idle
         if self.question_fade_state == "fade_in":
-            self.question_fade_alpha += dt * q_fade_in_rate
-            self.question_y_drift = 6.0 * (1.0 - min(1.0, self.question_fade_alpha))
-            if self.question_fade_alpha >= 1.0:
+            self.question_fade_timer += dt
+            prog = min(1.0, self.question_fade_timer / q_fade_in_sec)
+            self.question_fade_alpha = prog
+            self.question_y_drift = 6.0 * (1.0 - prog)
+            if prog >= 1.0:
                 self.question_fade_alpha = 1.0
                 self.question_y_drift = 0.0
+                self.question_fade_timer = 0.0
                 self.question_fade_state = "steady"
 
         elif self.question_fade_state == "steady":
+            self.question_fade_timer += dt
             self.question_fade_alpha = 1.0
             self.question_y_drift = 0.0
-            # If the Oracle is ready to speak or speaking AND the question has lingered long enough, trigger fade_out
-            if (is_speaking or self.subtitle_target_text) and q_time_elapsed >= (min_q_linger - 0.15):
+            if self.question_fade_timer >= display_duration or not pinned_chat_message:
                 self.question_fade_state = "fade_out"
-            elif not pinned_chat_message:
-                self.question_fade_state = "fade_out"
+                self.question_fade_timer = 0.0
 
         elif self.question_fade_state == "fade_out":
-            self.question_fade_alpha -= dt * q_fade_out_rate
-            self.question_y_drift = -4.0 * (1.0 - max(0.0, self.question_fade_alpha))
-            if self.question_fade_alpha <= 0.0:
+            self.question_fade_timer += dt
+            prog = min(1.0, self.question_fade_timer / q_fade_out_sec)
+            self.question_fade_alpha = max(0.0, 1.0 - prog)
+            self.question_y_drift = -4.0 * prog
+            if prog >= 1.0:
                 self.question_fade_alpha = 0.0
+                self.question_fade_timer = 0.0
                 self.question_fade_state = "idle"
                 self.question_y_drift = 0.0
+                if self.active_question_text:
+                    self.last_completed_question_text = self.active_question_text
+                    self.active_question_text = ""
 
         showing_question_preview = bool(
             self.active_question_text
@@ -1827,6 +1838,7 @@ class Visualizer:
                     self.ai_text_target = ""
                     self.ai_text_state = "idle_empty"
                     self.question_fade_state = "fade_in"
+                    self.question_fade_timer = 0.0
                     self.question_fade_alpha = 0.0
                     self.question_y_drift = 6.0
                     self.active_question_start_time = time.time()

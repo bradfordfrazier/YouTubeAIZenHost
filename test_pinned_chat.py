@@ -239,7 +239,7 @@ def test_question_fade_in_out_animation():
     assert vis.question_fade_state in ("waiting_for_dissolve", "fade_in", "steady")
 
     # Step through frames to dissolve motto and reach full steady state
-    for _ in range(80):
+    for _ in range(120):
         vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=[],
@@ -251,7 +251,7 @@ def test_question_fade_in_out_animation():
     assert vis.question_fade_alpha == 1.0
 
     # 2. Fast-forward linger time and trigger speech -> starts fade_out
-    vis.active_question_start_time = 0.0  # Force elapsed > linger
+    vis.fade_out_question()
     vis.render_frame(
         audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
         chat_messages=[],
@@ -268,7 +268,7 @@ def test_question_fade_in_out_animation():
             chat_messages=[],
             host_transcript="",
             ai_subtitle="Stars are the dreaming eye of the universe.",
-            pinned_chat_message=pinned_msg,
+            pinned_chat_message=None,
         )
     assert vis.question_fade_state == "idle"
     assert vis.question_fade_alpha == 0.0

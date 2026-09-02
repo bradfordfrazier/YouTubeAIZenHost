@@ -52,6 +52,17 @@ class NDIStreamer:
         self.start_time = 0.0
         self._lock = threading.RLock()
 
+        # Double-buffered video memory to guarantee buffer lifetime during asynchronous NDI read
+        self._buffer_index = 0
+        self._video_buffers = [
+            np.zeros(self.width * self.height * 4, dtype=np.uint8),
+            np.zeros(self.width * self.height * 4, dtype=np.uint8),
+        ]
+        self._curr_frame_buffer: Optional[np.ndarray] = None
+        self._prev_frame_buffer: Optional[np.ndarray] = None
+        self._frame_buffer_bytes: Optional[bytes] = None
+        self._prev_frame_buffer_bytes: Optional[bytes] = None
+
     def open(self) -> bool:
         """Initialize and open the NDI Sender."""
         if not CYNDILIB_AVAILABLE:
@@ -73,6 +84,23 @@ class NDIStreamer:
                 self.video_frame.set_resolution(self.width, self.height)
                 self.video_frame.set_frame_rate(Fraction(self.fps, 1))
                 self.video_frame.set_fourcc(cyndilib.FourCC.RGBA)
+
+                # Explicit line stride verification (width * 4 bytes per row)
+                expected_line_stride = self.width * 4
+                actual_line_stride = self.video_frame.get_line_stride()
+                if actual_line_stride != expected_line_stride:
+                    logger.error(
+                        f"NDI VideoSendFrame line stride mismatch: got {actual_line_stride}, expected {expected_line_stride} (width={self.width}x4)."
+                    )
+                else:
+                    logger.info(f"NDI VideoSendFrame line stride verified: {actual_line_stride} bytes/line ({self.width}x4)")
+
+                # Explicit FourCC verification (FOURCC_VIDEO_TYPE_RGBA)
+                actual_fourcc = self.video_frame.get_fourcc()
+                if actual_fourcc != cyndilib.FourCC.RGBA:
+                    logger.error(f"NDI VideoSendFrame FourCC mismatch: got {actual_fourcc}, expected {cyndilib.FourCC.RGBA} (RGBA)")
+                else:
+                    logger.info(f"NDI VideoSendFrame FourCC verified: FOURCC_VIDEO_TYPE_RGBA ({actual_fourcc})")
 
                 # 2. Configure Audio Frame (48000Hz Stereo Float32 with exact 480-sample buffer)
                 # Matches the 10ms isochronous pump (480 samples @ 48kHz = exactly 1920 bytes/channel)
@@ -115,11 +143,6 @@ class NDIStreamer:
         if self.is_mock or not self.sender:
             return
 
-        if isinstance(video_rgba_bytes, (bytes, bytearray)):
-            video_data = np.frombuffer(video_rgba_bytes, dtype=np.uint8).copy()
-        else:
-            video_data = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
-
         if audio_data.ndim == 2:
             if audio_data.shape[1] == 2 and audio_data.shape[0] != 2:
                 audio_out = np.ascontiguousarray(audio_data.T, dtype=np.float32)
@@ -132,11 +155,25 @@ class NDIStreamer:
 
         with self._lock:
             try:
+                # Rotate double buffer so previous frame remains alive during NDI asynchronous read
+                target_buf = self._video_buffers[self._buffer_index]
+                self._buffer_index = 1 - self._buffer_index
+
+                if isinstance(video_rgba_bytes, (bytes, bytearray)):
+                    target_buf[:] = np.frombuffer(video_rgba_bytes, dtype=np.uint8)
+                else:
+                    target_buf[:] = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
+
+                self._prev_frame_buffer = self._curr_frame_buffer
+                self._curr_frame_buffer = target_buf
+                self._prev_frame_buffer_bytes = self._frame_buffer_bytes
+                self._frame_buffer_bytes = video_rgba_bytes if isinstance(video_rgba_bytes, (bytes, bytearray)) else None
+
                 # Use atomic write_video_and_audio for asynchronous video transmission and synchronized audio
                 if hasattr(self.sender, "write_video_and_audio"):
-                    self.sender.write_video_and_audio(video_data, audio_out)
+                    self.sender.write_video_and_audio(target_buf, audio_out)
                 else:
-                    self.sender.write_video_async(video_data)
+                    self.sender.write_video_async(target_buf)
                     self.sender.write_audio(audio_out)
             except Exception as e:
                 logger.error(f"Error in synchronized NDI broadcast: {e}")
@@ -149,13 +186,23 @@ class NDIStreamer:
         if self.is_mock or not self.sender:
             return
         try:
-            if isinstance(video_rgba_bytes, (bytes, bytearray)):
-                video_data = np.frombuffer(video_rgba_bytes, dtype=np.uint8).copy()
-            else:
-                video_data = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
-
             with self._lock:
-                self.sender.write_video_async(video_data)
+                # Rotate double buffer so previous frame remains alive during NDI asynchronous read
+                target_buf = self._video_buffers[self._buffer_index]
+                self._buffer_index = 1 - self._buffer_index
+
+                if isinstance(video_rgba_bytes, (bytes, bytearray)):
+                    target_buf[:] = np.frombuffer(video_rgba_bytes, dtype=np.uint8)
+                else:
+                    target_buf[:] = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
+
+                # Maintain persistent references on self across async NDI read lifetime
+                self._prev_frame_buffer = self._curr_frame_buffer
+                self._curr_frame_buffer = target_buf
+                self._prev_frame_buffer_bytes = self._frame_buffer_bytes
+                self._frame_buffer_bytes = video_rgba_bytes if isinstance(video_rgba_bytes, (bytes, bytearray)) else None
+
+                self.sender.write_video_async(target_buf)
         except Exception as e:
             logger.error(f"Error streaming video frame over NDI: {e}")
 

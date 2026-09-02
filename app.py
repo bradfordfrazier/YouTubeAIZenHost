@@ -1803,10 +1803,8 @@ class LocalCoHostApp:
 
                 self._update_engagement_state()
 
-                if self.engagement_mode == "standby":
-                    continue
-
-                if getattr(self.cfg, "cast_require_viewers", False) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
+                # In Standby or ECO mode (0 viewers), suppress synthetic cast questions
+                if self.engagement_mode in ("standby", "eco"):
                     continue
 
                 now = time.time()
@@ -1894,10 +1892,8 @@ class LocalCoHostApp:
 
                 self._update_engagement_state()
 
-                if self.engagement_mode == "standby":
-                    continue
-
-                if getattr(self.cfg, "spontaneous_require_viewers", False) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
+                # In Standby or ECO mode (0 viewers), suppress spontaneous reflections
+                if self.engagement_mode in ("standby", "eco"):
                     continue
 
                 now = time.time()

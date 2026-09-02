@@ -662,6 +662,12 @@ class Visualizer:
             self.ai_text_state = "fade_in"
             self.ai_text_y_drift = 6.0
 
+            # Ensure promo overlay smoothly exits if active when speech begins
+            if self.promo_state in ("entrance", "display"):
+                self.promo_state = "exit"
+                self.promo_state_timer = 0.0
+                self.promo_slide_factor = 0.0
+
     def _update_palette_lerp(self, dt: float):
         """Smoothly interpolate colors toward target mood."""
         if self.mood_lerp_factor < 1.0:
@@ -763,7 +769,7 @@ class Visualizer:
         )
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
-        self._draw_promo_callout_overlay(dt)
+        self._draw_promo_callout_overlay(dt, is_speaking=is_speaking)
 
         # Update Pygame display if not headless
         if not self.cfg.visualizer_headless and self.window_surf is not None:
@@ -1951,13 +1957,22 @@ class Visualizer:
     # --------------------------------------------------------------------------
     # Promotional Callout Graphic Overlays ("Ask God" & "Like & Subscribe")
     # --------------------------------------------------------------------------
-    def _update_promo_state(self, dt: float):
+    def _update_promo_state(self, dt: float, is_speaking: bool = False):
         """Updates animation timers, easing curves, and state transitions for promotional callout overlays."""
         entrance_duration = max(0.2, getattr(self.cfg, "promo_overlay_entrance_sec", 0.9))
         exit_duration = max(0.2, getattr(self.cfg, "promo_overlay_exit_sec", 1.15))
 
+        # If avatar is speaking, smoothly exit promo if active and hold timer
+        if is_speaking:
+            if self.promo_state in ("entrance", "display"):
+                self.promo_state = "exit"
+                self.promo_state_timer = 0.0
+                self.promo_slide_factor = 0.0
+            elif self.promo_state == "off":
+                self.promo_timer = max(self.promo_timer, 4.0)
+
         if self.promo_state == "off":
-            if self.promo_enabled:
+            if self.promo_enabled and not is_speaking:
                 self.promo_timer -= dt
                 if self.promo_timer <= 0:
                     self.promo_state = "entrance"
@@ -2004,9 +2019,9 @@ class Visualizer:
                 # Alternate to the other promo for next appearance
                 self.promo_current_type = "like_sub" if self.promo_current_type == "ask_god" else "ask_god"
 
-    def _draw_promo_callout_overlay(self, dt: float):
+    def _draw_promo_callout_overlay(self, dt: float, is_speaking: bool = False):
         """Coordinates and renders the active promotional callout overlay card with smooth cinematic motion."""
-        self._update_promo_state(dt)
+        self._update_promo_state(dt, is_speaking=is_speaking)
 
         if self.promo_state == "off" or self.promo_alpha <= 0.005:
             return

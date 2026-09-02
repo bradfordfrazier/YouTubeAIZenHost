@@ -2014,9 +2014,9 @@ class Visualizer:
             elif self.promo_state == "display":
                 cur_x = round(target_x + hover_x)
                 cur_y = round(target_y + hover_y)
-            else:  # exit: gentle upward ethereal ascension
-                cur_x = round(target_x + hover_x)
-                cur_y = round(target_y - 28.0 * self.promo_slide_factor + hover_y)
+            else:  # exit: gentle upward ethereal ascension with smooth hover decay
+                cur_x = round(target_x + hover_x * (1.0 - self.promo_slide_factor))
+                cur_y = round(target_y - 24.0 * self.promo_slide_factor + hover_y * (1.0 - self.promo_slide_factor))
         else:
             card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
@@ -2029,9 +2029,9 @@ class Visualizer:
             elif self.promo_state == "display":
                 cur_x = round(target_x + hover_x)
                 cur_y = round(target_y + hover_y)
-            else:  # exit: gentle drift to right in reading flow direction + upward ethereal float
-                cur_x = round(target_x + 140.0 * self.promo_slide_factor + hover_x)
-                cur_y = round(target_y - 12.0 * self.promo_slide_factor + hover_y)
+            else:  # exit: gentle drift in reading flow direction + upward ethereal float with smooth hover decay
+                cur_x = round(target_x + 28.0 * self.promo_slide_factor + hover_x * (1.0 - self.promo_slide_factor))
+                cur_y = round(target_y - 18.0 * self.promo_slide_factor + hover_y * (1.0 - self.promo_slide_factor))
 
         self.surf_promo_card.fill((0, 0, 0, 0))
 

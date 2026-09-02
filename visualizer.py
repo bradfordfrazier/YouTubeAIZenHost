@@ -1627,7 +1627,11 @@ class Visualizer:
 
         # Calculate word-count-based reading duration for natural human reading speed (~200-250 WPM)
         q_words = len(self.active_question_text.split()) if self.active_question_text else 0
-        min_q_linger = max(1.5, min(4.5, 0.8 + q_words * 0.22))
+        min_sec = getattr(self.cfg, "question_read_min_sec", 2.8)
+        max_sec = getattr(self.cfg, "question_read_max_sec", 5.0)
+        base_sec = getattr(self.cfg, "question_read_base_sec", 2.0)
+        rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.16)
+        min_q_linger = max(min_sec, min(max_sec, base_sec + q_words * rate_sec))
         q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
 
         # 2. Update Question Fade In / Steady / Fade Out State Machine
@@ -1962,8 +1966,8 @@ class Visualizer:
         elif self.promo_state == "exit":
             self.promo_state_timer += dt
             prog = min(1.0, self.promo_state_timer / exit_duration)
-            # Smooth cubic ease-out for gentle outward drift
-            ease_drift = 1.0 - (1.0 - prog) ** 3
+            # Quintic SmootherStep (zero initial and final velocity for butter-smooth acceleration & deceleration)
+            ease_drift = (prog ** 3) * (prog * (prog * 6.0 - 15.0) + 10.0)
             # Smooth Cosine fade: lingers legibly for first half of exit before softly dissolving into starlight
             ease_alpha = max(0.0, 0.5 * (1.0 + math.cos(prog * math.pi)))
             self.promo_slide_factor = ease_drift
@@ -1985,19 +1989,9 @@ class Visualizer:
             return
 
         hover_amp = getattr(self.cfg, "promo_overlay_hover_amp", 4.5)
-        # Compute smooth hover envelope (0.0 at entrance start -> 1.0 at display -> 0.0 at exit end)
-        # to ensure 100% continuous motion with zero position jumps across state transitions
-        if self.promo_state == "entrance":
-            hover_weight = self.promo_slide_factor
-        elif self.promo_state == "display":
-            hover_weight = 1.0
-        elif self.promo_state == "exit":
-            hover_weight = max(0.0, 1.0 - self.promo_slide_factor)
-        else:
-            hover_weight = 0.0
-
-        hover_y = math.sin(self.time_elapsed * 2.2) * hover_amp * hover_weight
-        hover_x = math.cos(self.time_elapsed * 1.4) * (hover_amp * 0.35) * hover_weight
+        # Continuous harmonic hover oscillation (unbroken phase continuity across all state transitions)
+        hover_y = math.sin(self.time_elapsed * 2.2) * hover_amp
+        hover_x = math.cos(self.time_elapsed * 1.4) * (hover_amp * 0.35)
 
         if self.is_vertical:
             card_w, card_h = 920, 130
@@ -2005,14 +1999,14 @@ class Visualizer:
             target_y = self.core_cy - (card_h // 2)
 
             if self.promo_state == "entrance":
-                cur_x = target_x + int(hover_x)
-                cur_y = target_y + int(45.0 * (1.0 - self.promo_slide_factor) + hover_y)
+                cur_x = int(target_x + hover_x * self.promo_slide_factor)
+                cur_y = int(target_y + 45.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
             elif self.promo_state == "display":
-                cur_x = target_x + int(hover_x)
-                cur_y = target_y + int(hover_y)
+                cur_x = int(target_x + hover_x)
+                cur_y = int(target_y + hover_y)
             else:  # exit: gentle upward ethereal ascension
-                cur_x = target_x + int(hover_x)
-                cur_y = target_y - int(28.0 * self.promo_slide_factor - hover_y)
+                cur_x = int(target_x + hover_x)
+                cur_y = int(target_y - 28.0 * self.promo_slide_factor + hover_y)
         else:
             card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
@@ -2020,14 +2014,14 @@ class Visualizer:
 
             if self.promo_state == "entrance":
                 # Glide in from left (-260px) with subtle upward settling arc
-                cur_x = target_x - int(260.0 * (1.0 - self.promo_slide_factor) - hover_x)
-                cur_y = target_y + int(14.0 * (1.0 - self.promo_slide_factor) + hover_y)
+                cur_x = int(target_x - 260.0 * (1.0 - self.promo_slide_factor) + hover_x * self.promo_slide_factor)
+                cur_y = int(target_y + 14.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
             elif self.promo_state == "display":
-                cur_x = target_x + int(hover_x)
-                cur_y = target_y + int(hover_y)
+                cur_x = int(target_x + hover_x)
+                cur_y = int(target_y + hover_y)
             else:  # exit: gentle drift to right in reading flow direction + upward ethereal float
-                cur_x = target_x + int(140.0 * self.promo_slide_factor + hover_x)
-                cur_y = target_y - int(12.0 * self.promo_slide_factor - hover_y)
+                cur_x = int(target_x + 140.0 * self.promo_slide_factor + hover_x)
+                cur_y = int(target_y - 12.0 * self.promo_slide_factor + hover_y)
 
         self.surf_promo_card.fill((0, 0, 0, 0))
 
@@ -2130,7 +2124,7 @@ class Visualizer:
         """
         Draws the streamlined 'Subscribing Changes Nothing' community callout card:
         - Sleek ruby-tinted glassmorphic container with neon coral/magenta border
-        - Centered title row with YouTube Play badge + ringing bell + bold title
+        - Centered title row with YouTube Play badge + harmonic ringing bell + bold title
         - Centered high-legibility subtitle
         - Shimmering specular rim sweep & corner glints
         """
@@ -2179,11 +2173,11 @@ class Visualizer:
             ]
         pygame.draw.polygon(surf, (255, 255, 255, 250), tri_pts)
 
-        # Ringing Golden Notification Bell badge overlapping lower right
+        # Harmonically Swaying Notification Bell badge overlapping lower right
         bell_cx = pill_x + pill_w - 2
         bell_cy = pill_y + pill_h - 2
-        swing = math.sin(t * 8.0)
-        clapper_x = int(bell_cx + swing * 3.5)
+        swing = math.sin(t * 3.5)
+        clapper_x = int(bell_cx + swing * 2.0)
         bell_r = 14 if self.is_vertical else 12
 
         # Bell pill background
@@ -2202,11 +2196,12 @@ class Visualizer:
         pygame.draw.polygon(surf, (255, 215, 0, 245), bell_pts)
         pygame.draw.circle(surf, (255, 240, 120, 250), (clapper_x, bell_cy + 5), 2)
 
-        # Sound arcs around ringing bell
-        if abs(swing) > 0.35:
-            arc_a = min(255, int(abs(swing) * 220))
-            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx - 12, bell_cy - 6, 7, 11), math.pi * 0.6, math.pi * 1.4, 2)
-            pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx + 5, bell_cy - 6, 7, 11), -math.pi * 0.4, math.pi * 0.4, 2)
+        # Smooth radiating golden sound ripples around bell (continuous alpha without popping)
+        ring_phase = (t * 2.8) % 1.0
+        ring_r = int(bell_r + ring_phase * 6.0)
+        ring_alpha = max(0, int((1.0 - ring_phase) * 150 * (0.5 + 0.5 * abs(swing))))
+        if ring_alpha > 5:
+            pygame.draw.circle(surf, (255, 200, 50, ring_alpha), (bell_cx, bell_cy), ring_r, 1)
 
         # Title Blit
         title_x = lockup_x + badge_area_w + lockup_gap

@@ -830,7 +830,11 @@ class LocalCoHostApp:
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:
             word_count = len(question_text.split())
-            min_question_read_sec = max(1.5, min(4.5, 0.8 + word_count * 0.22))
+            min_sec = getattr(self.cfg, "question_read_min_sec", 2.8)
+            max_sec = getattr(self.cfg, "question_read_max_sec", 5.0)
+            base_sec = getattr(self.cfg, "question_read_base_sec", 2.0)
+            rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.16)
+            min_question_read_sec = max(min_sec, min(max_sec, base_sec + word_count * rate_sec))
         else:
             min_question_read_sec = 0.0
 

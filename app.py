@@ -839,23 +839,23 @@ class LocalCoHostApp:
                     self.chat_history.append(dict(self.current_pinned_chat))
                     self._save_cached_chat()
 
-        # Calculate total display lifecycle duration for question (fade in + steady hold + fade out + pause)
+        # Calculate minimum reading duration for the question (min display floor or word count * rate)
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:
             word_count = len(question_text.split())
             min_display_sec = getattr(self.cfg, "question_min_display_sec", getattr(self.cfg, "question_read_min_sec", 2.0))
             rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.25)
-            display_sec = max(min_display_sec, word_count * rate_sec)
+            min_display_hold_sec = max(min_display_sec, word_count * rate_sec)
             q_fade_in_sec = getattr(self.cfg, "question_fade_in_sec", 0.80)
             q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.80)
             pause_qa = getattr(self.cfg, "question_to_answer_pause_sec", 0.60)
-            total_question_display_sec = q_fade_in_sec + display_sec + q_fade_out_sec + pause_qa
+            min_time_before_fade_out = q_fade_in_sec + min_display_hold_sec
         else:
-            total_question_display_sec = 0.0
-            display_sec = 0.0
+            min_display_hold_sec = 0.0
             q_fade_in_sec = 0.0
             q_fade_out_sec = 0.0
             pause_qa = 0.0
+            min_time_before_fade_out = 0.0
 
         t_question_shown = time.perf_counter()
 
@@ -885,15 +885,25 @@ class LocalCoHostApp:
                 and len(words) >= 3
                 and clean_speech[-1] in ".!?\"'”’)"
             ):
-                # Ensure the full question lifecycle (fade in + steady hold + fade out + pause) has completed
-                if total_question_display_sec > 0:
+                # 1. Question displayed while answer was generating; hold if needed to satisfy minimum reading duration
+                if question_text and min_time_before_fade_out > 0:
                     elapsed = time.perf_counter() - t_question_shown
-                    remaining = total_question_display_sec - elapsed
-                    if remaining > 0.05:
-                        logger.info(f"⏳ [Question Display] Holding for {remaining:.2f}s (Fade In: {q_fade_in_sec:.2f}s, Hold: {display_sec:.2f}s, Fade Out: {q_fade_out_sec:.2f}s, Pause: {pause_qa:.2f}s)...")
-                        await asyncio.sleep(remaining)
-                elif question_text and hasattr(self.visualizer, "fade_out_question"):
+                    remaining_hold = min_time_before_fade_out - elapsed
+                    if remaining_hold > 0.05:
+                        logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
+                        await asyncio.sleep(remaining_hold)
+
+                # 2. Fade out question based on QUESTION_FADE_OUT_SEC
+                if question_text and hasattr(self.visualizer, "fade_out_question"):
                     self.visualizer.fade_out_question()
+                    if q_fade_out_sec > 0:
+                        logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
+                        await asyncio.sleep(q_fade_out_sec)
+
+                # 3. Apply contemplative pause before transitioning to answer process
+                if pause_qa > 0:
+                    logger.info(f"✨ [Question-To-Answer Pause] Pausing {pause_qa:.2f}s before answer...")
+                    await asyncio.sleep(pause_qa)
 
                 logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
                 await self.tts.queue_speech(clean_speech)

@@ -1679,7 +1679,7 @@ class Visualizer:
             self.question_fade_timer += dt
             self.question_fade_alpha = 1.0
             self.question_y_drift = 0.0
-            if self.question_fade_timer >= display_duration or not pinned_chat_message:
+            if not pinned_chat_message:
                 self.question_fade_state = "fade_out"
                 self.question_fade_timer = 0.0
 

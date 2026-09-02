@@ -980,7 +980,8 @@ class LocalCoHostApp:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
             self.last_activity_time = time.time()
-            self.last_spontaneous_time = time.time()
+            if event.event_type == "spontaneous":
+                self.last_spontaneous_time = time.time()
             if not self.comment_queue:
                 self.current_pinned_chat = None
                 self.current_ai_subtitle = ""

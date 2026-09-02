@@ -1926,8 +1926,9 @@ class Visualizer:
     # Promotional Callout Graphic Overlays ("Ask God" & "Like & Subscribe")
     # --------------------------------------------------------------------------
     def _update_promo_state(self, dt: float):
-        """Updates animation timers and state transitions for promotional callout overlays."""
-        transition_duration = 0.6  # Smooth slide & fade transition time in seconds
+        """Updates animation timers, easing curves, and state transitions for promotional callout overlays."""
+        entrance_duration = max(0.2, getattr(self.cfg, "promo_overlay_entrance_sec", 0.9))
+        exit_duration = max(0.2, getattr(self.cfg, "promo_overlay_exit_sec", 1.15))
 
         if self.promo_state == "off":
             if self.promo_enabled:
@@ -1939,11 +1940,13 @@ class Visualizer:
                     self.promo_alpha = 0.0
         elif self.promo_state == "entrance":
             self.promo_state_timer += dt
-            prog = min(1.0, self.promo_state_timer / transition_duration)
-            # Smooth cubic ease-out
-            ease = 1.0 - (1.0 - prog) ** 3
-            self.promo_slide_factor = ease
-            self.promo_alpha = ease
+            prog = min(1.0, self.promo_state_timer / entrance_duration)
+            # Quartic ease-out for a silky, cushioned landing
+            ease_pos = 1.0 - (1.0 - prog) ** 4
+            # Sine ease-out for luminous opacity bloom (promptly visible, settles gently)
+            ease_alpha = math.sin(prog * (math.pi / 2.0))
+            self.promo_slide_factor = ease_pos
+            self.promo_alpha = ease_alpha
             if prog >= 1.0:
                 self.promo_state = "display"
                 self.promo_state_timer = 0.0
@@ -1958,11 +1961,13 @@ class Visualizer:
                 self.promo_state_timer = 0.0
         elif self.promo_state == "exit":
             self.promo_state_timer += dt
-            prog = min(1.0, self.promo_state_timer / transition_duration)
-            # Smooth cubic ease-in
-            ease = prog ** 3
-            self.promo_slide_factor = 1.0 - ease
-            self.promo_alpha = max(0.0, 1.0 - prog)
+            prog = min(1.0, self.promo_state_timer / exit_duration)
+            # Smooth cubic ease-out for gentle outward drift
+            ease_drift = 1.0 - (1.0 - prog) ** 3
+            # Smooth Cosine fade: lingers legibly for first half of exit before softly dissolving into starlight
+            ease_alpha = max(0.0, 0.5 * (1.0 + math.cos(prog * math.pi)))
+            self.promo_slide_factor = ease_drift
+            self.promo_alpha = ease_alpha
             if prog >= 1.0:
                 self.promo_state = "off"
                 self.promo_state_timer = 0.0
@@ -1973,42 +1978,71 @@ class Visualizer:
                 self.promo_current_type = "like_sub" if self.promo_current_type == "ask_god" else "ask_god"
 
     def _draw_promo_callout_overlay(self, dt: float):
-        """Coordinates and renders the active promotional callout overlay card."""
+        """Coordinates and renders the active promotional callout overlay card with smooth cinematic motion."""
         self._update_promo_state(dt)
 
         if self.promo_state == "off" or self.promo_alpha <= 0.005:
             return
 
+        hover_amp = getattr(self.cfg, "promo_overlay_hover_amp", 4.5)
+        # Compute smooth hover envelope (0.0 at entrance start -> 1.0 at display -> 0.0 at exit end)
+        # to ensure 100% continuous motion with zero position jumps across state transitions
+        if self.promo_state == "entrance":
+            hover_weight = self.promo_slide_factor
+        elif self.promo_state == "display":
+            hover_weight = 1.0
+        elif self.promo_state == "exit":
+            hover_weight = max(0.0, 1.0 - self.promo_slide_factor)
+        else:
+            hover_weight = 0.0
+
+        hover_y = math.sin(self.time_elapsed * 2.2) * hover_amp * hover_weight
+        hover_x = math.cos(self.time_elapsed * 1.4) * (hover_amp * 0.35) * hover_weight
+
         if self.is_vertical:
             card_w, card_h = 920, 130
             target_x = (self.width - card_w) // 2
-            # Dead center on avatar
             target_y = self.core_cy - (card_h // 2)
-            start_y = target_y - 40
-            cur_x = target_x
-            cur_y = int(start_y + (target_y - start_y) * self.promo_slide_factor)
-            if self.promo_state == "display":
-                cur_y += int(math.sin(self.time_elapsed * 2.8) * 4.0)
+
+            if self.promo_state == "entrance":
+                cur_x = target_x + int(hover_x)
+                cur_y = target_y + int(45.0 * (1.0 - self.promo_slide_factor) + hover_y)
+            elif self.promo_state == "display":
+                cur_x = target_x + int(hover_x)
+                cur_y = target_y + int(hover_y)
+            else:  # exit: gentle upward ethereal ascension
+                cur_x = target_x + int(hover_x)
+                cur_y = target_y - int(28.0 * self.promo_slide_factor - hover_y)
         else:
             card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
-            # Dead center on avatar
             target_y = self.core_cy - (card_h // 2)
-            start_x = -card_w - 60
-            cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
-            hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0
-            cur_y = target_y + hover_offset
+
+            if self.promo_state == "entrance":
+                # Glide in from left (-260px) with subtle upward settling arc
+                cur_x = target_x - int(260.0 * (1.0 - self.promo_slide_factor) - hover_x)
+                cur_y = target_y + int(14.0 * (1.0 - self.promo_slide_factor) + hover_y)
+            elif self.promo_state == "display":
+                cur_x = target_x + int(hover_x)
+                cur_y = target_y + int(hover_y)
+            else:  # exit: gentle drift to right in reading flow direction + upward ethereal float
+                cur_x = target_x + int(140.0 * self.promo_slide_factor + hover_x)
+                cur_y = target_y - int(12.0 * self.promo_slide_factor - hover_y)
 
         self.surf_promo_card.fill((0, 0, 0, 0))
 
         if self.promo_current_type == "ask_god":
-            self._draw_ask_god_card(self.surf_promo_card, card_w, card_h, self.time_elapsed, self.promo_alpha)
+            self._draw_ask_god_card(self.surf_promo_card, card_w, card_h, self.time_elapsed)
         else:
-            self._draw_like_sub_card(self.surf_promo_card, card_w, card_h, self.time_elapsed, self.promo_alpha)
+            self._draw_like_sub_card(self.surf_promo_card, card_w, card_h, self.time_elapsed)
+
+        # Apply whole-card alpha modulation (smoothly fades frame, text, badges, and specular glints in perfect unison)
+        alpha_byte = max(0, min(255, int(self.promo_alpha * 255)))
+        self.surf_promo_card.set_alpha(alpha_byte)
 
         self.screen.blit(self.surf_promo_card, (cur_x, cur_y))
 
-    def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
+    def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float):
         """
         Draws the streamlined 'Ask Anything' inquiry callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
@@ -2017,17 +2051,17 @@ class Visualizer:
         - Shimmering specular rim sweep & corner glints
         """
         # 1. Glassmorphism Card Frame
-        bg_alpha = int(255 * alpha_mult) if self.is_vertical else min(248, int(245 * alpha_mult))
+        bg_alpha = 255 if self.is_vertical else 248
         pygame.draw.rect(surf, (10, 16, 32, bg_alpha), (0, 0, w, h), border_radius=16)
-        pygame.draw.rect(surf, (20, 36, 68, min(240, int(230 * alpha_mult))), (2, 2, w - 4, h - 4), border_radius=14)
+        pygame.draw.rect(surf, (20, 36, 68, 235), (2, 2, w - 4, h - 4), border_radius=14)
 
         # Radiant Golden/Cyan Border Glow
         border_pulse = 0.85 + 0.15 * math.sin(t * 5.0)
         gold_border = (255, 215, 0)
-        pygame.draw.rect(surf, (*gold_border, min(255, int(200 * border_pulse * alpha_mult))), (0, 0, w, h), width=2, border_radius=16)
+        pygame.draw.rect(surf, (*gold_border, min(255, int(210 * border_pulse))), (0, 0, w, h), width=2, border_radius=16)
 
         # Top rim specular sheen
-        pygame.draw.line(surf, (255, 255, 255, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
+        pygame.draw.line(surf, (255, 255, 255, 175), (24, 2), (w - 24, 2), 1)
 
         # 2. Centered Title Row: Celestial Question Badge + Title (Centered Lockup)
         title_str = "Ask Anything"
@@ -2051,12 +2085,12 @@ class Visualizer:
             r_out = badge_r + 7 + 3.0 * math.sin(t * 6.0 + i)
             p1 = (int(badge_cx + r_in * math.cos(ang)), int(badge_cy + r_in * math.sin(ang)))
             p2 = (int(badge_cx + r_out * math.cos(ang)), int(badge_cy + r_out * math.sin(ang)))
-            pygame.draw.line(surf, (255, 215, 0, min(255, int(170 * alpha_mult))), p1, p2, 2)
+            pygame.draw.line(surf, (255, 215, 0, 180), p1, p2, 2)
 
         # Core Badge Circle
-        pygame.draw.circle(surf, (20, 36, 68, min(255, int(240 * alpha_mult))), (badge_cx, badge_cy), badge_r)
-        pygame.draw.circle(surf, (255, 215, 0, min(255, int(230 * alpha_mult))), (badge_cx, badge_cy), badge_r, 2)
-        pygame.draw.circle(surf, (0, 240, 255, min(255, int(130 * alpha_mult))), (badge_cx, badge_cy), badge_r - 4, 1)
+        pygame.draw.circle(surf, (20, 36, 68, 240), (badge_cx, badge_cy), badge_r)
+        pygame.draw.circle(surf, (255, 215, 0, 235), (badge_cx, badge_cy), badge_r, 2)
+        pygame.draw.circle(surf, (0, 240, 255, 140), (badge_cx, badge_cy), badge_r - 4, 1)
 
         # White Question Mark Glyph
         q_rend = self.font_callout_icon.render("?", True, (255, 255, 255))
@@ -2081,18 +2115,18 @@ class Visualizer:
         if 0 <= shimmer_pos < w:
             s_left = max(10, shimmer_pos - 35)
             s_right = min(w - 10, shimmer_pos + 35)
-            pygame.draw.line(surf, (255, 255, 255, min(255, int(220 * alpha_mult))), (s_left, 1), (s_right, 1), 2)
-            pygame.draw.line(surf, (255, 215, 0, min(255, int(180 * alpha_mult))), (s_left, h - 2), (s_right, h - 2), 2)
+            pygame.draw.line(surf, (255, 255, 255, 220), (s_left, 1), (s_right, 1), 2)
+            pygame.draw.line(surf, (255, 215, 0, 180), (s_left, h - 2), (s_right, h - 2), 2)
 
         # 5. Corner Sparkle Glints
-        sp_a = min(255, int((140 + 115 * math.sin(t * 8.0)) * alpha_mult))
+        sp_a = min(255, int(140 + 115 * math.sin(t * 8.0)))
         for sp_pos in [(w - 18, 18), (w - 28, h - 18)]:
             sx, sy = sp_pos
             pygame.draw.circle(surf, (255, 255, 255, sp_a), (sx, sy), 2)
             pygame.draw.line(surf, (255, 215, 0, sp_a), (sx - 6, sy), (sx + 6, sy), 1)
             pygame.draw.line(surf, (255, 215, 0, sp_a), (sx, sy - 6), (sx, sy + 6), 1)
 
-    def _draw_like_sub_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
+    def _draw_like_sub_card(self, surf: pygame.Surface, w: int, h: int, t: float):
         """
         Draws the streamlined 'Subscribing Changes Nothing' community callout card:
         - Sleek ruby-tinted glassmorphic container with neon coral/magenta border
@@ -2101,17 +2135,17 @@ class Visualizer:
         - Shimmering specular rim sweep & corner glints
         """
         # 1. Glassmorphism Card Frame
-        bg_alpha = int(255 * alpha_mult) if self.is_vertical else min(248, int(245 * alpha_mult))
+        bg_alpha = 255 if self.is_vertical else 248
         pygame.draw.rect(surf, (24, 10, 20, bg_alpha), (0, 0, w, h), border_radius=16)
-        pygame.draw.rect(surf, (48, 16, 34, min(240, int(230 * alpha_mult))), (2, 2, w - 4, h - 4), border_radius=14)
+        pygame.draw.rect(surf, (48, 16, 34, 235), (2, 2, w - 4, h - 4), border_radius=14)
 
         # Radiant Neon Coral/Ruby Border Glow
         border_pulse = 0.85 + 0.15 * math.sin(t * 5.0)
         coral_border = (255, 50, 90)
-        pygame.draw.rect(surf, (*coral_border, min(255, int(200 * border_pulse * alpha_mult))), (0, 0, w, h), width=2, border_radius=16)
+        pygame.draw.rect(surf, (*coral_border, min(255, int(210 * border_pulse))), (0, 0, w, h), width=2, border_radius=16)
 
         # Top rim specular sheen
-        pygame.draw.line(surf, (255, 220, 230, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
+        pygame.draw.line(surf, (255, 220, 230, 175), (24, 2), (w - 24, 2), 1)
 
         # 2. Centered Title Row: YouTube & Bell Badge + Title (Centered Lockup)
         title_str = "Subscribing Changes Nothing."
@@ -2127,8 +2161,8 @@ class Visualizer:
         # YouTube Red Squircle Pill
         pill_x = lockup_x
         pill_y = 28 if self.is_vertical else 24
-        pygame.draw.rect(surf, (255, 20, 50, min(255, int(240 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), border_radius=8)
-        pygame.draw.rect(surf, (255, 255, 255, min(255, int(180 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), width=1, border_radius=8)
+        pygame.draw.rect(surf, (255, 20, 50, 240), (pill_x, pill_y, pill_w, pill_h), border_radius=8)
+        pygame.draw.rect(surf, (255, 255, 255, 190), (pill_x, pill_y, pill_w, pill_h), width=1, border_radius=8)
 
         # White play triangle inside pill
         if self.is_vertical:
@@ -2143,7 +2177,7 @@ class Visualizer:
                 (pill_x + 15, pill_y + 19),
                 (pill_x + 28, pill_y + 13),
             ]
-        pygame.draw.polygon(surf, (255, 255, 255, min(255, int(250 * alpha_mult))), tri_pts)
+        pygame.draw.polygon(surf, (255, 255, 255, 250), tri_pts)
 
         # Ringing Golden Notification Bell badge overlapping lower right
         bell_cx = pill_x + pill_w - 2
@@ -2153,8 +2187,8 @@ class Visualizer:
         bell_r = 14 if self.is_vertical else 12
 
         # Bell pill background
-        pygame.draw.circle(surf, (35, 15, 25, min(255, int(240 * alpha_mult))), (bell_cx, bell_cy), bell_r)
-        pygame.draw.circle(surf, (255, 200, 50, min(255, int(220 * alpha_mult))), (bell_cx, bell_cy), bell_r, 1)
+        pygame.draw.circle(surf, (35, 15, 25, 240), (bell_cx, bell_cy), bell_r)
+        pygame.draw.circle(surf, (255, 200, 50, 230), (bell_cx, bell_cy), bell_r, 1)
 
         # Bell Dome
         dome_w = 7 if self.is_vertical else 5
@@ -2165,12 +2199,12 @@ class Visualizer:
             (bell_cx + 3, bell_cy - dome_h),
             (bell_cx + dome_w, bell_cy + 3),
         ]
-        pygame.draw.polygon(surf, (255, 215, 0, min(255, int(245 * alpha_mult))), bell_pts)
-        pygame.draw.circle(surf, (255, 240, 120, min(255, int(250 * alpha_mult))), (clapper_x, bell_cy + 5), 2)
+        pygame.draw.polygon(surf, (255, 215, 0, 245), bell_pts)
+        pygame.draw.circle(surf, (255, 240, 120, 250), (clapper_x, bell_cy + 5), 2)
 
         # Sound arcs around ringing bell
         if abs(swing) > 0.35:
-            arc_a = min(255, int(abs(swing) * 210 * alpha_mult))
+            arc_a = min(255, int(abs(swing) * 220))
             pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx - 12, bell_cy - 6, 7, 11), math.pi * 0.6, math.pi * 1.4, 2)
             pygame.draw.arc(surf, (255, 200, 50, arc_a), (bell_cx + 5, bell_cy - 6, 7, 11), -math.pi * 0.4, math.pi * 0.4, 2)
 
@@ -2195,11 +2229,11 @@ class Visualizer:
         if 0 <= shimmer_pos < w:
             s_left = max(10, shimmer_pos - 35)
             s_right = min(w - 10, shimmer_pos + 35)
-            pygame.draw.line(surf, (255, 255, 255, min(255, int(220 * alpha_mult))), (s_left, 1), (s_right, 1), 2)
-            pygame.draw.line(surf, (255, 60, 120, min(255, int(180 * alpha_mult))), (s_left, h - 2), (s_right, h - 2), 2)
+            pygame.draw.line(surf, (255, 255, 255, 220), (s_left, 1), (s_right, 1), 2)
+            pygame.draw.line(surf, (255, 60, 120, 190), (s_left, h - 2), (s_right, h - 2), 2)
 
         # 5. Corner Sparkle Glints
-        sp_a = min(255, int((140 + 115 * math.sin(t * 8.0)) * alpha_mult))
+        sp_a = min(255, int(140 + 115 * math.sin(t * 8.0)))
         for sp_pos in [(w - 18, 18), (w - 28, h - 18)]:
             sx, sy = sp_pos
             pygame.draw.circle(surf, (255, 255, 255, sp_a), (sx, sy), 2)

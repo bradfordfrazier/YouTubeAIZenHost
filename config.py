@@ -286,6 +286,9 @@ class AppConfig:
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")
     promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "75.0"))
     promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))
+    promo_overlay_entrance_sec: float = float(os.getenv("PROMO_OVERLAY_ENTRANCE_SEC", "0.9"))
+    promo_overlay_exit_sec: float = float(os.getenv("PROMO_OVERLAY_EXIT_SEC", "1.15"))
+    promo_overlay_hover_amp: float = float(os.getenv("PROMO_OVERLAY_HOVER_AMP", "4.5"))
 
     # --------------------------------------------------------------------------
     # 8. Windows Audio & Local Playback Settings (OBS Window / Application Capture)

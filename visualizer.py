@@ -598,13 +598,21 @@ class Visualizer:
         if self.ai_text_current and self.ai_text_alpha > 0.01:
             self.ai_text_state = "fade_out"
             self.pinned_chat_state = "fade_out"
-        elif self.ai_text_state == "fade_out":
-            pass
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
             self.ai_text_state = "idle_empty"
             self._active_pinned_message = None
+
+        # If promo overlay is currently active or entering/displaying, smoothly transition it to exit without jumping
+        if self.promo_state in ("entrance", "display"):
+            self.promo_state = "exit"
+            self.promo_state_timer = 0.0
+
+    def fade_out_question(self):
+        """Initiates smooth graceful fade-out of the active question preview in the main comment card."""
+        if self.question_fade_state in ("fade_in", "steady"):
+            self.question_fade_state = "fade_out"
 
     def clear_subtitle(self):
         """Resets subtitle text to motto, initiating smooth synchronized dissolution of Oracle comment & pinned question."""
@@ -1635,8 +1643,10 @@ class Visualizer:
         q_time_elapsed = (time.time() - self.active_question_start_time) if self.active_question_start_time > 0 else 999.0
 
         # 2. Update Question Fade In / Steady / Fade Out State Machine
-        q_fade_in_rate = 1.0 / 0.35
-        q_fade_out_rate = 1.0 / 0.35
+        q_fade_in_sec = max(0.05, getattr(self.cfg, "question_fade_in_sec", 0.75))
+        q_fade_out_sec = max(0.05, getattr(self.cfg, "question_fade_out_sec", 0.85))
+        q_fade_in_rate = 1.0 / q_fade_in_sec
+        q_fade_out_rate = 1.0 / q_fade_out_sec
 
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
@@ -1999,14 +2009,14 @@ class Visualizer:
             target_y = self.core_cy - (card_h // 2)
 
             if self.promo_state == "entrance":
-                cur_x = int(target_x + hover_x * self.promo_slide_factor)
-                cur_y = int(target_y + 45.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
+                cur_x = round(target_x + hover_x * self.promo_slide_factor)
+                cur_y = round(target_y + 45.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
             elif self.promo_state == "display":
-                cur_x = int(target_x + hover_x)
-                cur_y = int(target_y + hover_y)
+                cur_x = round(target_x + hover_x)
+                cur_y = round(target_y + hover_y)
             else:  # exit: gentle upward ethereal ascension
-                cur_x = int(target_x + hover_x)
-                cur_y = int(target_y - 28.0 * self.promo_slide_factor + hover_y)
+                cur_x = round(target_x + hover_x)
+                cur_y = round(target_y - 28.0 * self.promo_slide_factor + hover_y)
         else:
             card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
@@ -2014,14 +2024,14 @@ class Visualizer:
 
             if self.promo_state == "entrance":
                 # Glide in from left (-260px) with subtle upward settling arc
-                cur_x = int(target_x - 260.0 * (1.0 - self.promo_slide_factor) + hover_x * self.promo_slide_factor)
-                cur_y = int(target_y + 14.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
+                cur_x = round(target_x - 260.0 * (1.0 - self.promo_slide_factor) + hover_x * self.promo_slide_factor)
+                cur_y = round(target_y + 14.0 * (1.0 - self.promo_slide_factor) + hover_y * self.promo_slide_factor)
             elif self.promo_state == "display":
-                cur_x = int(target_x + hover_x)
-                cur_y = int(target_y + hover_y)
+                cur_x = round(target_x + hover_x)
+                cur_y = round(target_y + hover_y)
             else:  # exit: gentle drift to right in reading flow direction + upward ethereal float
-                cur_x = int(target_x + 140.0 * self.promo_slide_factor + hover_x)
-                cur_y = int(target_y - 12.0 * self.promo_slide_factor + hover_y)
+                cur_x = round(target_x + 140.0 * self.promo_slide_factor + hover_x)
+                cur_y = round(target_y - 12.0 * self.promo_slide_factor + hover_y)
 
         self.surf_promo_card.fill((0, 0, 0, 0))
 

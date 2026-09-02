@@ -491,24 +491,37 @@ class LocalCoHostApp:
             logger.debug(f"Failed to load chat cache: {e}")
 
     def _save_cached_chat(self):
-        """Persists recent chat history to disk for seamless recovery upon restart."""
+        """Persists recent chat history to disk for seamless recovery upon restart (non-blocking)."""
         try:
             items = list(self.chat_history)[-50:]
-            temp_file = self.CHAT_CACHE_FILE.with_suffix(".tmp")
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(items, f, indent=2)
-            temp_file.replace(self.CHAT_CACHE_FILE)
+            def _write():
+                try:
+                    temp_file = self.CHAT_CACHE_FILE.with_suffix(".tmp")
+                    with open(temp_file, "w", encoding="utf-8") as f:
+                        json.dump(items, f, indent=2)
+                    temp_file.replace(self.CHAT_CACHE_FILE)
+                except Exception as e:
+                    logger.debug(f"Failed to write chat cache: {e}")
+
+            if self.loop and self.loop.is_running():
+                self.loop.run_in_executor(None, _write)
+            else:
+                _write()
         except Exception as e:
             logger.debug(f"Failed to save chat cache: {e}")
 
     # --------------------------------------------------------------------------
     # 1. State & Engagement State Management
     # --------------------------------------------------------------------------
-    def _wake_up_and_trigger_comment(self, viewers: int):
+    def _wake_up_and_trigger_comment(self, viewers: int, prev_viewers: int = 0):
         """
-        Wakes up the system when a viewer enters an empty room (0 -> 1+) or on initial boot with active viewers.
+        Wakes up the system when a viewer enters an empty room (strictly 0 -> 1+).
         Immediately triggers the next scripted comment event and establishes the active cadence.
         """
+        if prev_viewers > 0:
+            logger.debug(f"Room wake-up bypassed: viewers changed from {prev_viewers} to {viewers} (not an empty room 0 -> 1+ transition).")
+            return
+
         now = time.time()
         cooldown = getattr(self.cfg, "viewer_join_cooldown_sec", 60.0)
         if (now - self.last_viewer_join_welcome_time) < cooldown:
@@ -539,11 +552,11 @@ class LocalCoHostApp:
                     f"Acknowledge the arrival on {chan_handle} with transcendent, charismatic presence. "
                     f"Do not ask for chat comments or plead for engagement."
                 )
-            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Immediately performing comment event: {prompt}...")
+            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). Immediately performing comment event: {prompt}...")
             self.visualizer.fade_out_for_turn()
             self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=2, force=False)
         else:
-            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room ({viewers} active). Room transitioned to ACTIVE.")
+            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). Room transitioned to ACTIVE.")
 
     def _on_viewer_count_update(self, new_viewers: int, new_chat_velocity: int = 0):
         """Processes viewer count updates and manages active vs eco engagement transitions."""
@@ -569,7 +582,7 @@ class LocalCoHostApp:
                 f"⚡ [Wake Up] Viewer entered empty room! (Viewers rose from 0 to {new_viewers}). "
                 "Resuming active cadence..."
             )
-            self._wake_up_and_trigger_comment(new_viewers)
+            self._wake_up_and_trigger_comment(new_viewers, prev_viewers=prev_viewers)
 
         elif prev_viewers >= min_viewers and new_viewers < min_viewers:
             logger.info(
@@ -873,6 +886,14 @@ class LocalCoHostApp:
                     if remaining_linger > 0.05:
                         logger.info(f"⏳ [Question Linger] Holding question preview on screen for {remaining_linger:.2f}s for audience comprehension...")
                         await asyncio.sleep(remaining_linger)
+
+                # Graceful transition from Question to Answer: let question dissolve softly, then provide a contemplative breath
+                if question_text and hasattr(self.visualizer, "fade_out_question"):
+                    self.visualizer.fade_out_question()
+                    q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.85)
+                    pause_qa = getattr(self.cfg, "question_to_answer_pause_sec", 0.6)
+                    logger.info(f"✨ [Question Transition] Dissolving question preview ({q_fade_out_sec:.2f}s fade + {pause_qa:.2f}s breath before answer)...")
+                    await asyncio.sleep(q_fade_out_sec + pause_qa)
 
                 logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
                 await self.tts.queue_speech(clean_speech)
@@ -1580,11 +1601,7 @@ class LocalCoHostApp:
                     if api_viewers is not None:
                         self._on_viewer_count_update(api_viewers, chat_velocity)
                     else:
-                        idle_timeout = self.cfg.chat_idle_timeout_sec
-                        if self.last_chat_received_time > 0 and (now - self.last_chat_received_time) > idle_timeout:
-                            if self.concurrent_viewers > 0:
-                                logger.info("🌙 [Chat Inactive] No recent chat activity; resetting viewer count to 0 (ECO mode).")
-                                self._on_viewer_count_update(0, 0)
+                        logger.debug("YouTube viewer poller: API response unavailable; retaining current viewer count.")
 
             except Exception as e:
                 logger.debug(f"Viewer poller cycle note: {e}")

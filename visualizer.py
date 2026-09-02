@@ -610,6 +610,7 @@ class Visualizer:
         if self.promo_state in ("entrance", "display"):
             self.promo_state = "exit"
             self.promo_state_timer = 0.0
+            self.promo_slide_factor = 0.0
 
     def fade_out_question(self):
         """Initiates smooth graceful fade-out of the active question preview in the main comment card."""
@@ -1985,6 +1986,7 @@ class Visualizer:
             if self.promo_state_timer >= self.promo_duration:
                 self.promo_state = "exit"
                 self.promo_state_timer = 0.0
+                self.promo_slide_factor = 0.0
         elif self.promo_state == "exit":
             self.promo_state_timer += dt
             prog = min(1.0, self.promo_state_timer / exit_duration)

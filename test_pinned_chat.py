@@ -343,13 +343,13 @@ def test_configurable_transitions_override():
     """Verifies that overriding transition configs in config.py directly controls fade and hold timings."""
     orig_fade_in = config.comment_fade_in_sec
     orig_fade_out = config.comment_fade_out_sec
-    orig_pause = config.comment_pause_sec
+    orig_motto_delay = config.motto_pre_fade_in_sec
     orig_hold = config.comment_post_speech_hold_sec
 
     try:
         config.comment_fade_in_sec = 0.2
         config.comment_fade_out_sec = 0.3
-        config.comment_pause_sec = 0.5
+        config.motto_pre_fade_in_sec = 0.5
         config.comment_post_speech_hold_sec = 2.0
 
         vis = Visualizer(width=1920, height=1080)
@@ -368,7 +368,7 @@ def test_configurable_transitions_override():
     finally:
         config.comment_fade_in_sec = orig_fade_in
         config.comment_fade_out_sec = orig_fade_out
-        config.comment_pause_sec = orig_pause
+        config.motto_pre_fade_in_sec = orig_motto_delay
         config.comment_post_speech_hold_sec = orig_hold
 
 

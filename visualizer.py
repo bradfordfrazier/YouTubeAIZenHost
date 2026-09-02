@@ -635,7 +635,7 @@ class Visualizer:
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
-            motto_delay = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", getattr(self.cfg, "comment_pause_sec", 2.0)))))
+            motto_delay = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", 0.0))))
             if motto_delay > 0.0:
                 self.ai_text_state = "motto_pause"
                 self.motto_pause_timer = motto_delay
@@ -1653,8 +1653,7 @@ class Visualizer:
 
         comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
         comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
-        comment_pause_sec = max(0.0, getattr(self.cfg, "comment_pause_sec", 2.0))
-        motto_pre_fade_in_sec = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", getattr(self.cfg, "comment_pause_sec", 2.0)))))
+        motto_pre_fade_in_sec = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", 0.0))))
         motto_fade_in_sec = max(0.05, getattr(self.cfg, "motto_fade_in_sec", 1.4))
         motto_fade_out_sec = max(0.05, getattr(self.cfg, "motto_fade_out_sec", 0.6))
 

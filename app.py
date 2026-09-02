@@ -848,13 +848,11 @@ class LocalCoHostApp:
             min_display_hold_sec = max(min_display_sec, word_count * rate_sec)
             q_fade_in_sec = getattr(self.cfg, "question_fade_in_sec", 0.80)
             q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.80)
-            pause_qa = getattr(self.cfg, "question_to_answer_pause_sec", 0.60)
             min_time_before_fade_out = q_fade_in_sec + min_display_hold_sec
         else:
             min_display_hold_sec = 0.0
             q_fade_in_sec = 0.0
             q_fade_out_sec = 0.0
-            pause_qa = 0.0
             min_time_before_fade_out = 0.0
 
         t_question_shown = time.perf_counter()
@@ -904,12 +902,7 @@ class LocalCoHostApp:
                         logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
                         await asyncio.sleep(q_fade_out_sec)
 
-                # 4. Apply contemplative pause before transitioning to answer process
-                if pause_qa > 0:
-                    logger.info(f"✨ [Question-To-Answer Pause] Pausing {pause_qa:.2f}s before answer...")
-                    await asyncio.sleep(pause_qa)
-
-                # 5. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle
+                # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle
                 self.tts.push_audio(audio)
                 self.current_ai_subtitle = clean_speech
                 self.visualizer.set_subtitle(clean_speech)

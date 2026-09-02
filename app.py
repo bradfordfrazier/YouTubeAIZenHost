@@ -1806,7 +1806,7 @@ class LocalCoHostApp:
                 if self.engagement_mode == "standby":
                     continue
 
-                if getattr(self.cfg, "cast_require_viewers", True) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
+                if getattr(self.cfg, "cast_require_viewers", False) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
                     continue
 
                 now = time.time()
@@ -1894,7 +1894,10 @@ class LocalCoHostApp:
 
                 self._update_engagement_state()
 
-                if self.engagement_mode != "active" or self.concurrent_viewers == 0:
+                if self.engagement_mode == "standby":
+                    continue
+
+                if getattr(self.cfg, "spontaneous_require_viewers", False) and (self.engagement_mode == "eco" or self.concurrent_viewers == 0):
                     continue
 
                 now = time.time()

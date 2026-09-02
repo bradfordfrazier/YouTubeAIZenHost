@@ -170,6 +170,7 @@ class AppConfig:
 
     # Spontaneous Idle Commentary & Adaptive Backoff
     spontaneous_commentary_enabled: bool = os.getenv("SPONTANEOUS_COMMENTARY_ENABLED", "true").lower() in ("true", "1", "yes")
+    spontaneous_require_viewers: bool = os.getenv("SPONTANEOUS_REQUIRE_VIEWERS", "false").lower() in ("true", "1", "yes")
     idle_silence_threshold_sec: float = _get_float("IDLE_SILENCE_THRESHOLD_SEC", 45.0)
     spontaneous_min_interval_sec: float = _get_float("SPONTANEOUS_MIN_INTERVAL_SEC", 60.0)
     spontaneous_max_backoff_sec: float = _get_float("SPONTANEOUS_MAX_BACKOFF_SEC", 600.0)
@@ -326,7 +327,7 @@ class AppConfig:
     # 12. The Cast Subsystem (B1-B4: Synthetic Asker Archetypes)
     # --------------------------------------------------------------------------
     cast_enabled: bool = os.getenv("CAST_ENABLED", "true").lower() in ("true", "1", "yes")
-    cast_require_viewers: bool = os.getenv("CAST_REQUIRE_VIEWERS", "true").lower() in ("true", "1", "yes")
+    cast_require_viewers: bool = os.getenv("CAST_REQUIRE_VIEWERS", "false").lower() in ("true", "1", "yes")
     cast_min_interval_sec: float = float(os.getenv("CAST_MIN_INTERVAL_SEC", "75.0"))
     cast_max_interval_sec: float = float(os.getenv("CAST_MAX_INTERVAL_SEC", "160.0"))
     cast_quiet_chat_threshold_sec: float = float(os.getenv("CAST_QUIET_CHAT_THRESHOLD_SEC", "45.0"))

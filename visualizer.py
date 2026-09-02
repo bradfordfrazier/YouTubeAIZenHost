@@ -528,7 +528,7 @@ class Visualizer:
         host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
         chat_w, chat_h = (940, 580) if self.is_vertical else (380, 490)
         sub_w, sub_h = (940, 380) if self.is_vertical else (880, 360)
-        promo_w, promo_h = (940, 190) if self.is_vertical else (840, 160)
+        promo_w, promo_h = (920, 130) if self.is_vertical else (820, 114)
 
         self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
         self.surf_chat_card = pygame.Surface((chat_w, chat_h), pygame.SRCALPHA)
@@ -1980,20 +1980,20 @@ class Visualizer:
             return
 
         if self.is_vertical:
-            card_w, card_h = 940, 190
+            card_w, card_h = 920, 130
             target_x = (self.width - card_w) // 2
-            # Positioned just above chat feed (chat_y=1205, promo bottom at 1190)
-            target_y = 1000
+            # Dead center on avatar
+            target_y = self.core_cy - (card_h // 2)
             start_y = target_y - 40
             cur_x = target_x
             cur_y = int(start_y + (target_y - start_y) * self.promo_slide_factor)
             if self.promo_state == "display":
                 cur_y += int(math.sin(self.time_elapsed * 2.8) * 4.0)
         else:
-            card_w, card_h = 840, 160
+            card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
-            # Positioned just above the lower screen border / below AI comment card (875)
-            target_y = 875
+            # Dead center on avatar
+            target_y = self.core_cy - (card_h // 2)
             start_x = -card_w - 60
             cur_x = int(start_x + (target_x - start_x) * self.promo_slide_factor)
             hover_offset = int(math.sin(self.time_elapsed * 2.8) * 4.0) if self.promo_state == "display" else 0
@@ -2010,7 +2010,7 @@ class Visualizer:
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Ask Anything' inquiry callout card:
+        Draws the streamlined 'Ask Anything' inquiry callout card:
         - Deep space sapphire glassmorphic container with radiant gold/cyan border
         - Centered title row with celestial sunbeam question glyph + bold title
         - Centered high-legibility subtitle
@@ -2039,9 +2039,9 @@ class Visualizer:
         total_title_w = (badge_r * 2 + 8) + lockup_gap + title_rend.get_width()
         lockup_x = (w - total_title_w) // 2
         badge_cx = lockup_x + badge_r + 4
-        badge_cy = 68 if self.is_vertical else 54
+        badge_cy = 44 if self.is_vertical else 38
         title_x = lockup_x + (badge_r * 2 + 8) + lockup_gap
-        title_y = 48 if self.is_vertical else 38
+        title_y = 26 if self.is_vertical else 22
 
         # Rotating halo rays around question badge
         ray_angle_base = t * 1.6
@@ -2071,12 +2071,12 @@ class Visualizer:
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)
-        sub_y = 120 if self.is_vertical else 98
+        sub_y = 78 if self.is_vertical else 68
         sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 
-        # 5. Specular Rim Sheen Light Sweep
+        # 4. Specular Rim Sheen Light Sweep
         shimmer_pos = int((t * 280) % (w + 140)) - 70
         if 0 <= shimmer_pos < w:
             s_left = max(10, shimmer_pos - 35)
@@ -2084,7 +2084,7 @@ class Visualizer:
             pygame.draw.line(surf, (255, 255, 255, min(255, int(220 * alpha_mult))), (s_left, 1), (s_right, 1), 2)
             pygame.draw.line(surf, (255, 215, 0, min(255, int(180 * alpha_mult))), (s_left, h - 2), (s_right, h - 2), 2)
 
-        # 6. Corner Sparkle Glints
+        # 5. Corner Sparkle Glints
         sp_a = min(255, int((140 + 115 * math.sin(t * 8.0)) * alpha_mult))
         for sp_pos in [(w - 18, 18), (w - 28, h - 18)]:
             sx, sy = sp_pos
@@ -2094,9 +2094,8 @@ class Visualizer:
 
     def _draw_like_sub_card(self, surf: pygame.Surface, w: int, h: int, t: float, alpha_mult: float):
         """
-        Draws the 'Subscribing Changes Nothing' community callout card:
+        Draws the streamlined 'Subscribing Changes Nothing' community callout card:
         - Sleek ruby-tinted glassmorphic container with neon coral/magenta border
-        - Top centered 'STREAM CONTINUITY' badge tag
         - Centered title row with YouTube Play badge + ringing bell + bold title
         - Centered high-legibility subtitle
         - Shimmering specular rim sweep & corner glints
@@ -2114,23 +2113,7 @@ class Visualizer:
         # Top rim specular sheen
         pygame.draw.line(surf, (255, 220, 230, min(255, int(160 * alpha_mult))), (24, 2), (w - 24, 2), 1)
 
-        # 2. Top Pill Tag: "STREAM CONTINUITY" (Centered)
-        tag_txt = self.font_callout_tag.render("STREAM CONTINUITY", True, (255, 100, 130))
-        tag_w = tag_txt.get_width() + (36 if self.is_vertical else 30)
-        tag_h = 26 if self.is_vertical else 22
-        tag_x = (w - tag_w) // 2
-        tag_y = 16 if self.is_vertical else 12
-
-        pygame.draw.rect(surf, (255, 40, 80, min(255, int(50 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), border_radius=tag_h // 2)
-        pygame.draw.rect(surf, (255, 60, 100, min(255, int(180 * alpha_mult))), (tag_x, tag_y, tag_w, tag_h), width=1, border_radius=tag_h // 2)
-
-        # Pulsating Live Red Dot
-        dot_a = min(255, int((160 + 95 * math.sin(t * 6.0)) * alpha_mult))
-        dot_r = 4 if self.is_vertical else 4
-        pygame.draw.circle(surf, (255, 50, 90, dot_a), (tag_x + 12, tag_y + tag_h // 2), dot_r)
-        surf.blit(tag_txt, (tag_x + (22 if self.is_vertical else 20), tag_y + (2 if self.is_vertical else 1)))
-
-        # 3. Middle Title Row: YouTube & Bell Badge + Title (Centered Lockup)
+        # 2. Centered Title Row: YouTube & Bell Badge + Title (Centered Lockup)
         title_str = "Subscribing Changes Nothing."
         title_rend = self.font_callout_title.render(title_str, True, (255, 245, 245))
         sh_rend = self.font_callout_title.render(title_str, True, (160, 20, 50))
@@ -2143,7 +2126,7 @@ class Visualizer:
 
         # YouTube Red Squircle Pill
         pill_x = lockup_x
-        pill_y = 60 if self.is_vertical else 48
+        pill_y = 28 if self.is_vertical else 24
         pygame.draw.rect(surf, (255, 20, 50, min(255, int(240 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), border_radius=8)
         pygame.draw.rect(surf, (255, 255, 255, min(255, int(180 * alpha_mult))), (pill_x, pill_y, pill_w, pill_h), width=1, border_radius=8)
 
@@ -2193,21 +2176,21 @@ class Visualizer:
 
         # Title Blit
         title_x = lockup_x + badge_area_w + lockup_gap
-        title_y = 57 if self.is_vertical else 45
+        title_y = 26 if self.is_vertical else 22
         surf.blit(sh_rend, (title_x + 2, title_y + 2))
         surf.blit(title_rend, (title_x, title_y))
 
-        # 4. Bottom Subtitle Row (Centered & fully visible)
+        # 3. Bottom Subtitle Row (Centered & fully visible)
         sub_str = "It is, however, appreciated • Ring bell for live alerts"
         sub_rend = self.font_callout_sub.render(sub_str, True, (255, 220, 205))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)
-        sub_y = 130 if self.is_vertical else 106
+        sub_y = 78 if self.is_vertical else 68
         sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 
-        # 5. Specular Rim Sheen Light Sweep
+        # 4. Specular Rim Sheen Light Sweep
         shimmer_pos = int((t * 280) % (w + 140)) - 70
         if 0 <= shimmer_pos < w:
             s_left = max(10, shimmer_pos - 35)
@@ -2215,7 +2198,7 @@ class Visualizer:
             pygame.draw.line(surf, (255, 255, 255, min(255, int(220 * alpha_mult))), (s_left, 1), (s_right, 1), 2)
             pygame.draw.line(surf, (255, 60, 120, min(255, int(180 * alpha_mult))), (s_left, h - 2), (s_right, h - 2), 2)
 
-        # 6. Corner Sparkle Glints
+        # 5. Corner Sparkle Glints
         sp_a = min(255, int((140 + 115 * math.sin(t * 8.0)) * alpha_mult))
         for sp_pos in [(w - 18, 18), (w - 28, h - 18)]:
             sx, sy = sp_pos

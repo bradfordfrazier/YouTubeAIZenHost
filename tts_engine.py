@@ -340,10 +340,9 @@ class TTSEngine:
                 self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
                 self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
 
-    async def queue_speech(self, text: str):
-        """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
-        audio = await self.synthesize(text)
-        if len(audio) > 0:
+    def push_audio(self, audio: np.ndarray):
+        """Pushes pre-synthesized audio into playback buffers with zero latency."""
+        if audio is not None and len(audio) > 0:
             dur = len(audio) / self.sample_rate
             self.last_synthesized_duration = dur
             with self._buffer_lock:
@@ -351,9 +350,14 @@ class TTSEngine:
                 self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
                 self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
                 self.is_speaking = True
-            logger.info(f"Queued {dur:.2f}s audio (buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)")
+            logger.info(f"Queued {dur:.2f}s pre-synthesized audio (buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)")
         else:
             self.last_synthesized_duration = 0.0
+
+    async def queue_speech(self, text: str):
+        """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
+        audio = await self.synthesize(text)
+        self.push_audio(audio)
 
     def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:
         """

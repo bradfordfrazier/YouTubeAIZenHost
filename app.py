@@ -885,7 +885,11 @@ class LocalCoHostApp:
                 and len(words) >= 3
                 and clean_speech[-1] in ".!?\"'”’)"
             ):
-                # 1. Question displayed while answer was generating; hold if needed to satisfy minimum reading duration
+                # 1. Pre-synthesize TTS audio in background while question is STILL steadily displayed on screen
+                logger.info(f"🔊 [AI Speech] Pre-synthesizing audio for: '{clean_speech}'...")
+                audio = await self.tts.synthesize(clean_speech)
+
+                # 2. Question displayed while answer was generating and synthesizing; hold if needed to satisfy minimum reading duration
                 if question_text and min_time_before_fade_out > 0:
                     elapsed = time.perf_counter() - t_question_shown
                     remaining_hold = min_time_before_fade_out - elapsed
@@ -893,20 +897,20 @@ class LocalCoHostApp:
                         logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
                         await asyncio.sleep(remaining_hold)
 
-                # 2. Fade out question based on QUESTION_FADE_OUT_SEC
+                # 3. Fade out question based on QUESTION_FADE_OUT_SEC (answer is fully ready in RAM!)
                 if question_text and hasattr(self.visualizer, "fade_out_question"):
                     self.visualizer.fade_out_question()
                     if q_fade_out_sec > 0:
                         logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
                         await asyncio.sleep(q_fade_out_sec)
 
-                # 3. Apply contemplative pause before transitioning to answer process
+                # 4. Apply contemplative pause before transitioning to answer process
                 if pause_qa > 0:
                     logger.info(f"✨ [Question-To-Answer Pause] Pausing {pause_qa:.2f}s before answer...")
                     await asyncio.sleep(pause_qa)
 
-                logger.info(f"🔊 [AI Speech] Synthesizing audio for: '{clean_speech}'")
-                await self.tts.queue_speech(clean_speech)
+                # 5. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle
+                self.tts.push_audio(audio)
                 self.current_ai_subtitle = clean_speech
                 self.visualizer.set_subtitle(clean_speech)
 

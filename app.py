@@ -972,8 +972,9 @@ class LocalCoHostApp:
 
                 has_queued_next = len(self.comment_queue) > 0
                 if is_spontaneous_turn and only_cast_active:
-                    motto_hold = float(getattr(self.cfg, "motto_post_reflection_hold_sec", 5.0))
-                    max_hold = max(motto_hold, float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)))
+                    motto_fade_in = float(getattr(self.cfg, "motto_fade_in_sec", 1.4))
+                    motto_display = float(getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+                    max_hold = motto_fade_in + motto_display
                 else:
                     max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
                 min_hold = min(2.5, max_hold)

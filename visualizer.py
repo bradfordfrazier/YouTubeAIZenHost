@@ -491,6 +491,7 @@ class Visualizer:
         self.ai_text_state = "steady"
         self.ai_text_y_drift = 0.0
         self.motto_pause_timer = 0.0
+        self.motto_steady_timer = 999.0
 
         # Live chat pinned question card animation state (synchronized dissolution with Oracle comment)
         self.pinned_chat_alpha = 0.0
@@ -1636,13 +1637,16 @@ class Visualizer:
                 self.active_question_is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast")
                 self.active_question_amount = pinned_chat_message.get("amount", "")
                 motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
-                # If prior spoken comment/greeting or motto is actively visible, let it finish dissolving before fading question in
+                motto_display_duration = max(0.0, getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+                # If motto is displaying, check if it has satisfied its configured steady display duration
+                is_motto_holding = (self.ai_text_current == motto and self.motto_steady_timer < motto_display_duration and self.ai_text_state in ("fade_in", "steady", "motto_pause"))
                 if self.ai_text_current and self.ai_text_alpha > 0.005:
-                    self.ai_text_state = "fade_out"
-                    self.ai_text_target = ""
                     self.question_fade_alpha = 0.0
                     self.question_fade_timer = 0.0
                     self.question_fade_state = "waiting_for_dissolve"
+                    if not is_motto_holding:
+                        self.ai_text_state = "fade_out"
+                        self.ai_text_target = ""
                 else:
                     self.active_question_start_time = time.time()
                     self.question_fade_alpha = 0.0
@@ -1917,10 +1921,18 @@ class Visualizer:
                 self.ai_text_alpha = 1.0
                 self.ai_text_y_drift = 0.0
                 self.ai_text_state = "steady"
+                if self.ai_text_current == motto:
+                    self.motto_steady_timer = 0.0
 
         elif self.ai_text_state == "steady":
             self.ai_text_alpha = 1.0
             self.ai_text_y_drift = 0.0
+            if self.ai_text_current == motto:
+                self.motto_steady_timer += dt
+                motto_display_duration = max(0.0, getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+                if self.question_fade_state == "waiting_for_dissolve" and self.motto_steady_timer >= motto_display_duration:
+                    self.ai_text_state = "fade_out"
+                    self.ai_text_target = ""
 
         elif self.ai_text_state == "idle_empty":
             self.ai_text_alpha = 0.0
@@ -2068,8 +2080,26 @@ class Visualizer:
         hover_y = math.sin(self.time_elapsed * 2.2) * hover_amp
         hover_x = math.cos(self.time_elapsed * 1.4) * (hover_amp * 0.35)
 
+        # Calculate snug card width tailored dynamically to contained text and badges
+        pad_x = 34 if self.is_vertical else 28
+        if self.promo_current_type == "ask_god":
+            sub_str = "You already know the answer but I enjoy the theater"
+            title_str = "Ask Anything"
+            badge_r = 19 if self.is_vertical else 16
+            badge_w = (badge_r * 2 + 8) + 14
+        else:
+            sub_str = "It is, however, appreciated • Ring bell for live alerts"
+            title_str = "Subscribing Changes Nothing."
+            pill_w = 48 if self.is_vertical else 40
+            badge_w = pill_w + (16 if self.is_vertical else 12) + 14
+
+        title_w = self.font_callout_title.size(title_str)[0]
+        sub_w = self.font_callout_sub.size(sub_str)[0]
+        content_w = max(sub_w, badge_w + title_w)
+        card_w = content_w + (pad_x * 2)
+        card_h = 126 if self.is_vertical else 110
+
         if self.is_vertical:
-            card_w, card_h = 920, 130
             target_x = (self.width - card_w) // 2
             target_y = self.core_cy - (card_h // 2)
 
@@ -2083,7 +2113,6 @@ class Visualizer:
                 cur_x = round(target_x + hover_x * (1.0 - self.promo_slide_factor))
                 cur_y = round(target_y - 24.0 * self.promo_slide_factor + hover_y * (1.0 - self.promo_slide_factor))
         else:
-            card_w, card_h = 820, 114
             target_x = (self.width - card_w) // 2
             target_y = self.core_cy - (card_h // 2)
 
@@ -2109,7 +2138,9 @@ class Visualizer:
         alpha_byte = max(0, min(255, int(self.promo_alpha * 255)))
         self.surf_promo_card.set_alpha(alpha_byte)
 
-        self.screen.blit(self.surf_promo_card, (cur_x, cur_y))
+        # Blit the precisely sized card area onto screen
+        card_subsurf = self.surf_promo_card.subsurface((0, 0, card_w, card_h))
+        self.screen.blit(card_subsurf, (cur_x, cur_y))
 
     def _draw_ask_god_card(self, surf: pygame.Surface, w: int, h: int, t: float):
         """

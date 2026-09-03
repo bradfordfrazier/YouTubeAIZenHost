@@ -211,8 +211,9 @@ class AppConfig:
     tts_rate: str = os.getenv("TTS_RATE", "+5%")
 
     # --------------------------------------------------------------------------
-    # 7. Visualizer Settings (Supports 16:9 1920x1080 and 9:16 1080x1920)
+    # 7. Visualizer & Vox-Only Mode Settings (Supports 16:9 1920x1080 and 9:16 1080x1920)
     # --------------------------------------------------------------------------
+    vox_only_mode: bool = os.getenv("VOX_ONLY_MODE", os.getenv("VOX_ONLY", "false")).lower() in ("true", "1", "yes")
     visualizer_aspect_ratio: str = os.getenv("VISUALIZER_ASPECT_RATIO", "16:9")
     visualizer_width: int = _get_int("VISUALIZER_WIDTH", 1080 if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else 1920)
     visualizer_height: int = _get_int("VISUALIZER_HEIGHT", 1920 if os.getenv("VISUALIZER_ASPECT_RATIO") in ("9:16", "vertical", "portrait") else 1080)

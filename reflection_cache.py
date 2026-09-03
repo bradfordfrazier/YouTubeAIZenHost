@@ -94,6 +94,9 @@ class ReflectionCache:
         while True:
             try:
                 await asyncio.sleep(poll_interval)
+                if getattr(brain, "engagement_mode", "active") in ("standby", "eco"):
+                    continue
+
                 if self.size() >= self.max_size:
                     continue
 

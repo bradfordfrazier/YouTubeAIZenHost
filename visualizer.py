@@ -647,6 +647,10 @@ class Visualizer:
 
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
+        if getattr(self.cfg, "vox_only_mode", False):
+            self.subtitle_target_text = ""
+            return
+
         clean = re.sub(r"@+", "@", text).strip() if text else ""
         if not clean or len(clean) < 4:
             self.subtitle_target_text = ""
@@ -1799,7 +1803,9 @@ class Visualizer:
         # ORACLE SPOKEN STATEMENT / IDLE MOTTO MANIFESTATION
         # ----------------------------------------------------------------------
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
-        if self.subtitle_target_text:
+        if getattr(self.cfg, "vox_only_mode", False) and is_speaking:
+            desired_target = ""
+        elif self.subtitle_target_text:
             desired_target = self.subtitle_target_text
         elif self.ai_text_state in ("idle_empty", "fade_out") and self.ai_text_target == "":
             desired_target = ""

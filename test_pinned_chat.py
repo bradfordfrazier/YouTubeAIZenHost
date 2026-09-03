@@ -599,6 +599,61 @@ def test_real_chat_evicts_pending_synthetic_cast():
     assert app.comment_queue[0].chat_item["author"] == "RealHuman"
 
 
+def test_vox_only_mode():
+    """Verifies that in VOX_ONLY mode, chat questions stay visible during speech without AI subtitle, and reflections display nothing."""
+    orig_vox = config.vox_only_mode
+    try:
+        config.vox_only_mode = True
+        vis = Visualizer(1920, 1080)
+        vis.cfg.vox_only_mode = True
+        pinned_msg = {"author": "ZenSeeker", "message": "What is nothingness?"}
+
+        # 1. Step through initial motto dissolve and question fade-in
+        for _ in range(120):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+
+        assert vis.question_fade_state == "steady"
+        assert vis.question_fade_alpha == 1.0
+        assert vis.active_question_text == "What is nothingness?"
+
+        # 2. Speaking starts: set_subtitle is called, but in VOX_ONLY mode subtitle text is not displayed
+        vis.set_subtitle("Nothingness is the canvas of all creation.")
+        assert vis.subtitle_target_text == ""
+
+        for _ in range(60):
+            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", "", pinned_chat_message=pinned_msg)
+
+        # Question remains steadily displayed in comment card during speech
+        assert vis.question_fade_state == "steady"
+        assert vis.question_fade_alpha == 1.0
+        assert vis.active_question_text == "What is nothingness?"
+
+        # 3. Speech ends and question is unpinned
+        for _ in range(100):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+
+        assert vis.question_fade_state == "idle"
+        assert vis.active_question_text == ""
+
+        # 4. Spontaneous reflection: nothing displayed in comment card during speech
+        vis.fade_out_for_turn()
+        vis.set_subtitle("The cosmos listens to its own echo.")
+        for _ in range(50):
+            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", "", pinned_chat_message=None)
+
+        assert vis.active_question_text == ""
+        assert vis.ai_text_current == "" or vis.ai_text_alpha <= 0.01
+
+        # 5. Reflection ends -> motto returns
+        vis.clear_subtitle()
+        for _ in range(120):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+
+        assert vis.ai_text_current == config.motto_phrase
+    finally:
+        config.vox_only_mode = orig_vox
+
+
 if __name__ == "__main__":
     print("Testing Visualizer Pinned Chat Rendering...")
     test_visualizer_pinned_chat_rendering()
@@ -663,4 +718,8 @@ if __name__ == "__main__":
     print("Testing App Turn Pinning Lifecycle...")
     test_app_turn_pinning_lifecycle()
     print("App Turn Pinning Lifecycle Passed!")
+
+    print("Testing VOX_ONLY Mode Display Dynamics...")
+    test_vox_only_mode()
+    print("VOX_ONLY Mode Display Dynamics Passed!")
     print("\nALL PINNED CHAT, ANIMATION & READABILITY TESTS PASSED 100%!")

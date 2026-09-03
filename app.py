@@ -432,6 +432,7 @@ class LocalCoHostApp:
         # Activity & Commentary Timers
         self.last_activity_time = time.time()
         self.last_chat_time = 0.0
+        self.last_real_chat_time = 0.0
         self.last_spontaneous_time = time.time()
         self.last_chat_encouragement_time = 0.0
         self.last_viewer_join_welcome_time = 0.0
@@ -612,7 +613,7 @@ class LocalCoHostApp:
         if (self.cfg.obs_require_stream_active and not is_live) or is_resting_scene:
             new_mode = "standby"
         else:
-            is_chat_recently_active = (now - self.last_chat_time < self.cfg.chat_idle_timeout_sec)
+            is_chat_recently_active = (self.last_real_chat_time > 0 and (now - self.last_real_chat_time < self.cfg.chat_idle_timeout_sec))
             has_viewers = (self.concurrent_viewers >= self.cfg.min_concurrent_viewers_active) or is_chat_recently_active
             if has_viewers:
                 new_mode = "active"
@@ -896,12 +897,17 @@ class LocalCoHostApp:
                         logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
                         await asyncio.sleep(remaining_hold)
 
+                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+
                 # 3. Fade out question preview or motto before speech emerges (answer audio is fully ready in RAM!)
-                if question_text and hasattr(self.visualizer, "fade_out_question"):
-                    self.visualizer.fade_out_question()
-                    if q_fade_out_sec > 0:
-                        logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
-                        await asyncio.sleep(q_fade_out_sec)
+                if question_text:
+                    if is_vox_only:
+                        logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
+                    elif hasattr(self.visualizer, "fade_out_question"):
+                        self.visualizer.fade_out_question()
+                        if q_fade_out_sec > 0:
+                            logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
+                            await asyncio.sleep(q_fade_out_sec)
                 elif not question_text and hasattr(self.visualizer, "fade_out_for_turn"):
                     # For spontaneous reflections/system turns, cleanly fade out motto now that audio is ready to speak
                     self.visualizer.fade_out_for_turn()
@@ -910,10 +916,13 @@ class LocalCoHostApp:
                         logger.info(f"✨ [Motto Dissolve] Dissolving motto before spontaneous speech ({m_fade_out_sec:.2f}s)...")
                         await asyncio.sleep(m_fade_out_sec)
 
-                # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle
+                # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle if enabled
                 self.tts.push_audio(audio)
-                self.current_ai_subtitle = clean_speech
-                self.visualizer.set_subtitle(clean_speech)
+                if is_vox_only:
+                    self.current_ai_subtitle = ""
+                else:
+                    self.current_ai_subtitle = clean_speech
+                    self.visualizer.set_subtitle(clean_speech)
 
                 # 5. CRITICAL: Wait until audio has completely finished broadcasting out
                 await self.tts.wait_until_speech_completed()
@@ -1485,6 +1494,7 @@ class LocalCoHostApp:
                             )
                         self.last_activity_time = now_ts
                         self.last_chat_time = now_ts
+                        self.last_real_chat_time = now_ts
                         self.spontaneous_idle_count = 0
                         self.encouragement_idle_count = 0
 
@@ -1768,6 +1778,7 @@ class LocalCoHostApp:
                     )
                 self.last_activity_time = time.time()
                 self.last_chat_time = time.time()
+                self.last_real_chat_time = time.time()
                 self.spontaneous_idle_count = 0
                 self.encouragement_idle_count = 0
 

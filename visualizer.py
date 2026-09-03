@@ -1960,8 +1960,11 @@ class Visualizer:
                 y_start = 12
             y_start += self.ai_text_y_drift
 
-            # Dynamic mood-matched color
-            mood_color = tuple(int(np.clip(c, 0, 255)) for c in self.c_primary)
+            # Dynamic mood-matched color (for motto, use steady celestial color so it never flashes or shifts color on mood changes)
+            if self.ai_text_current == motto:
+                mood_color = (0, 200, 255)
+            else:
+                mood_color = tuple(int(np.clip(c, 0, 255)) for c in self.c_primary)
 
             alpha_int = int(np.clip(self.ai_text_alpha * 255, 0, 255))
             for i, line in enumerate(display_lines):

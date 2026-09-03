@@ -822,9 +822,8 @@ class LocalCoHostApp:
         else:
             self.current_pinned_chat = None
 
-        # 1. Clear previous subtitle card / fade out motto ONLY if a question preview is ready to display
-        if self.current_pinned_chat:
-            self.visualizer.fade_out_for_turn()
+        # 1. Immediately fade out motto / previous comment to clear canvas for the upcoming turn
+        self.visualizer.fade_out_for_turn()
         self.current_ai_subtitle = ""
 
         # Ensure active question is present in live chat feed (appended to bottom if not already present)
@@ -898,8 +897,9 @@ class LocalCoHostApp:
                         await asyncio.sleep(remaining_hold)
 
                 is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+                is_spontaneous = (event.event_type == "spontaneous")
 
-                # 3. Fade out question preview or motto before speech emerges (answer audio is fully ready in RAM!)
+                # 3. Fade out question preview before speech emerges (if active question was displayed)
                 if question_text:
                     if is_vox_only:
                         logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
@@ -908,17 +908,11 @@ class LocalCoHostApp:
                         if q_fade_out_sec > 0:
                             logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
                             await asyncio.sleep(q_fade_out_sec)
-                elif not question_text and hasattr(self.visualizer, "fade_out_for_turn"):
-                    # For spontaneous reflections/system turns, cleanly fade out motto now that audio is ready to speak
-                    self.visualizer.fade_out_for_turn()
-                    m_fade_out_sec = getattr(self.cfg, "motto_fade_out_sec", 0.6)
-                    if m_fade_out_sec > 0:
-                        logger.info(f"✨ [Motto Dissolve] Dissolving motto before spontaneous speech ({m_fade_out_sec:.2f}s)...")
-                        await asyncio.sleep(m_fade_out_sec)
 
                 # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle if enabled
                 self.tts.push_audio(audio)
-                if is_vox_only:
+                if is_vox_only or is_spontaneous:
+                    # During spontaneous reflections or vox-only mode, keep comment panel completely empty
                     self.current_ai_subtitle = ""
                 else:
                     self.current_ai_subtitle = clean_speech
@@ -1991,6 +1985,7 @@ class LocalCoHostApp:
                     self.last_spontaneous_time = now
                     self.last_activity_time = now
                     self.spontaneous_idle_count += 1
+                    self.visualizer.fade_out_for_turn()
                     self._trigger_ai_turn(prompt_trigger="[SPONTANEOUS_REFLECTION]", event_type="spontaneous", priority=10)
 
             except asyncio.CancelledError:

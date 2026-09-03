@@ -592,15 +592,24 @@ class Visualizer:
             self.target_mood = m_lower
             self.mood_lerp_factor = 0.0
 
-    def fade_out_for_turn(self):
+    def fade_out_for_turn(self, force: bool = False):
         """
         Immediately initiates smooth fade-out of whatever is currently on screen
         (motto or previous comment) to prepare a clean canvas for an incoming speech turn.
-        Unlike clear_subtitle(), this transitions directly to idle_empty once faded out,
-        preventing any motto pause or re-emergence before speech starts.
+        If the motto is currently in its protected display duration, dissolution is deferred
+        until MOTTO_DISPLAY_DURATION_SEC completes (unless force=True).
         """
         self.is_empty_hold = False
         self.subtitle_target_text = ""
+        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        motto_display_duration = max(0.0, getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+
+        # If motto is currently in its protected display window, defer dissolution
+        if not force and self.ai_text_current == motto and self.ai_text_state in ("fade_in", "steady", "motto_pause"):
+            if self.motto_steady_timer < motto_display_duration:
+                self.question_fade_state = "waiting_for_dissolve"
+                return
+
         self.ai_text_target = ""
         if self.ai_text_current and self.ai_text_alpha > 0.01:
             self.ai_text_state = "fade_out"
@@ -640,6 +649,7 @@ class Visualizer:
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
+            self.motto_steady_timer = 0.0
             motto_delay = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", 0.0))))
             if motto_delay > 0.0:
                 self.ai_text_state = "motto_pause"

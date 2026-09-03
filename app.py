@@ -822,9 +822,12 @@ class LocalCoHostApp:
         else:
             self.current_pinned_chat = None
 
-        # 1. Clear previous subtitle card / fade out motto ONLY if a question preview is ready to display
+        # 1. Prepare visualizer canvas for incoming question preview
         if self.current_pinned_chat:
-            self.visualizer.fade_out_for_turn()
+            motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+            motto_display_dur = max(0.0, getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+            if not (self.visualizer.ai_text_current == motto and self.visualizer.motto_steady_timer < motto_display_dur):
+                self.visualizer.fade_out_for_turn()
         self.current_ai_subtitle = ""
 
         # Ensure active question is present in live chat feed (appended to bottom if not already present)
@@ -958,38 +961,47 @@ class LocalCoHostApp:
                     )
 
                 # 8. Dynamic Queue-Aware Post-Speech Hold:
-                # Check whether any real human chatters are active vs only synthetic cast members
                 is_real_chat_active = bool(self.last_real_chat_time > 0 and (time.time() - self.last_real_chat_time < self.cfg.chat_idle_timeout_sec))
                 is_spontaneous_turn = (event.event_type == "spontaneous")
                 only_cast_active = not is_real_chat_active
 
-                # When a reflection completes and only cast members are active, always display the motto on screen!
-                if is_spontaneous_turn and only_cast_active:
+                # When a reflection completes, always unpin and display the motto on screen!
+                if is_spontaneous_turn:
                     self.current_pinned_chat = None
                     self.current_ai_subtitle = ""
                     self.visualizer.clear_subtitle()
-                    logger.info("✨ [Reflection Complete] Displaying motto after spontaneous reflection before continuing cast cadence.")
+                    logger.info("✨ [Reflection Complete] Displaying motto after spontaneous reflection before continuing stream.")
 
                 has_queued_next = len(self.comment_queue) > 0
-                if is_spontaneous_turn and only_cast_active:
-                    motto_fade_in = float(getattr(self.cfg, "motto_fade_in_sec", 1.4))
-                    motto_display = float(getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
-                    max_hold = motto_fade_in + motto_display
-                else:
-                    max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
-                min_hold = min(2.5, max_hold)
+                has_real_chat = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
 
+                motto_fade_in = float(getattr(self.cfg, "motto_fade_in_sec", 1.4))
+                motto_display = float(getattr(self.cfg, "motto_display_duration_sec", getattr(self.cfg, "motto_display_sec", 8.0)))
+
+                if is_spontaneous_turn:
+                    max_hold = motto_fade_in + motto_display
+                elif has_queued_next:
+                    max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                else:
+                    max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+
+                min_hold = min(2.5, max_hold)
                 t_hold_start = time.perf_counter()
                 logger.info(f"⏳ [Post-Speech Hold] Holding comment/motto (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
 
                 try:
                     while time.perf_counter() - t_hold_start < max_hold:
                         await asyncio.sleep(0.15)
-                        # If a comment arrives in queue while idle-holding, check if we should break early
+                        # Only break early if a REAL human viewer is waiting! Cast messages wait for motto display.
                         if len(self.comment_queue) > 0 and (time.perf_counter() - t_hold_start) >= min_hold:
-                            has_real_chat = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
-                            if has_real_chat or not (is_spontaneous_turn and only_cast_active):
-                                logger.info(f"⚡ [Queue Wakeup] Comment detected in queue ({len(self.comment_queue)} pending). Transitioning to next turn.")
+                            has_real_chat_now = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
+                            if has_real_chat_now:
+                                logger.info(f"⚡ [Live Chat Wakeup] Real viewer comment detected in queue ({len(self.comment_queue)} pending). Transitioning to next turn.")
+                                has_queued_next = True
+                                break
+                            elif not is_spontaneous_turn:
+                                # For non-spontaneous turns where motto is not holding, cast can advance after queue hold
+                                logger.info(f"⚡ [Queue Wakeup] Queued comment ready ({len(self.comment_queue)} pending). Transitioning to next turn.")
                                 has_queued_next = True
                                 break
                 except asyncio.CancelledError:
@@ -997,8 +1009,8 @@ class LocalCoHostApp:
 
                 # If there are more comments in queue, transition cleanly
                 if len(self.comment_queue) > 0 or has_queued_next:
-                    if is_spontaneous_turn and only_cast_active:
-                        logger.info("✨ [Cast Next Turn] Motto displayed after reflection; now proceeding to next cast comment.")
+                    if is_spontaneous_turn:
+                        logger.info("✨ [Cast Next Turn] Motto displayed after reflection; now proceeding to next comment.")
                     else:
                         logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
                 else:

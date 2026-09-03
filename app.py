@@ -958,13 +958,20 @@ class LocalCoHostApp:
                     )
 
                 # 8. Dynamic Queue-Aware Post-Speech Hold:
-                # If there are pending comments waiting in queue, hold briefly (e.g. 2.5s) for audience reading,
-                # then proceed directly to the next comment without transitioning to the motto!
-                # If the queue is empty, hold for the full post_speech_hold duration (default 15.0s).
-                # During the hold, poll for incoming comments so the co-host responds immediately if a viewer chats.
+                # - For spontaneous reflections or when only synthetic cast members are waiting,
+                #   hold for the full comment_post_speech_hold_sec (e.g. 5.0s).
+                # - If real human viewers have chatted and are waiting in queue, hold briefly for reading
+                #   (comment_active_queue_hold_sec, default 2.5s) to stay responsive to live audience.
+                is_spontaneous = (event.event_type == "spontaneous")
+                has_real_chat = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
                 has_queued_next = len(self.comment_queue) > 0
-                max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
-                min_hold = min(2.5, max_hold)
+
+                if has_real_chat and not is_spontaneous:
+                    max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                else:
+                    max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+
+                min_hold = min(2.0, max_hold)
 
                 t_hold_start = time.perf_counter()
                 logger.info(f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
@@ -972,11 +979,13 @@ class LocalCoHostApp:
                 try:
                     while time.perf_counter() - t_hold_start < max_hold:
                         await asyncio.sleep(0.15)
-                        # If a new comment arrives in queue while idle-holding, break early after min_hold!
-                        if len(self.comment_queue) > 0 and (time.perf_counter() - t_hold_start) >= min_hold:
-                            logger.info(f"⚡ [Queue Wakeup] New comment detected in queue ({len(self.comment_queue)} pending). Transitioning directly to next turn.")
-                            has_queued_next = True
-                            break
+                        # Only interrupt hold early if a REAL human viewer comment arrives during the hold!
+                        if len(self.comment_queue) > 0:
+                            has_real_chat_now = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
+                            if has_real_chat_now and (time.perf_counter() - t_hold_start) >= min_hold:
+                                logger.info(f"⚡ [Live Chat Wakeup] Real viewer comment detected in queue ({len(self.comment_queue)} pending). Transitioning directly to next turn.")
+                                has_queued_next = True
+                                break
                 except asyncio.CancelledError:
                     pass
 

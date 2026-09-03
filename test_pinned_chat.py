@@ -466,6 +466,52 @@ def test_queue_aware_hold_and_direct_turn_transitions():
     asyncio.run(_test())
 
 
+def test_reflection_post_speech_hold_honors_config():
+    """Verifies that spontaneous reflections hold for comment_post_speech_hold_sec even when cast items are pending."""
+    async def _test():
+        app = LocalCoHostApp()
+        app.cfg.comment_post_speech_hold_sec = 0.4
+        app.cfg.comment_active_queue_hold_sec = 0.05
+
+        async def mock_queue_speech(txt):
+            pass
+
+        async def mock_wait():
+            pass
+
+        app.tts.queue_speech = mock_queue_speech
+        app.tts.wait_until_speech_completed = mock_wait
+        app.new_comment_signal = asyncio.Event()
+
+        # Create reflection event
+        event_reflection = CommentEvent(
+            prompt_trigger="[SPONTANEOUS_REFLECTION]",
+            event_type="spontaneous",
+            priority=10,
+            created_at=time.time(),
+            max_age_sec=90.0,
+        )
+        # Pending cast event
+        event_cast = CommentEvent(
+            prompt_trigger="Cast member @ExistentialDave asks: 'Who submits the Jira ticket?'",
+            event_type="cast",
+            priority=6,
+            created_at=time.time(),
+            max_age_sec=90.0,
+            chat_item={"author": "ExistentialDave", "message": "Who submits the Jira ticket?"},
+        )
+        app.comment_queue.append(event_cast)
+
+        t_start = time.perf_counter()
+        await app._execute_ai_turn(event_reflection)
+        t_elapsed = time.perf_counter() - t_start
+
+        # Reflection should have held for >= 0.4s (comment_post_speech_hold_sec), not truncated to 0.05s!
+        assert t_elapsed >= 0.35, f"Expected hold duration >= 0.35s, got {t_elapsed:.3f}s"
+
+    asyncio.run(_test())
+
+
 def test_strict_fifo_chat_ordering():
     """Verifies that all live chat messages are scheduled in strict FIFO arrival order, while Superchats jump ahead."""
     app = LocalCoHostApp()
@@ -694,6 +740,10 @@ if __name__ == "__main__":
     print("Testing Queue-Aware Hold and Direct Turn Transitions...")
     test_queue_aware_hold_and_direct_turn_transitions()
     print("Queue-Aware Hold and Direct Turn Transitions Passed!")
+
+    print("Testing Reflection Post-Speech Hold Honors Config...")
+    test_reflection_post_speech_hold_honors_config()
+    print("Reflection Post-Speech Hold Honors Config Passed!")
 
     print("Testing Strict FIFO Chat Ordering...")
     test_strict_fifo_chat_ordering()

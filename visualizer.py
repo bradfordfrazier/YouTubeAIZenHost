@@ -471,6 +471,10 @@ class Visualizer:
         self.typewriter_index = 0
         self.is_empty_hold = False
         self.active_question_text = ""
+        self.active_question_author = ""
+        self.active_question_is_sc = False
+        self.active_question_is_cast = False
+        self.active_question_amount = ""
         self.last_completed_question_text = ""
         self.active_question_start_time = 0.0
         self.question_fade_alpha = 0.0
@@ -1625,8 +1629,12 @@ class Visualizer:
         dt = 1.0 / self.fps
         if pinned_chat_message and isinstance(pinned_chat_message, dict):
             curr_q_msg = pinned_chat_message.get("message", "").strip()
-            if curr_q_msg and curr_q_msg != self.active_question_text and curr_q_msg != self.last_completed_question_text:
+            if curr_q_msg and (curr_q_msg != self.active_question_text or self.question_fade_state == "idle") and curr_q_msg != self.last_completed_question_text:
                 self.active_question_text = curr_q_msg
+                self.active_question_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@")
+                self.active_question_is_sc = pinned_chat_message.get("is_superchat", False)
+                self.active_question_is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast")
+                self.active_question_amount = pinned_chat_message.get("amount", "")
                 motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
                 # If prior spoken comment/greeting or motto is actively visible, let it finish dissolving before fading question in
                 if self.ai_text_current and self.ai_text_alpha > 0.005:
@@ -1653,6 +1661,10 @@ class Visualizer:
                 if self.active_question_text:
                     self.last_completed_question_text = self.active_question_text
                     self.active_question_text = ""
+                    self.active_question_author = ""
+                    self.active_question_is_sc = False
+                    self.active_question_is_cast = False
+                    self.active_question_amount = ""
                 self.active_question_start_time = 0.0
 
         # 2. Timing Parameters & Calculations
@@ -1708,6 +1720,10 @@ class Visualizer:
                 if self.active_question_text:
                     self.last_completed_question_text = self.active_question_text
                     self.active_question_text = ""
+                    self.active_question_author = ""
+                    self.active_question_is_sc = False
+                    self.active_question_is_cast = False
+                    self.active_question_amount = ""
 
         showing_question_preview = bool(
             self.active_question_text
@@ -1719,13 +1735,20 @@ class Visualizer:
             # ------------------------------------------------------------------
             # QUESTION PREVIEW: Display question formatted visually like chat
             # ------------------------------------------------------------------
-            raw_author = pinned_chat_message.get("author", "Viewer").strip().lstrip("@") if pinned_chat_message else "Viewer"
-            clean_author = f"@{raw_author.replace(' ', '')}"
-            is_sc = pinned_chat_message.get("is_superchat", False) if pinned_chat_message else False
-            is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast") if pinned_chat_message else False
-            amount = pinned_chat_message.get("amount", "") if pinned_chat_message else ""
-            msg = self.active_question_text or (pinned_chat_message.get("message", "").strip() if pinned_chat_message else "")
+            if pinned_chat_message and isinstance(pinned_chat_message, dict):
+                raw_author = pinned_chat_message.get("author", self.active_question_author or "Viewer").strip().lstrip("@")
+                is_sc = pinned_chat_message.get("is_superchat", self.active_question_is_sc)
+                is_cast = (pinned_chat_message.get("is_cast", False) or pinned_chat_message.get("author_type") == "cast") or self.active_question_is_cast
+                amount = pinned_chat_message.get("amount", self.active_question_amount)
+                msg = self.active_question_text or pinned_chat_message.get("message", "").strip()
+            else:
+                raw_author = self.active_question_author or "Viewer"
+                is_sc = self.active_question_is_sc
+                is_cast = self.active_question_is_cast
+                amount = self.active_question_amount
+                msg = self.active_question_text
 
+            clean_author = f"@{raw_author.replace(' ', '')}"
             sc_badge_str = f" [{amount}]" if is_sc else ""
 
             if is_sc:

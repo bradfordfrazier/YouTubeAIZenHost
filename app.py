@@ -958,32 +958,48 @@ class LocalCoHostApp:
                     )
 
                 # 8. Dynamic Queue-Aware Post-Speech Hold:
-                # If there are pending comments waiting in queue, hold briefly (e.g. 2.5s) for audience reading,
-                # then proceed directly to the next comment without transitioning to the motto!
-                # If the queue is empty, hold for the full post_speech_hold duration (default 15.0s).
-                # During the hold, poll for incoming comments so the co-host responds immediately if a viewer chats.
+                # Check whether any real human chatters are active vs only synthetic cast members
+                is_real_chat_active = bool(self.last_real_chat_time > 0 and (time.time() - self.last_real_chat_time < self.cfg.chat_idle_timeout_sec))
+                is_spontaneous_turn = (event.event_type == "spontaneous")
+                only_cast_active = not is_real_chat_active
+
+                # When a reflection completes and only cast members are active, always display the motto on screen!
+                if is_spontaneous_turn and only_cast_active:
+                    self.current_pinned_chat = None
+                    self.current_ai_subtitle = ""
+                    self.visualizer.clear_subtitle()
+                    logger.info("✨ [Reflection Complete] Displaying motto after spontaneous reflection before continuing cast cadence.")
+
                 has_queued_next = len(self.comment_queue) > 0
-                max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+                if is_spontaneous_turn and only_cast_active:
+                    motto_hold = float(getattr(self.cfg, "motto_post_reflection_hold_sec", 5.0))
+                    max_hold = max(motto_hold, float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)))
+                else:
+                    max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5)) if has_queued_next else float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
                 min_hold = min(2.5, max_hold)
 
                 t_hold_start = time.perf_counter()
-                logger.info(f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
+                logger.info(f"⏳ [Post-Speech Hold] Holding comment/motto (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
 
                 try:
                     while time.perf_counter() - t_hold_start < max_hold:
                         await asyncio.sleep(0.15)
-                        # If a new comment arrives in queue while idle-holding, break early after min_hold!
+                        # If a comment arrives in queue while idle-holding, check if we should break early
                         if len(self.comment_queue) > 0 and (time.perf_counter() - t_hold_start) >= min_hold:
-                            logger.info(f"⚡ [Queue Wakeup] New comment detected in queue ({len(self.comment_queue)} pending). Transitioning directly to next turn.")
-                            has_queued_next = True
-                            break
+                            has_real_chat = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
+                            if has_real_chat or not (is_spontaneous_turn and only_cast_active):
+                                logger.info(f"⚡ [Queue Wakeup] Comment detected in queue ({len(self.comment_queue)} pending). Transitioning to next turn.")
+                                has_queued_next = True
+                                break
                 except asyncio.CancelledError:
                     pass
 
-                # If there are more comments in queue, do NOT transition to motto!
-                # Transition directly to the next comment cleanly without any motto flicker.
+                # If there are more comments in queue, transition cleanly
                 if len(self.comment_queue) > 0 or has_queued_next:
-                    logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
+                    if is_spontaneous_turn and only_cast_active:
+                        logger.info("✨ [Cast Next Turn] Motto displayed after reflection; now proceeding to next cast comment.")
+                    else:
+                        logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
                 else:
                     logger.info(f"✨ [Motto Transition] {max_hold:.1f}s post-speech hold finished with empty queue. Unpinning question and transitioning to motto.")
                     self.current_pinned_chat = None

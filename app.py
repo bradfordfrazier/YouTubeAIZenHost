@@ -783,10 +783,6 @@ class LocalCoHostApp:
         t_start = time.perf_counter()
         logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
 
-        # 1. Clear previous subtitle card / fade out motto and setup pinned question highlight
-        self.visualizer.fade_out_for_turn()
-        self.current_ai_subtitle = ""
-
         # Set active pinned chat question during turn
         if getattr(event, "chat_item", None):
             self.current_pinned_chat = event.chat_item
@@ -824,6 +820,11 @@ class LocalCoHostApp:
                 self.current_pinned_chat = matched
         else:
             self.current_pinned_chat = None
+
+        # 1. Clear previous subtitle card / fade out motto ONLY if a question preview is ready to display
+        if self.current_pinned_chat:
+            self.visualizer.fade_out_for_turn()
+        self.current_ai_subtitle = ""
 
         # Ensure active question is present in live chat feed (appended to bottom if not already present)
         # Only valid viewer/cast chat items (never internal bracketed system prompts) should be in feed
@@ -895,12 +896,19 @@ class LocalCoHostApp:
                         logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
                         await asyncio.sleep(remaining_hold)
 
-                # 3. Fade out question based on QUESTION_FADE_OUT_SEC (answer is fully ready in RAM!)
+                # 3. Fade out question preview or motto before speech emerges (answer audio is fully ready in RAM!)
                 if question_text and hasattr(self.visualizer, "fade_out_question"):
                     self.visualizer.fade_out_question()
                     if q_fade_out_sec > 0:
                         logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
                         await asyncio.sleep(q_fade_out_sec)
+                elif not question_text and hasattr(self.visualizer, "fade_out_for_turn"):
+                    # For spontaneous reflections/system turns, cleanly fade out motto now that audio is ready to speak
+                    self.visualizer.fade_out_for_turn()
+                    m_fade_out_sec = getattr(self.cfg, "motto_fade_out_sec", 0.6)
+                    if m_fade_out_sec > 0:
+                        logger.info(f"✨ [Motto Dissolve] Dissolving motto before spontaneous speech ({m_fade_out_sec:.2f}s)...")
+                        await asyncio.sleep(m_fade_out_sec)
 
                 # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle
                 self.tts.push_audio(audio)

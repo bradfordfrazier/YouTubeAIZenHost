@@ -1812,6 +1812,10 @@ class LocalCoHostApp:
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_cast = now - self.cast.last_cast_time
                 is_queue_full = len(self.comment_queue) >= getattr(self.cfg, "max_comment_queue_size", 5)
+                is_promo_showing = getattr(self.visualizer, "is_promo_active", False)
+
+                if is_promo_showing:
+                    continue
 
                 if self.cast.should_trigger_cast(
                     time_since_last_chat=time_since_last_chat,
@@ -1904,6 +1908,7 @@ class LocalCoHostApp:
                     or self.tts.remaining_speech_duration > 0.05
                     or self.active_turn_event is not None
                     or len(self.comment_queue) > 0
+                    or getattr(self.visualizer, "is_promo_active", False)
                 ):
                     continue
 

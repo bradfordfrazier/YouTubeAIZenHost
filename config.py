@@ -171,9 +171,9 @@ class AppConfig:
     # Spontaneous Idle Commentary & Adaptive Backoff
     spontaneous_commentary_enabled: bool = os.getenv("SPONTANEOUS_COMMENTARY_ENABLED", "true").lower() in ("true", "1", "yes")
     spontaneous_require_viewers: bool = os.getenv("SPONTANEOUS_REQUIRE_VIEWERS", "false").lower() in ("true", "1", "yes")
-    idle_silence_threshold_sec: float = _get_float("IDLE_SILENCE_THRESHOLD_SEC", 45.0)
-    spontaneous_min_interval_sec: float = _get_float("SPONTANEOUS_MIN_INTERVAL_SEC", 60.0)
-    spontaneous_max_backoff_sec: float = _get_float("SPONTANEOUS_MAX_BACKOFF_SEC", 600.0)
+    idle_silence_threshold_sec: float = _get_float("IDLE_SILENCE_THRESHOLD_SEC", 15.0)
+    spontaneous_min_interval_sec: float = _get_float("SPONTANEOUS_MIN_INTERVAL_SEC", 35.0)
+    spontaneous_max_backoff_sec: float = _get_float("SPONTANEOUS_MAX_BACKOFF_SEC", 180.0)
     motto_phrase: str = os.getenv("MOTTO_PHRASE", "Everything is perfect.")
 
     # --------------------------------------------------------------------------
@@ -328,9 +328,9 @@ class AppConfig:
     # --------------------------------------------------------------------------
     cast_enabled: bool = os.getenv("CAST_ENABLED", "true").lower() in ("true", "1", "yes")
     cast_require_viewers: bool = os.getenv("CAST_REQUIRE_VIEWERS", "false").lower() in ("true", "1", "yes")
-    cast_min_interval_sec: float = float(os.getenv("CAST_MIN_INTERVAL_SEC", "75.0"))
-    cast_max_interval_sec: float = float(os.getenv("CAST_MAX_INTERVAL_SEC", "160.0"))
-    cast_quiet_chat_threshold_sec: float = float(os.getenv("CAST_QUIET_CHAT_THRESHOLD_SEC", "45.0"))
+    cast_min_interval_sec: float = float(os.getenv("CAST_MIN_INTERVAL_SEC", "70.0"))
+    cast_max_interval_sec: float = float(os.getenv("CAST_MAX_INTERVAL_SEC", "130.0"))
+    cast_quiet_chat_threshold_sec: float = float(os.getenv("CAST_QUIET_CHAT_THRESHOLD_SEC", "40.0"))
     cast_max_per_session: int = int(os.getenv("CAST_MAX_PER_SESSION", "50"))
     # --------------------------------------------------------------------------
     # 13. Intelligence Leverage & Dynamic Thinking Budget (D1-D3)

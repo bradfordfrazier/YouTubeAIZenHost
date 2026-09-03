@@ -2141,7 +2141,7 @@ class Visualizer:
         surf.blit(title_rend, (title_x, title_y))
 
         # 3. Bottom Subtitle Row (Centered & fully visible)
-        sub_str = "Questions of reality, existence, or absurdities • Serious or strange, I answer all"
+        sub_str = "You already know the answer but I enjoy the theater"
         sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)

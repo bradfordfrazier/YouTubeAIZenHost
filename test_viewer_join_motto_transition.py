@@ -169,35 +169,40 @@ def test_fast_thinking_budget_for_viewer_join():
 
 def test_greeting_fade_out_to_motto_lifecycle():
     """Verifies that the viewer greeting fades out smoothly over comment_fade_out_sec, pauses, and returns to motto."""
-    vis = Visualizer(width=1920, height=1080)
-    motto = config.motto_phrase
+    orig_pause = getattr(config, "motto_pre_fade_in_sec", 0.0)
+    try:
+        config.motto_pre_fade_in_sec = 2.0
+        vis = Visualizer(width=1920, height=1080)
+        motto = config.motto_phrase
 
-    greeting = "Welcome, traveler! Drop your luggage and ask whatever is on your mind."
-    vis.set_subtitle(greeting)
-    vis.ai_text_current = greeting
-    vis.ai_text_target = greeting
-    vis.ai_text_alpha = 1.0
-    vis.ai_text_state = "steady"
+        greeting = "Welcome, traveler! Drop your luggage and ask whatever is on your mind."
+        vis.set_subtitle(greeting)
+        vis.ai_text_current = greeting
+        vis.ai_text_target = greeting
+        vis.ai_text_alpha = 1.0
+        vis.ai_text_state = "steady"
 
-    # When speech/hold completes, clear_subtitle() is called
-    vis.clear_subtitle()
-    assert vis.ai_text_state == "fade_out"
-    assert vis.ai_text_target == motto
+        # When speech/hold completes, clear_subtitle() is called
+        vis.clear_subtitle()
+        assert vis.ai_text_state == "fade_out"
+        assert vis.ai_text_target == motto
 
-    # Render through fade out
-    for _ in range(80):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        # Render through fade out
+        for _ in range(80):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
 
-    assert vis.ai_text_state == "motto_pause"
-    assert vis.ai_text_alpha == 0.0
+        assert vis.ai_text_state == "motto_pause"
+        assert vis.ai_text_alpha == 0.0
 
-    # Render through motto pause and fade in
-    for _ in range(180):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        # Render through motto pause and fade in
+        for _ in range(180):
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
 
-    assert vis.ai_text_state in ("fade_in", "steady")
-    assert vis.ai_text_current == motto
-    assert vis.ai_text_alpha > 0.5
+        assert vis.ai_text_state in ("fade_in", "steady")
+        assert vis.ai_text_current == motto
+        assert vis.ai_text_alpha > 0.5
+    finally:
+        config.motto_pre_fade_in_sec = orig_pause
 
 
 def test_greeting_dissolves_smoothly_when_next_chat_question_arrives():

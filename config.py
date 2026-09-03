@@ -244,9 +244,6 @@ class AppConfig:
     motto_pause_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_PAUSE_SEC", _get_float("MOTTO_DELAY_SEC", 0.0)))
     motto_fade_in_sec: float = _get_float("MOTTO_FADE_IN_SEC", 1.4)
     motto_fade_out_sec: float = _get_float("MOTTO_FADE_OUT_SEC", 0.6)
-    motto_display_duration_sec: float = _get_float("MOTTO_DISPLAY_DURATION_SEC", _get_float("MOTTO_DISPLAY_SEC", 8.0))
-    motto_display_sec: float = _get_float("MOTTO_DISPLAY_DURATION_SEC", _get_float("MOTTO_DISPLAY_SEC", 8.0))
-    motto_post_reflection_hold_sec: float = _get_float("MOTTO_POST_REFLECTION_HOLD_SEC", 8.0)
 
     def __post_init__(self):
         ar = self.visualizer_aspect_ratio.strip().lower()

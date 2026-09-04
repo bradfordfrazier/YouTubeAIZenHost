@@ -1856,8 +1856,8 @@ class LocalCoHostApp:
 
                 self._update_engagement_state()
 
-                # In Standby or ECO mode (0 viewers), suppress synthetic cast questions
-                if self.engagement_mode in ("standby", "eco"):
+                # In Standby or ECO mode (0 viewers), suppress synthetic cast questions if require_viewers is enabled
+                if getattr(self.cfg, "cast_require_viewers", True) and self.engagement_mode in ("standby", "eco"):
                     continue
 
                 if (
@@ -1875,14 +1875,20 @@ class LocalCoHostApp:
                 time_since_last_cast = now - self.cast.last_cast_time
                 time_since_last_activity = now - self.last_activity_time
                 time_since_last_spontaneous = now - self.last_spontaneous_time
-                quiet_dur = min(time_since_last_chat, time_since_last_activity, time_since_last_spontaneous)
 
-                if self.cast.should_trigger_cast(
-                    time_since_last_chat=quiet_dur,
-                    time_since_last_cast=time_since_last_cast,
-                    quiet_threshold_sec=self.cfg.cast_quiet_chat_threshold_sec,
-                    min_interval_sec=self.cfg.cast_min_interval_sec,
-                    is_ai_busy=(len(self.comment_queue) > 0),
+                # Cast triggers when chat has been quiet for cast_quiet_chat_threshold_sec,
+                # at least min_interval_sec since last cast question,
+                # and at least 5s of stillness after any recent activity/reflection.
+                if (
+                    time_since_last_activity >= 5.0
+                    and time_since_last_spontaneous >= 5.0
+                    and self.cast.should_trigger_cast(
+                        time_since_last_chat=time_since_last_chat,
+                        time_since_last_cast=time_since_last_cast,
+                        quiet_threshold_sec=self.cfg.cast_quiet_chat_threshold_sec,
+                        min_interval_sec=self.cfg.cast_min_interval_sec,
+                        is_ai_busy=(len(self.comment_queue) > 0),
+                    )
                 ):
                     persona, question = self.cast.next_cast_question()
 
@@ -1957,8 +1963,8 @@ class LocalCoHostApp:
 
                 self._update_engagement_state()
 
-                # In Standby or ECO mode (0 viewers), suppress spontaneous reflections
-                if self.engagement_mode in ("standby", "eco"):
+                # In Standby or ECO mode (0 viewers), suppress spontaneous reflections if require_viewers is enabled
+                if getattr(self.cfg, "spontaneous_require_viewers", False) and self.engagement_mode in ("standby", "eco"):
                     continue
 
                 now = time.time()

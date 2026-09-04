@@ -952,57 +952,56 @@ class LocalCoHostApp:
                     )
 
                 # 8. Dynamic Queue-Aware Post-Speech Hold:
-                # - When a reflection completes and next item (chat/cast question) is in queue,
-                #   hold for reflection_post_speech_chat_delay_sec (default 3.0s).
-                # - When a regular chat/response completes and more items are in queue,
-                #   hold briefly for comment_active_queue_hold_sec (default 2.5s).
-                # - When queue is empty after speech, hold for full comment_post_speech_hold_sec (default 15.0s)
-                #   before dissolving to motto, waking up early if new items arrive.
                 is_spontaneous = (event.event_type == "spontaneous")
-                has_queued_next = len(self.comment_queue) > 0
 
                 if is_spontaneous:
+                    # After a spontaneous reflection finishes speaking:
+                    # Hold in serene silence/stillness for reflection_post_speech_chat_delay_sec (default 3.0s)
+                    # before allowing ANY next sequence (chat question or motto) to emerge.
+                    refl_delay = float(getattr(
+                        self.cfg,
+                        "reflection_post_speech_chat_delay_sec",
+                        getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
+                    ))
+                    logger.info(f"⏳ [Post-Reflection Hold] Holding peaceful stillness for {refl_delay:.1f}s after reflection (Queue: {len(self.comment_queue)})...")
+                    t_hold_start = time.perf_counter()
+                    try:
+                        while time.perf_counter() - t_hold_start < refl_delay:
+                            await asyncio.sleep(0.05)
+                    except asyncio.CancelledError:
+                        pass
+
+                    has_queued_next = len(self.comment_queue) > 0
                     if has_queued_next:
-                        max_hold = float(getattr(
-                            self.cfg,
-                            "reflection_post_speech_chat_delay_sec",
-                            getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
-                        ))
+                        logger.info(f"✨ [Direct Turn Transition] Proceeding directly to next queued comment ({len(self.comment_queue)} pending) without motto.")
                     else:
-                        max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+                        logger.info(f"✨ [Motto Transition] {refl_delay:.1f}s post-reflection pause finished with empty queue. Transitioning to motto.")
+                        self.current_pinned_chat = None
+                        self.current_ai_subtitle = ""
+                        self.visualizer.clear_subtitle()
+
                 else:
+                    # For regular chat answers:
+                    # - If more comments are waiting in queue, hold briefly for reading (comment_active_queue_hold_sec, default 2.5s)
+                    # - If queue is empty, hold for comment_post_speech_hold_sec (default 15.0s) before dissolving to motto,
+                    #   waking up early if a new comment arrives.
+                    has_queued_next = len(self.comment_queue) > 0
                     if has_queued_next:
                         max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
                     else:
                         max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
 
-                t_hold_start = time.perf_counter()
-                logger.info(
-                    f"⏳ [Post-Speech Hold] Holding Oracle state (Hold target: {max_hold:.1f}s, "
-                    f"Spontaneous: {is_spontaneous}, Queue: {len(self.comment_queue)})..."
-                )
+                    t_hold_start = time.perf_counter()
+                    logger.info(
+                        f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})..."
+                    )
 
-                try:
-                    while time.perf_counter() - t_hold_start < max_hold:
-                        await asyncio.sleep(0.1)
-                        if len(self.comment_queue) > 0:
-                            elapsed = time.perf_counter() - t_hold_start
-                            if is_spontaneous:
-                                req_delay = float(getattr(
-                                    self.cfg,
-                                    "reflection_post_speech_chat_delay_sec",
-                                    getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
-                                ))
-                                if elapsed >= req_delay:
-                                    logger.info(
-                                        f"⚡ [Chat Wakeup] Chat item detected after reflection "
-                                        f"({len(self.comment_queue)} pending, {elapsed:.1f}s elapsed >= {req_delay:.1f}s target). "
-                                        "Transitioning to next turn."
-                                    )
-                                    has_queued_next = True
-                                    break
-                            else:
+                    try:
+                        while time.perf_counter() - t_hold_start < max_hold:
+                            await asyncio.sleep(0.1)
+                            if len(self.comment_queue) > 0:
                                 min_active_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                                elapsed = time.perf_counter() - t_hold_start
                                 if elapsed >= min_active_hold:
                                     logger.info(
                                         f"⚡ [Live Chat Wakeup] Viewer comment detected in queue "
@@ -1011,18 +1010,18 @@ class LocalCoHostApp:
                                     )
                                     has_queued_next = True
                                     break
-                except asyncio.CancelledError:
-                    pass
+                    except asyncio.CancelledError:
+                        pass
 
-                # If there are more comments in queue, do NOT transition to motto!
-                # Transition directly to the next comment cleanly without any motto flicker.
-                if len(self.comment_queue) > 0 or has_queued_next:
-                    logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
-                else:
-                    logger.info(f"✨ [Motto Transition] {max_hold:.1f}s post-speech hold finished with empty queue. Unpinning question and transitioning to motto.")
-                    self.current_pinned_chat = None
-                    self.current_ai_subtitle = ""
-                    self.visualizer.clear_subtitle()
+                    # If there are more comments in queue, do NOT transition to motto!
+                    # Transition directly to the next comment cleanly without any motto flicker.
+                    if len(self.comment_queue) > 0 or has_queued_next:
+                        logger.info("✨ [Direct Turn Transition] Proceeding directly to next queued comment without motto.")
+                    else:
+                        logger.info(f"✨ [Motto Transition] {max_hold:.1f}s post-speech hold finished with empty queue. Unpinning question and transitioning to motto.")
+                        self.current_pinned_chat = None
+                        self.current_ai_subtitle = ""
+                        self.visualizer.clear_subtitle()
 
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
@@ -1861,21 +1860,29 @@ class LocalCoHostApp:
                 if self.engagement_mode in ("standby", "eco"):
                     continue
 
+                if (
+                    self.brain.is_generating
+                    or self.tts.is_speaking
+                    or self.tts.remaining_speech_duration > 0.05
+                    or self.active_turn_event is not None
+                    or len(self.comment_queue) > 0
+                    or getattr(self.visualizer, "is_promo_active", False)
+                ):
+                    continue
+
                 now = time.time()
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_cast = now - self.cast.last_cast_time
-                is_queue_full = len(self.comment_queue) >= getattr(self.cfg, "max_comment_queue_size", 5)
-                is_promo_showing = getattr(self.visualizer, "is_promo_active", False)
-
-                if is_promo_showing:
-                    continue
+                time_since_last_activity = now - self.last_activity_time
+                time_since_last_spontaneous = now - self.last_spontaneous_time
+                quiet_dur = min(time_since_last_chat, time_since_last_activity, time_since_last_spontaneous)
 
                 if self.cast.should_trigger_cast(
-                    time_since_last_chat=time_since_last_chat,
+                    time_since_last_chat=quiet_dur,
                     time_since_last_cast=time_since_last_cast,
                     quiet_threshold_sec=self.cfg.cast_quiet_chat_threshold_sec,
                     min_interval_sec=self.cfg.cast_min_interval_sec,
-                    is_ai_busy=is_queue_full,
+                    is_ai_busy=(len(self.comment_queue) > 0),
                 ):
                     persona, question = self.cast.next_cast_question()
 

@@ -588,6 +588,49 @@ def test_reflection_chat_wakeup_during_hold():
     asyncio.run(_test())
 
 
+def test_reflection_empty_queue_holds_delay_before_motto():
+    """Verifies that with empty queue, spontaneous reflection holds for reflection_post_speech_chat_delay_sec before transitioning to motto."""
+    async def _test():
+        app = LocalCoHostApp()
+        app.cfg.reflection_post_speech_chat_delay_sec = 0.35
+
+        async def mock_gen(prompt):
+            yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
+
+        async def mock_synth(text):
+            return np.zeros((100, 2), dtype=np.float32)
+
+        async def mock_queue_speech(txt):
+            pass
+
+        async def mock_wait():
+            pass
+
+        app.brain.generate_response_stream = mock_gen
+        app.tts.synthesize = mock_synth
+        app.tts.queue_speech = mock_queue_speech
+        app.tts.wait_until_speech_completed = mock_wait
+        app.new_comment_signal = asyncio.Event()
+
+        event_reflection = CommentEvent(
+            prompt_trigger="[SPONTANEOUS_REFLECTION]",
+            event_type="spontaneous",
+            priority=10,
+            created_at=time.time(),
+            max_age_sec=90.0,
+        )
+
+        t_start = time.perf_counter()
+        await app._execute_ai_turn(event_reflection)
+        t_elapsed = time.perf_counter() - t_start
+
+        # Reflection should hold for configured reflection_post_speech_chat_delay_sec (0.35s) before motto transition
+        assert t_elapsed >= 0.30, f"Expected hold duration >= 0.30s, got {t_elapsed:.3f}s"
+        assert t_elapsed < 1.0, f"Expected hold duration < 1.0s, got {t_elapsed:.3f}s"
+
+    asyncio.run(_test())
+
+
 def test_strict_fifo_chat_ordering():
     """Verifies that all live chat messages are scheduled in strict FIFO arrival order, while Superchats jump ahead."""
     app = LocalCoHostApp()
@@ -824,6 +867,10 @@ if __name__ == "__main__":
     print("Testing Reflection Chat Wakeup During Hold Honors Config...")
     test_reflection_chat_wakeup_during_hold()
     print("Reflection Chat Wakeup During Hold Honors Config Passed!")
+
+    print("Testing Reflection Empty Queue Holds Delay Before Motto...")
+    test_reflection_empty_queue_holds_delay_before_motto()
+    print("Reflection Empty Queue Holds Delay Before Motto Passed!")
 
     print("Testing Strict FIFO Chat Ordering...")
     test_strict_fifo_chat_ordering()

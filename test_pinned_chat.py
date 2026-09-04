@@ -423,12 +423,20 @@ def test_queue_aware_hold_and_direct_turn_transitions():
         app.cfg.comment_post_speech_hold_sec = 15.0
         app.cfg.comment_active_queue_hold_sec = 0.2
 
+        async def mock_gen(prompt):
+            yield {"type": "complete", "full_text": "Awareness is the silent space.", "mood": "thoughtful"}
+
+        async def mock_synth(text):
+            return np.zeros((100, 2), dtype=np.float32)
+
         async def mock_queue_speech(txt):
             pass
 
         async def mock_wait():
             pass
 
+        app.brain.generate_response_stream = mock_gen
+        app.tts.synthesize = mock_synth
         app.tts.queue_speech = mock_queue_speech
         app.tts.wait_until_speech_completed = mock_wait
         app.new_comment_signal = asyncio.Event()
@@ -459,7 +467,7 @@ def test_queue_aware_hold_and_direct_turn_transitions():
         t_elapsed = time.perf_counter() - t_start
 
         # With active queue, hold should NOT wait 15 seconds! It should complete rapidly without the 15s idle hold
-        assert t_elapsed < 75.0
+        assert t_elapsed < 10.0
         # When queue has items, it should not have cleared into motto
         assert event_2 in app.comment_queue
 
@@ -467,11 +475,18 @@ def test_queue_aware_hold_and_direct_turn_transitions():
 
 
 def test_reflection_post_speech_hold_honors_config():
-    """Verifies that spontaneous reflections hold for comment_post_speech_hold_sec even when cast items are pending."""
+    """Verifies that spontaneous reflections hold for reflection_post_speech_chat_delay_sec when chat/cast items are pending."""
     async def _test():
         app = LocalCoHostApp()
-        app.cfg.comment_post_speech_hold_sec = 0.4
+        app.cfg.comment_post_speech_hold_sec = 2.0
         app.cfg.comment_active_queue_hold_sec = 0.05
+        app.cfg.reflection_post_speech_chat_delay_sec = 0.35
+
+        async def mock_gen(prompt):
+            yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
+
+        async def mock_synth(text):
+            return np.zeros((100, 2), dtype=np.float32)
 
         async def mock_queue_speech(txt):
             pass
@@ -479,6 +494,8 @@ def test_reflection_post_speech_hold_honors_config():
         async def mock_wait():
             pass
 
+        app.brain.generate_response_stream = mock_gen
+        app.tts.synthesize = mock_synth
         app.tts.queue_speech = mock_queue_speech
         app.tts.wait_until_speech_completed = mock_wait
         app.new_comment_signal = asyncio.Event()
@@ -506,8 +523,67 @@ def test_reflection_post_speech_hold_honors_config():
         await app._execute_ai_turn(event_reflection)
         t_elapsed = time.perf_counter() - t_start
 
-        # Reflection should have held for >= 0.4s (comment_post_speech_hold_sec), not truncated to 0.05s!
+        # Reflection should hold for configured reflection_post_speech_chat_delay_sec (0.35s), not 0.05s nor 2.0s
+        assert t_elapsed >= 0.30, f"Expected hold duration >= 0.30s, got {t_elapsed:.3f}s"
+        assert t_elapsed < 1.0, f"Expected hold duration < 1.0s, got {t_elapsed:.3f}s"
+
+    asyncio.run(_test())
+
+
+def test_reflection_chat_wakeup_during_hold():
+    """Verifies that when chat question arrives during post-reflection hold, it respects reflection_post_speech_chat_delay_sec."""
+    async def _test():
+        app = LocalCoHostApp()
+        app.cfg.comment_post_speech_hold_sec = 5.0
+        app.cfg.reflection_post_speech_chat_delay_sec = 0.4
+
+        async def mock_gen(prompt):
+            yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
+
+        async def mock_synth(text):
+            return np.zeros((100, 2), dtype=np.float32)
+
+        async def mock_queue_speech(txt):
+            pass
+
+        async def mock_wait():
+            pass
+
+        app.brain.generate_response_stream = mock_gen
+        app.tts.synthesize = mock_synth
+        app.tts.queue_speech = mock_queue_speech
+        app.tts.wait_until_speech_completed = mock_wait
+        app.new_comment_signal = asyncio.Event()
+
+        event_reflection = CommentEvent(
+            prompt_trigger="[SPONTANEOUS_REFLECTION]",
+            event_type="spontaneous",
+            priority=10,
+            created_at=time.time(),
+            max_age_sec=90.0,
+        )
+
+        async def inject_chat_later():
+            await asyncio.sleep(0.1)
+            event_chat = CommentEvent(
+                prompt_trigger="Chat message from @ViewerA: 'Hello!'",
+                event_type="chat",
+                priority=4,
+                created_at=time.time(),
+                max_age_sec=90.0,
+                chat_item={"author": "ViewerA", "message": "Hello!"},
+            )
+            app.comment_queue.append(event_chat)
+
+        inj_task = asyncio.create_task(inject_chat_later())
+        t_start = time.perf_counter()
+        await app._execute_ai_turn(event_reflection)
+        t_elapsed = time.perf_counter() - t_start
+        await inj_task
+
+        # It should hold until reflection_post_speech_chat_delay_sec (0.4s) has elapsed
         assert t_elapsed >= 0.35, f"Expected hold duration >= 0.35s, got {t_elapsed:.3f}s"
+        assert t_elapsed < 1.5, f"Expected hold duration < 1.5s, got {t_elapsed:.3f}s"
 
     asyncio.run(_test())
 
@@ -744,6 +820,10 @@ if __name__ == "__main__":
     print("Testing Reflection Post-Speech Hold Honors Config...")
     test_reflection_post_speech_hold_honors_config()
     print("Reflection Post-Speech Hold Honors Config Passed!")
+
+    print("Testing Reflection Chat Wakeup During Hold Honors Config...")
+    test_reflection_chat_wakeup_during_hold()
+    print("Reflection Chat Wakeup During Hold Honors Config Passed!")
 
     print("Testing Strict FIFO Chat Ordering...")
     test_strict_fifo_chat_ordering()

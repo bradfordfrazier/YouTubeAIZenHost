@@ -952,34 +952,65 @@ class LocalCoHostApp:
                     )
 
                 # 8. Dynamic Queue-Aware Post-Speech Hold:
-                # - For spontaneous reflections or when only synthetic cast members are waiting,
-                #   hold for the full comment_post_speech_hold_sec (e.g. 5.0s).
-                # - If real human viewers have chatted and are waiting in queue, hold briefly for reading
-                #   (comment_active_queue_hold_sec, default 2.5s) to stay responsive to live audience.
+                # - When a reflection completes and next item (chat/cast question) is in queue,
+                #   hold for reflection_post_speech_chat_delay_sec (default 3.0s).
+                # - When a regular chat/response completes and more items are in queue,
+                #   hold briefly for comment_active_queue_hold_sec (default 2.5s).
+                # - When queue is empty after speech, hold for full comment_post_speech_hold_sec (default 15.0s)
+                #   before dissolving to motto, waking up early if new items arrive.
                 is_spontaneous = (event.event_type == "spontaneous")
-                has_real_chat = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
                 has_queued_next = len(self.comment_queue) > 0
 
-                if has_real_chat and not is_spontaneous:
-                    max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                if is_spontaneous:
+                    if has_queued_next:
+                        max_hold = float(getattr(
+                            self.cfg,
+                            "reflection_post_speech_chat_delay_sec",
+                            getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
+                        ))
+                    else:
+                        max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
                 else:
-                    max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
-
-                min_hold = min(2.0, max_hold)
+                    if has_queued_next:
+                        max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                    else:
+                        max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
 
                 t_hold_start = time.perf_counter()
-                logger.info(f"⏳ [Post-Speech Hold] Holding Oracle comment & pinned question (Hold target: {max_hold:.1f}s, Queue: {len(self.comment_queue)})...")
+                logger.info(
+                    f"⏳ [Post-Speech Hold] Holding Oracle state (Hold target: {max_hold:.1f}s, "
+                    f"Spontaneous: {is_spontaneous}, Queue: {len(self.comment_queue)})..."
+                )
 
                 try:
                     while time.perf_counter() - t_hold_start < max_hold:
-                        await asyncio.sleep(0.15)
-                        # Only interrupt hold early if a REAL human viewer comment arrives during the hold!
+                        await asyncio.sleep(0.1)
                         if len(self.comment_queue) > 0:
-                            has_real_chat_now = any(getattr(q, "event_type", "") in ("chat", "superchat", "direct_mention", "host") for q in self.comment_queue)
-                            if has_real_chat_now and (time.perf_counter() - t_hold_start) >= min_hold:
-                                logger.info(f"⚡ [Live Chat Wakeup] Real viewer comment detected in queue ({len(self.comment_queue)} pending). Transitioning directly to next turn.")
-                                has_queued_next = True
-                                break
+                            elapsed = time.perf_counter() - t_hold_start
+                            if is_spontaneous:
+                                req_delay = float(getattr(
+                                    self.cfg,
+                                    "reflection_post_speech_chat_delay_sec",
+                                    getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
+                                ))
+                                if elapsed >= req_delay:
+                                    logger.info(
+                                        f"⚡ [Chat Wakeup] Chat item detected after reflection "
+                                        f"({len(self.comment_queue)} pending, {elapsed:.1f}s elapsed >= {req_delay:.1f}s target). "
+                                        "Transitioning to next turn."
+                                    )
+                                    has_queued_next = True
+                                    break
+                            else:
+                                min_active_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                                if elapsed >= min_active_hold:
+                                    logger.info(
+                                        f"⚡ [Live Chat Wakeup] Viewer comment detected in queue "
+                                        f"({len(self.comment_queue)} pending, {elapsed:.1f}s elapsed >= {min_active_hold:.1f}s target). "
+                                        "Transitioning to next turn."
+                                    )
+                                    has_queued_next = True
+                                    break
                 except asyncio.CancelledError:
                     pass
 

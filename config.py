@@ -233,6 +233,14 @@ class AppConfig:
     comment_fade_out_sec: float = _get_float("COMMENT_FADE_OUT_SEC", 1.2)
     comment_post_speech_hold_sec: float = _get_float("COMMENT_POST_SPEECH_HOLD_SEC", 15.0)
     comment_active_queue_hold_sec: float = _get_float("COMMENT_ACTIVE_QUEUE_HOLD_SEC", 2.5)
+    reflection_post_speech_chat_delay_sec: float = _get_float(
+        "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
+        _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),
+    )
+    reflection_to_chat_delay_sec: float = _get_float(
+        "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
+        _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),
+    )
     # Simplified Question Display & Transition Timings
     question_fade_in_sec: float = _get_float("QUESTION_FADE_IN_SEC", 0.80)
     question_fade_out_sec: float = _get_float("QUESTION_FADE_OUT_SEC", 0.80)

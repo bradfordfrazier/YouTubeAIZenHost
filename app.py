@@ -137,7 +137,7 @@ if sys.platform == "win32":
         kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         kernel32.SetPriorityClass.restype = wintypes.BOOL
 
-        pri_str = getattr(config, "process_priority", "above_normal").lower()
+        pri_str = config.process_priority.lower()
         pri_code = 0x00000080 if pri_str == "high" else 0x00008000
         kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), pri_code)
         logger.info(f"Enabled Windows 1ms timer and {pri_str.upper()} process priority for smooth audio.")
@@ -430,9 +430,9 @@ class LocalCoHostApp:
             self.tts.ndi_sink = self.visualizer.push_audio_samples
             self.tts.ndi_clear_sink = self.visualizer.clear_audio_buffer
         self.ndi = NDIStreamer()
-        self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
+        self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if self.cfg.session_logging_enabled else None
         self.cast = CastEngine()
-        self.greeting_cache = GreetingCache.get_instance(max_size=getattr(self.cfg, "greeting_cache_size", 3))
+        self.greeting_cache = GreetingCache.get_instance(max_size=self.cfg.greeting_cache_size)
 
         # OBS State
         self.obs_client = None
@@ -546,7 +546,7 @@ class LocalCoHostApp:
             return
 
         now = time.time()
-        cooldown = getattr(self.cfg, "viewer_join_cooldown_sec", 60.0)
+        cooldown = self.cfg.viewer_join_cooldown_sec
         if (now - self.last_viewer_join_welcome_time) < cooldown:
             logger.debug("Wake-up comment event suppressed by debounce cooldown.")
             return
@@ -560,7 +560,7 @@ class LocalCoHostApp:
         # Transition engagement tier to ACTIVE
         self.engagement_mode = "active"
         self._update_engagement_state()
-        should_greet = getattr(self.cfg, "greet_viewer_joins", False)
+        should_greet = self.cfg.greet_viewer_joins
         if should_greet:
             chan_handle = self.cfg.youtube_channel_handle
             if viewers == 1:
@@ -578,7 +578,7 @@ class LocalCoHostApp:
 
             cached_greeting = None
             if (
-                getattr(self.cfg, "greeting_cache_enabled", True)
+                self.cfg.greeting_cache_enabled
                 and hasattr(self, "greeting_cache")
                 and self.greeting_cache.has_greeting()
             ):
@@ -610,7 +610,7 @@ class LocalCoHostApp:
         self.concurrent_viewers = new_viewers
         self.chat_velocity = new_chat_velocity
         now = time.time()
-        min_viewers = getattr(self.cfg, "min_concurrent_viewers_active", 1)
+        min_viewers = self.cfg.min_concurrent_viewers_active
 
         if not self.initial_viewer_sync_done:
             self.initial_viewer_sync_done = True
@@ -756,7 +756,7 @@ class LocalCoHostApp:
             return
 
         # Backpressure & Queue Overflow Management (Max queue size)
-        max_queue = int(getattr(self.cfg, "max_comment_queue_size", 5))
+        max_queue = int(self.cfg.max_comment_queue_size)
         if len(self.comment_queue) >= max_queue:
             # Find lowest-priority item (largest priority tuple)
             lowest_item = max(self.comment_queue)
@@ -892,11 +892,11 @@ class LocalCoHostApp:
         question_text = self.current_pinned_chat.get("message", "") if self.current_pinned_chat else ""
         if question_text:
             word_count = len(question_text.split())
-            min_display_sec = getattr(self.cfg, "question_min_display_sec", getattr(self.cfg, "question_read_min_sec", 2.0))
-            rate_sec = getattr(self.cfg, "question_read_word_rate_sec", 0.25)
+            min_display_sec = self.cfg.question_min_display_sec
+            rate_sec = self.cfg.question_read_word_rate_sec
             min_display_hold_sec = max(min_display_sec, word_count * rate_sec)
-            q_fade_in_sec = getattr(self.cfg, "question_fade_in_sec", 0.80)
-            q_fade_out_sec = getattr(self.cfg, "question_fade_out_sec", 0.80)
+            q_fade_in_sec = self.cfg.question_fade_in_sec
+            q_fade_out_sec = self.cfg.question_fade_out_sec
             min_time_before_fade_out = q_fade_in_sec + min_display_hold_sec
         else:
             min_display_hold_sec = 0.0
@@ -934,7 +934,7 @@ class LocalCoHostApp:
                         logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
                         await asyncio.sleep(remaining_hold)
 
-                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+                is_vox_only = self.cfg.vox_only_mode
                 if question_text:
                     if is_vox_only:
                         logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
@@ -984,7 +984,7 @@ class LocalCoHostApp:
                                         logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
                                         await asyncio.sleep(remaining_hold)
 
-                                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+                                is_vox_only = self.cfg.vox_only_mode
                                 if question_text:
                                     if is_vox_only:
                                         logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
@@ -1068,8 +1068,8 @@ class LocalCoHostApp:
 
                 # Structured Session Log
                 if self.session_log:
-                    exag_map = getattr(self.cfg, "tts_mood_exaggeration_map", {})
-                    exaggeration = exag_map.get(active_mood.lower(), getattr(self.cfg, "tts_exaggeration_default", 0.5))
+                    exag_map = self.cfg.tts_mood_exaggeration_map
+                    exaggeration = exag_map.get(active_mood.lower(), self.cfg.tts_exaggeration_default)
                     self.session_log.log_ai_turn(
                         trigger=event.prompt_trigger,
                         event_type=event.event_type,
@@ -1091,11 +1091,7 @@ class LocalCoHostApp:
                     # After a spontaneous reflection finishes speaking:
                     # Hold in serene silence/stillness for reflection_post_speech_chat_delay_sec (default 3.0s)
                     # before allowing ANY next sequence (chat question or motto) to emerge.
-                    refl_delay = float(getattr(
-                        self.cfg,
-                        "reflection_post_speech_chat_delay_sec",
-                        getattr(self.cfg, "reflection_to_chat_delay_sec", 3.0),
-                    ))
+                    refl_delay = float(self.cfg.reflection_post_speech_chat_delay_sec)
                     logger.info(f"⏳ [Post-Reflection Hold] Holding peaceful stillness for {refl_delay:.1f}s after reflection (Queue: {len(self.comment_queue)})...")
                     t_hold_start = time.perf_counter()
                     try:
@@ -1121,9 +1117,9 @@ class LocalCoHostApp:
                     #   waking up early if a new comment arrives.
                     has_queued_next = len(self.comment_queue) > 0
                     if has_queued_next:
-                        max_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                        max_hold = float(self.cfg.comment_active_queue_hold_sec)
                     else:
-                        max_hold = float(getattr(self.cfg, "comment_post_speech_hold_sec", 15.0))
+                        max_hold = float(self.cfg.comment_post_speech_hold_sec)
 
                     t_hold_start = time.perf_counter()
                     logger.info(
@@ -1134,7 +1130,7 @@ class LocalCoHostApp:
                         while time.perf_counter() - t_hold_start < max_hold:
                             await asyncio.sleep(0.1)
                             if len(self.comment_queue) > 0:
-                                min_active_hold = float(getattr(self.cfg, "comment_active_queue_hold_sec", 2.5))
+                                min_active_hold = float(self.cfg.comment_active_queue_hold_sec)
                                 elapsed = time.perf_counter() - t_hold_start
                                 if elapsed >= min_active_hold:
                                     logger.info(
@@ -1288,7 +1284,7 @@ class LocalCoHostApp:
                     probe_tcp_port,
                     self.cfg.obs_ws_host,
                     self.cfg.obs_ws_port,
-                    getattr(self.cfg, "obs_connect_timeout", 0.2),
+                    self.cfg.obs_connect_timeout,
                 )
 
                 if not is_open:
@@ -1302,7 +1298,7 @@ class LocalCoHostApp:
                             f"OBS Studio WebSocket ({self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}) not listening. "
                             "Visualizer running standalone (will auto-connect when OBS starts)."
                         )
-                    await asyncio.sleep(getattr(self.cfg, "obs_retry_interval_sec", 5.0))
+                    await asyncio.sleep(self.cfg.obs_retry_interval_sec)
                     continue
 
                 # 2. Port is open: execute connection in thread pool
@@ -1339,7 +1335,7 @@ class LocalCoHostApp:
                 ws_client.register(on_event)
 
                 last_stream_check = 0.0
-                stream_poll_interval = getattr(self.cfg, "obs_stream_status_poll_interval", 2.0)
+                stream_poll_interval = self.cfg.obs_stream_status_poll_interval
 
                 while self.running:
                     now = time.time()
@@ -1403,7 +1399,7 @@ class LocalCoHostApp:
                         await loop.run_in_executor(None, ws_client.disconnect)
                     except Exception:
                         pass
-                await asyncio.sleep(getattr(self.cfg, "obs_retry_interval_sec", 5.0))
+                await asyncio.sleep(self.cfg.obs_retry_interval_sec)
     # --------------------------------------------------------------------------
     # 5. YouTube Live Chat Poller
     # --------------------------------------------------------------------------
@@ -1411,7 +1407,7 @@ class LocalCoHostApp:
         """Polls YouTube Live Chat via pytchat or runs simulated stream chat."""
         raw_input = (
             self.cfg.youtube_video_id.strip()
-            or getattr(self.cfg, "youtube_channel_handle", "").strip()
+            or self.cfg.youtube_channel_handle.strip()
         )
 
         if not raw_input:
@@ -1534,7 +1530,7 @@ class LocalCoHostApp:
                         }
                         for val in [
                             self.cfg.youtube_channel_handle,
-                            getattr(self.cfg, "ai_host_name", ""),
+                            self.cfg.ai_host_name,
                             self.discovered_channel_handle,
                         ]:
                             if val:
@@ -1542,7 +1538,7 @@ class LocalCoHostApp:
                                 own_identifiers.add(v_clean)
                                 own_identifiers.add(v_clean.replace(" ", "").replace("_", "").replace("-", ""))
 
-                        for ch in getattr(self.cfg, "channel_handles", []):
+                        for ch in self.cfg.channel_handles:
                             if ch:
                                 ch_clean = ch.lower().strip().lstrip("@")
                                 own_identifiers.add(ch_clean)
@@ -1926,12 +1922,12 @@ class LocalCoHostApp:
         Yields immediately whenever real human chatters or host speech is detected.
         Pauses in ECO MODE (0 viewers) when cast_require_viewers is enabled.
         """
-        if not getattr(self.cfg, "cast_enabled", True):
+        if not self.cfg.cast_enabled:
             return
 
         logger.info(
             f"🎭 [Cast Scheduler] Synthetic Cast ensemble active (Interval: {self.cfg.cast_min_interval_sec}-{self.cfg.cast_max_interval_sec}s, "
-            f"Quiet threshold: {self.cfg.cast_quiet_chat_threshold_sec}s, Require Viewers: {getattr(self.cfg, 'cast_require_viewers', True)})"
+            f"Quiet threshold: {self.cfg.cast_quiet_chat_threshold_sec}s, Require Viewers: {self.cfg.cast_require_viewers})"
         )
         # Stagger initial start
         await asyncio.sleep(15.0)
@@ -1939,13 +1935,13 @@ class LocalCoHostApp:
         while self.running:
             try:
                 await asyncio.sleep(5.0)
-                if not getattr(self.cfg, "cast_enabled", True):
+                if not self.cfg.cast_enabled:
                     continue
 
                 self._update_engagement_state()
 
                 # In Standby or ECO mode (0 viewers), suppress synthetic cast questions if require_viewers is enabled
-                if getattr(self.cfg, "cast_require_viewers", True) and self.engagement_mode in ("standby", "eco"):
+                if self.cfg.cast_require_viewers and self.engagement_mode in ("standby", "eco"):
                     continue
 
                 if (
@@ -2059,7 +2055,7 @@ class LocalCoHostApp:
                 self._update_engagement_state()
 
                 # In Standby or ECO mode (0 viewers), suppress spontaneous reflections if require_viewers is enabled
-                if getattr(self.cfg, "spontaneous_require_viewers", False) and self.engagement_mode in ("standby", "eco"):
+                if self.cfg.spontaneous_require_viewers and self.engagement_mode in ("standby", "eco"):
                     continue
 
                 now = time.time()
@@ -2077,8 +2073,8 @@ class LocalCoHostApp:
                 time_since_last_spontaneous = now - self.last_spontaneous_time
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_encouragement = now - self.last_chat_encouragement_time
-                encouragement_enabled = getattr(self.cfg, "chat_encouragement_enabled", False)
-                encouragement_base_interval = getattr(self.cfg, "chat_encouragement_interval_sec", 300.0)
+                encouragement_enabled = self.cfg.chat_encouragement_enabled
+                encouragement_base_interval = self.cfg.chat_encouragement_interval_sec
                 encouragement_backoff = min(600.0, encouragement_base_interval * (1.5 ** self.encouragement_idle_count))
 
                 # 1. Chat Encouragement: Viewers watching, but chat silent (only if enabled)
@@ -2106,8 +2102,8 @@ class LocalCoHostApp:
                     self._trigger_ai_turn(prompt_trigger=prompt, event_type="spontaneous", priority=6)
 
                 # 2. General Spontaneous Reflection with Adaptive Backoff
-                spontaneous_base = getattr(self.cfg, "spontaneous_min_interval_sec", 60.0)
-                spontaneous_max = getattr(self.cfg, "spontaneous_max_backoff_sec", 600.0)
+                spontaneous_base = self.cfg.spontaneous_min_interval_sec
+                spontaneous_max = self.cfg.spontaneous_max_backoff_sec
                 spontaneous_backoff = min(
                     spontaneous_max,
                     spontaneous_base * (1.5 ** self.spontaneous_idle_count),
@@ -2143,13 +2139,13 @@ class LocalCoHostApp:
           turn or celebration, at most once per promo_sub_min_interval_sec (default 300s).
         - Existing rule: Promos NEVER overlap speech or a pinned question.
         """
-        if getattr(self.cfg, "promo_mode", "event") != "event" or not getattr(self.cfg, "promo_overlay_enabled", True):
+        if self.cfg.promo_mode != "event" or not self.cfg.promo_overlay_enabled:
             return
 
         logger.info(
             f"📣 [Promo Monitor] Event-driven promo engine active "
-            f"(Ask Quiet: {getattr(self.cfg, 'promo_ask_quiet_sec', 45.0)}s, "
-            f"Like/Sub Cooldown: {getattr(self.cfg, 'promo_sub_min_interval_sec', 300.0)}s)"
+            f"(Ask Quiet: {self.cfg.promo_ask_quiet_sec}s, "
+            f"Like/Sub Cooldown: {self.cfg.promo_sub_min_interval_sec}s)"
         )
 
         last_ask_promo_time = 0.0
@@ -2179,8 +2175,8 @@ class LocalCoHostApp:
                 # Trigger within promo_sub_after_turn_sec after completed non-spontaneous turn or celebration
                 time_since_turn_done = now - getattr(self, "last_turn_completed_time", 0.0)
                 time_since_last_like_sub = now - last_like_sub_time
-                sub_after_turn_sec = getattr(self.cfg, "promo_sub_after_turn_sec", 3.0)
-                sub_min_interval = getattr(self.cfg, "promo_sub_min_interval_sec", 300.0)
+                sub_after_turn_sec = self.cfg.promo_sub_after_turn_sec
+                sub_min_interval = self.cfg.promo_sub_min_interval_sec
                 last_event_type = getattr(self, "last_turn_event_type", "")
 
                 if (
@@ -2197,7 +2193,7 @@ class LocalCoHostApp:
 
                 # 2. Check "Ask Anything" promo:
                 # Shows when chat has been silent for >= promo_ask_quiet_sec, viewers >= 1, no active turn
-                ask_quiet_sec = getattr(self.cfg, "promo_ask_quiet_sec", 45.0)
+                ask_quiet_sec = self.cfg.promo_ask_quiet_sec
                 time_since_last_chat = now - self.last_chat_time
                 time_since_last_ask = now - last_ask_promo_time
                 viewers = self.concurrent_viewers
@@ -2223,7 +2219,7 @@ class LocalCoHostApp:
         """High-priority PortAudio real-time audio callback running on kernel MMCSS thread."""
         if status:
             logger.debug(f"Audio Callback status: {status}")
-        outdata[:] = self.tts.pop_local_audio(frames, volume=getattr(self.cfg, "local_audio_volume", 1.0))
+        outdata[:] = self.tts.pop_local_audio(frames, volume=self.cfg.local_audio_volume)
         metrics = self.tts.get_audio_metrics()
         if hasattr(self.visualizer, "write_audio_metrics"):
             self.visualizer.write_audio_metrics(
@@ -2253,8 +2249,8 @@ class LocalCoHostApp:
                 cb_status = "TRIPPED (Cooldown)" if getattr(self.brain, "circuit_breaker_tripped", False) else "HEALTHY"
                 cache_lvl = self.brain.reflection_cache.size() if hasattr(self.brain, "reflection_cache") else 0
                 greet_lvl = self.greeting_cache.size() if hasattr(self, "greeting_cache") else 0
-                max_refl = getattr(self.cfg, "reflection_cache_size", 4)
-                max_greet = getattr(self.cfg, "greeting_cache_size", 3)
+                max_refl = self.cfg.reflection_cache_size
+                max_greet = self.cfg.greeting_cache_size
 
                 hud = (
                     f"\n{'='*65}\n"
@@ -2380,7 +2376,7 @@ class LocalCoHostApp:
         logger.info("=" * 65)
         logger.info("ALL-LOCAL AI LIVE STREAM CO-HOST INITIALIZING (OBS HOST PC)")
         logger.info(f"NDI Broadcast Feed: '{self.cfg.ndi_stream_name}' ({self.visualizer.width}x{self.visualizer.height} @ 60fps)")
-        tts_backend_name = getattr(self.cfg, "tts_backend", getattr(self.cfg, "tts_engine", "chatterbox"))
+        tts_backend_name = self.cfg.tts_backend
         logger.info(f"TTS Backend: {tts_backend_name} ({self.cfg.tts_voice}) @ 48kHz Stereo")
         logger.info(f"LLM Brain: {self.cfg.ai_cohost_name} ({self.cfg.gemini_model})")
         logger.info(f"Local OBS WebSocket: {self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}")
@@ -2399,7 +2395,7 @@ class LocalCoHostApp:
             logger.warning(f"Error during initial TTS health check: {e}")
 
         # Start high-priority dedicated NDI audio pump thread only in fallback in-process mode
-        if not isinstance(self.visualizer, VisualizerProxy) and getattr(self.cfg, "ndi_audio_enabled", True) and not self.ndi.is_mock:
+        if not isinstance(self.visualizer, VisualizerProxy) and self.cfg.ndi_audio_enabled and not self.ndi.is_mock:
             self.ndi_audio_running = True
             self.ndi_audio_thread = threading.Thread(
                 target=self._ndi_audio_pump_worker,
@@ -2411,13 +2407,13 @@ class LocalCoHostApp:
 
         # Initialize local Windows WASAPI / DirectSound / WDM-KS real-time audio callback stream
         self.sd_stream = None
-        if getattr(self.cfg, "local_audio_enabled", True) and sd is not None:
+        if self.cfg.local_audio_enabled and sd is not None:
             try:
                 target_dev_idx = resolve_wasapi_output_device(self.cfg.local_audio_device)
                 dev_info = sd.query_devices(target_dev_idx) if target_dev_idx is not None else None
                 dev_name = dev_info["name"] if dev_info else "Default"
                 api_name = sd.query_hostapis(dev_info["hostapi"])["name"] if dev_info else "WASAPI"
-                latency_setting = getattr(self.cfg, "local_audio_latency", "high")
+                latency_setting = self.cfg.local_audio_latency
 
                 self.sd_stream = sd.OutputStream(
                     samplerate=self.cfg.tts_sample_rate,
@@ -2439,7 +2435,7 @@ class LocalCoHostApp:
                     f"Could not open Windows audio output device: {e}. Audio will continue streaming over NDI."
                 )
                 self.sd_stream = None
-        elif not getattr(self.cfg, "local_audio_enabled", True):
+        elif not self.cfg.local_audio_enabled:
             logger.info("Windows Local Audio Output is disabled in configuration.")
         else:
             logger.warning("sounddevice module not available. Install sounddevice for OBS Window audio capture.")
@@ -2456,17 +2452,17 @@ class LocalCoHostApp:
             asyncio.create_task(self.stream_observability_task(), name="observability_hud"),
         ]
 
-        if getattr(self.cfg, "cast_enabled", True):
+        if self.cfg.cast_enabled:
             self.tasks.append(asyncio.create_task(self.cast_scheduler_task(), name="cast_scheduler"))
 
-        if getattr(self.cfg, "promo_mode", "event") == "event" and getattr(self.cfg, "promo_overlay_enabled", True):
+        if self.cfg.promo_mode == "event" and self.cfg.promo_overlay_enabled:
             self.tasks.append(asyncio.create_task(self.promo_monitor_task(), name="promo_monitor"))
 
-        if getattr(self.cfg, "reflection_cache_enabled", True) and hasattr(self.brain, "reflection_cache"):
+        if self.cfg.reflection_cache_enabled and hasattr(self.brain, "reflection_cache"):
             self.tasks.append(asyncio.create_task(self.brain.reflection_cache.replenish_worker(self.brain), name="reflection_cache_worker"))
 
-        if getattr(self.cfg, "greeting_cache_enabled", True) and hasattr(self, "greeting_cache"):
-            self.tasks.append(asyncio.create_task(self.greeting_cache.replenish_worker(self.brain, self.tts, self.cfg, poll_interval=getattr(self.cfg, "greeting_cache_poll_interval_sec", 15.0)), name="greeting_cache_worker"))
+        if self.cfg.greeting_cache_enabled and hasattr(self, "greeting_cache"):
+            self.tasks.append(asyncio.create_task(self.greeting_cache.replenish_worker(self.brain, self.tts, self.cfg, poll_interval=self.cfg.greeting_cache_poll_interval_sec), name="greeting_cache_worker"))
 
         try:
             results = await asyncio.gather(*self.tasks, return_exceptions=True)

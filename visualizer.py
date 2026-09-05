@@ -277,7 +277,7 @@ class Visualizer:
         self.width = width or self.cfg.visualizer_width  # 1920 (16:9) or 1080 (9:16)
         self.height = height or self.cfg.visualizer_height  # 1080 (16:9) or 1920 (9:16)
         self.fps = self.cfg.visualizer_fps  # 60
-        self.sample_rate = getattr(self.cfg, "tts_sample_rate", 48000)
+        self.sample_rate = self.cfg.tts_sample_rate
         self.host_name = self.cfg.ai_host_name
         self.is_vertical = (self.height > self.width)
 
@@ -308,14 +308,14 @@ class Visualizer:
             self.screen = pygame.Surface((self.width, self.height))
             self.window_size = (self.width, self.height)
         else:
-            if getattr(self.cfg, "visualizer_native_window", False):
+            if self.cfg.visualizer_native_window:
                 win_w = window_width or self.width
                 win_h = window_height or self.height
             else:
                 default_win_w = 540 if self.is_vertical else 320
                 default_win_h = 960 if self.is_vertical else 180
-                cfg_w = getattr(self.cfg, "visualizer_window_width", None)
-                cfg_h = getattr(self.cfg, "visualizer_window_height", None)
+                cfg_w = self.cfg.visualizer_window_width
+                cfg_h = self.cfg.visualizer_window_height
                 if cfg_w and cfg_h and ((cfg_h > cfg_w) == self.is_vertical):
                     win_w = window_width or cfg_w
                     win_h = window_height or cfg_h
@@ -324,7 +324,7 @@ class Visualizer:
                     win_h = window_height or default_win_h
             self.window_size = (win_w, win_h)
             flags = pygame.DOUBLEBUF | pygame.RESIZABLE
-            if getattr(self.cfg, "visualizer_borderless", False):
+            if self.cfg.visualizer_borderless:
                 flags = pygame.DOUBLEBUF | pygame.NOFRAME
             self.window_surf = pygame.display.set_mode(self.window_size, flags)
             pygame.event.set_grab(False)
@@ -351,8 +351,8 @@ class Visualizer:
                         mi.cbSize = ctypes.sizeof(MONITORINFO)
                         if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
                             work = mi.rcWork
-                            cfg_x = getattr(self.cfg, "visualizer_window_x", None)
-                            cfg_y = getattr(self.cfg, "visualizer_window_y", None)
+                            cfg_x = self.cfg.visualizer_window_x
+                            cfg_y = self.cfg.visualizer_window_y
                             target_x = cfg_x if cfg_x is not None else (work.left + 40)
                             target_y = cfg_y if cfg_y is not None else (work.top + 40)
 
@@ -407,7 +407,7 @@ class Visualizer:
             self.font_callout_icon = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
 
         # Ambient Particle System (optimally tuned for 60+ FPS on Intel Core i5 / UHD 630 Graphics)
-        self.num_particles = getattr(self.cfg, "visualizer_particle_count", 70)
+        self.num_particles = self.cfg.visualizer_particle_count
         self.particles = [Particle(self.width, self.height) for _ in range(self.num_particles)]
 
         # Celestial Sparkle System around the central Point of Light
@@ -423,10 +423,10 @@ class Visualizer:
         self.celebration_timer: float = 0.0
 
         # Promotional Callout Overlays ("Ask God", "Like & Subscribe")
-        self.promo_enabled = getattr(self.cfg, "promo_overlay_enabled", True)
-        self.promo_mode = getattr(self.cfg, "promo_mode", "event").strip().lower()
-        self.promo_interval = getattr(self.cfg, "promo_overlay_interval_sec", 40.0)
-        self.promo_duration = getattr(self.cfg, "promo_overlay_duration_sec", 10.0)
+        self.promo_enabled = self.cfg.promo_overlay_enabled
+        self.promo_mode = self.cfg.promo_mode.strip().lower()
+        self.promo_interval = self.cfg.promo_overlay_interval_sec
+        self.promo_duration = self.cfg.promo_overlay_duration_sec
         self.promo_state = "off"  # "off", "entrance", "display", "exit"
         self.promo_timer = self.promo_interval * 0.35  # First promo appears after a brief initial warmup
         self.promo_state_timer = 0.0
@@ -482,7 +482,7 @@ class Visualizer:
         self._active_pinned_message: Optional[Dict] = None
 
         # Ethereal consciousness text transition engine (arising from nowhere & dissolving into nowhere)
-        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        motto = self.cfg.motto_phrase
         self.ai_text_current = motto
         self.ai_text_target = motto
         self.ai_text_alpha = 1.0          # Start with motto visible when there is nothing to display
@@ -638,7 +638,7 @@ class Visualizer:
         """Resets subtitle text to motto, initiating smooth synchronized dissolution of Oracle comment & pinned question."""
         self.is_empty_hold = False
         self.subtitle_target_text = ""
-        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        motto = self.cfg.motto_phrase
         self.ai_text_target = motto
         if self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.01:
             self.ai_text_state = "fade_out"
@@ -651,7 +651,7 @@ class Visualizer:
         else:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
-            motto_delay = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", 0.0))))
+            motto_delay = max(0.0, self.cfg.motto_pre_fade_in_sec)
             if motto_delay > 0.0:
                 self.ai_text_state = "motto_pause"
                 self.motto_pause_timer = motto_delay
@@ -673,7 +673,7 @@ class Visualizer:
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
         clean = re.sub(r"@+", "@", text).strip() if text else ""
         logger.debug(f"✨ [Visualizer] set_subtitle called: '{clean[:40]}'")
-        if getattr(self.cfg, "vox_only_mode", False):
+        if self.cfg.vox_only_mode:
             self.subtitle_target_text = ""
             return
 
@@ -771,7 +771,7 @@ class Visualizer:
         self._draw_celebration_fx(dt)
 
         # 5. Glassmorphism HUD Overlays
-        if getattr(self.cfg, "show_top_status_bar", False):
+        if self.cfg.show_top_status_bar:
             self._draw_top_header(
                 obs_connected=obs_connected,
                 engagement_mode=engagement_mode,
@@ -780,7 +780,7 @@ class Visualizer:
             )
 
         # Maintain active pinned message in chat panel until Oracle response completely dissolves
-        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        motto = self.cfg.motto_phrase
         has_active_statement = bool(
             (self.subtitle_target_text and self.subtitle_target_text != motto)
             or (self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05)
@@ -812,7 +812,7 @@ class Visualizer:
                 if event.type == pygame.VIDEORESIZE:
                     self.window_size = (max(160, event.w), max(90, event.h))
                     flags = pygame.DOUBLEBUF | pygame.RESIZABLE
-                    if getattr(self.cfg, "visualizer_borderless", False):
+                    if self.cfg.visualizer_borderless:
                         flags = pygame.DOUBLEBUF | pygame.NOFRAME
                     self.window_surf = pygame.display.set_mode(self.window_size, flags)
                     pygame.event.set_grab(False)
@@ -1161,7 +1161,7 @@ class Visualizer:
         is_stream_live: bool = True,
     ):
         """Draws broadcast status bar at top of screen directly on canvas."""
-        if not getattr(self.cfg, "show_top_status_bar", False):
+        if not self.cfg.show_top_status_bar:
             return
         bar_h = 70 if self.is_vertical else 60
         txt_y = 20 if self.is_vertical else 22
@@ -1208,7 +1208,7 @@ class Visualizer:
         Renders a distinctive glassmorphic [CAST] transparency pill badge.
         Returns total width consumed including padding.
         """
-        badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
+        badge_label = self.cfg.cast_badge_label
         badge_tag = f"{badge_label}"
         badge_txt = self._render_text(self.font_callout_tag, badge_tag, (240, 185, 255))
 
@@ -1292,8 +1292,8 @@ class Visualizer:
         # 3. ACTIVE CHAT QUESTION IDENTIFICATION & PIN DOCKING CALCULATION
         # ----------------------------------------------------------------------
         dt = 1.0 / self.fps
-        comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
-        comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
+        comment_fade_in_sec = max(0.05, self.cfg.comment_fade_in_sec)
+        comment_fade_out_sec = max(0.05, self.cfg.comment_fade_out_sec)
         pin_fade_in_rate = 1.0 / comment_fade_in_sec
         pin_fade_out_rate = 1.0 / comment_fade_out_sec
 
@@ -1673,19 +1673,19 @@ class Visualizer:
                 self.active_question_start_time = 0.0
 
         # 2. Timing Parameters & Calculations
-        q_fade_in_sec = max(0.05, getattr(self.cfg, "question_fade_in_sec", 0.80))
-        q_fade_out_sec = max(0.05, getattr(self.cfg, "question_fade_out_sec", 0.80))
-        min_display_sec = max(0.1, getattr(self.cfg, "question_min_display_sec", getattr(self.cfg, "question_read_min_sec", 2.0)))
-        word_rate_sec = max(0.01, getattr(self.cfg, "question_read_word_rate_sec", 0.25))
+        q_fade_in_sec = max(0.05, self.cfg.question_fade_in_sec)
+        q_fade_out_sec = max(0.05, self.cfg.question_fade_out_sec)
+        min_display_sec = max(0.1, self.cfg.question_min_display_sec)
+        word_rate_sec = max(0.01, self.cfg.question_read_word_rate_sec)
 
         q_words = len(self.active_question_text.split()) if self.active_question_text else 0
         display_duration = max(min_display_sec, q_words * word_rate_sec)
 
-        comment_fade_in_sec = max(0.05, getattr(self.cfg, "comment_fade_in_sec", 0.6))
-        comment_fade_out_sec = max(0.05, getattr(self.cfg, "comment_fade_out_sec", 1.2))
-        motto_pre_fade_in_sec = max(0.0, getattr(self.cfg, "motto_pre_fade_in_sec", getattr(self.cfg, "motto_delay_sec", getattr(self.cfg, "motto_pause_sec", 0.0))))
-        motto_fade_in_sec = max(0.05, getattr(self.cfg, "motto_fade_in_sec", 1.4))
-        motto_fade_out_sec = max(0.05, getattr(self.cfg, "motto_fade_out_sec", 0.6))
+        comment_fade_in_sec = max(0.05, self.cfg.comment_fade_in_sec)
+        comment_fade_out_sec = max(0.05, self.cfg.comment_fade_out_sec)
+        motto_pre_fade_in_sec = max(0.0, self.cfg.motto_pre_fade_in_sec)
+        motto_fade_in_sec = max(0.05, self.cfg.motto_fade_in_sec)
+        motto_fade_out_sec = max(0.05, self.cfg.motto_fade_out_sec)
 
         comment_fade_in_rate = 1.0 / comment_fade_in_sec
         comment_fade_out_rate = 1.0 / comment_fade_out_sec
@@ -1800,7 +1800,7 @@ class Visualizer:
             sh_off = 2 if self.is_vertical else 1
 
             if is_cast:
-                badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
+                badge_label = self.cfg.cast_badge_label
                 badge_sample_txt = self._render_text(self.font_callout_tag, f"{badge_label}", (240, 185, 255))
                 pad_w = 6 if self.is_vertical else 5
                 badge_w = badge_sample_txt.get_width() + (pad_w * 2)
@@ -1842,8 +1842,8 @@ class Visualizer:
         # ----------------------------------------------------------------------
         # ORACLE SPOKEN STATEMENT / IDLE MOTTO MANIFESTATION
         # ----------------------------------------------------------------------
-        motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
-        if getattr(self.cfg, "vox_only_mode", False) and is_speaking:
+        motto = self.cfg.motto_phrase
+        if self.cfg.vox_only_mode and is_speaking:
             desired_target = ""
         elif self.subtitle_target_text:
             desired_target = self.subtitle_target_text
@@ -2014,8 +2014,8 @@ class Visualizer:
 
     def _update_promo_state(self, dt: float, is_speaking: bool = False, is_turn_busy: bool = False):
         """Updates animation timers, easing curves, and state transitions for promotional callout overlays."""
-        entrance_duration = max(0.2, getattr(self.cfg, "promo_overlay_entrance_sec", 0.9))
-        exit_duration = max(0.2, getattr(self.cfg, "promo_overlay_exit_sec", 1.15))
+        entrance_duration = max(0.2, self.cfg.promo_overlay_entrance_sec)
+        exit_duration = max(0.2, self.cfg.promo_overlay_exit_sec)
 
         # If turn is busy (avatar speaking, question displayed/generating), hold promo in off state
         if is_speaking or is_turn_busy:
@@ -2082,7 +2082,7 @@ class Visualizer:
         if self.promo_state == "off" or self.promo_alpha <= 0.005:
             return
 
-        hover_amp = getattr(self.cfg, "promo_overlay_hover_amp", 4.5)
+        hover_amp = self.cfg.promo_overlay_hover_amp
         # Continuous harmonic hover oscillation (unbroken phase continuity across all state transitions)
         hover_y = math.sin(self.time_elapsed * 2.2) * hover_amp
         hover_x = math.cos(self.time_elapsed * 1.4) * (hover_amp * 0.35)

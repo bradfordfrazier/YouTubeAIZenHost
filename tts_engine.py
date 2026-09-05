@@ -388,7 +388,7 @@ class TTSEngine:
             now = time.time()
             with self._buffer_lock:
                 utterance_open = self._utterance_open
-                local_enabled = getattr(self.cfg, "local_audio_enabled", True)
+                local_enabled = self.cfg.local_audio_enabled
                 local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0 and local_enabled
                 ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0 and self.ndi_buffer_enabled
 

@@ -499,9 +499,9 @@ class VisualizerProxy:
         self.width = self.cfg.visualizer_width
         self.height = self.cfg.visualizer_height
         self.fps = self.cfg.visualizer_fps
-        self.sample_rate = getattr(self.cfg, "tts_sample_rate", 48000)
+        self.sample_rate = self.cfg.tts_sample_rate
         self.current_mood = "chill"
-        self.ai_text_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.ai_text_target = self.cfg.motto_phrase
         self.current_pinned: Optional[Dict] = None
 
         # Shared memory and IPC objects
@@ -618,7 +618,7 @@ class VisualizerProxy:
 
     def clear_subtitle(self):
         """Resets subtitle / question to subtle motto."""
-        self.ai_text_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.ai_text_target = self.cfg.motto_phrase
         self.ai_text_state = "fade_in"
         self._send_cmd("CLEAR_SUBTITLE", None)
 

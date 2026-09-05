@@ -169,7 +169,7 @@ def test_fast_thinking_budget_for_viewer_join():
 
 def test_greeting_fade_out_to_motto_lifecycle():
     """Verifies that the viewer greeting fades out smoothly over comment_fade_out_sec, pauses, and returns to motto."""
-    orig_pause = getattr(config, "motto_pre_fade_in_sec", 0.0)
+    orig_pause = config.motto_pre_fade_in_sec
     try:
         config.motto_pre_fade_in_sec = 2.0
         vis = Visualizer(width=1920, height=1080)
@@ -288,7 +288,7 @@ def test_motto_dissolves_smoothly_when_next_chat_question_arrives():
 
 def test_motto_delay_configurable():
     """Verifies that motto_pre_fade_in_sec (MOTTO_PRE_FADE_IN_SEC) accurately controls the pause duration before motto display."""
-    orig_delay = getattr(config, "motto_pre_fade_in_sec", 2.0)
+    orig_delay = config.motto_pre_fade_in_sec
     orig_fade_in = config.comment_fade_in_sec
     orig_fade_out = config.comment_fade_out_sec
 

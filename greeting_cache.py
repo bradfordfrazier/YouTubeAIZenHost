@@ -112,7 +112,7 @@ class GreetingCache:
                 await asyncio.sleep(poll_interval)
 
                 # Only run if greeting cache is enabled
-                if not getattr(cfg, "greeting_cache_enabled", True):
+                if not cfg.greeting_cache_enabled:
                     continue
 
                 if self.size() >= self.max_size:
@@ -122,7 +122,7 @@ class GreetingCache:
                 if getattr(brain, "is_generating", False) or getattr(tts, "is_speaking", False):
                     continue
 
-                chan_handle = getattr(cfg, "youtube_channel_handle", "@MassiveGodComplex")
+                chan_handle = cfg.youtube_channel_handle
                 prompt = (
                     f"[VIEWER_JOINED] A new traveler just tuned in to the live broadcast on {chan_handle}. "
                     f"Acknowledge their arrival with transcendent, charismatic presence. "

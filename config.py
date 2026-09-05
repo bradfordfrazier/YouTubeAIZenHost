@@ -178,6 +178,7 @@ class AppConfig:
     eco_mode_enabled: bool = os.getenv("ECO_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
     max_responses_per_minute: int = _get_int("MAX_RESPONSES_PER_MINUTE", 12)
     max_responses_per_hour: int = _get_int("MAX_RESPONSES_PER_HOUR", 120)
+    max_comment_queue_size: int = _get_int("MAX_COMMENT_QUEUE_SIZE", 5)
 
     # Spontaneous Idle Commentary & Adaptive Backoff
     spontaneous_commentary_enabled: bool = os.getenv("SPONTANEOUS_COMMENTARY_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -190,8 +191,7 @@ class AppConfig:
     # --------------------------------------------------------------------------
     # 6. Neural TTS Settings (Dual-Backend: ChatterBox Turbo on LAN / Edge-TTS Failback)
     # --------------------------------------------------------------------------
-    tts_backend: str = os.getenv("TTS_BACKEND", "chatterbox")  # "chatterbox" | "edge"
-    tts_engine: str = os.getenv("TTS_ENGINE", os.getenv("TTS_BACKEND", "chatterbox"))
+    tts_backend: str = os.getenv("TTS_BACKEND", os.getenv("TTS_ENGINE", "chatterbox"))  # "chatterbox" | "edge"
     tts_server_url: str = os.getenv("TTS_SERVER_URL", "http://192.168.0.115:8123")
     tts_reference_voice: str = os.getenv("TTS_REFERENCE_VOICE", "cohost.wav")
     tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 4.0)

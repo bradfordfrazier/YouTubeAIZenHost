@@ -99,6 +99,7 @@ This reference documents every configuration parameter in `config.py`, its envir
 
 | Key | Environment Variable | Type | Default Value | Description | Read By |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| `vox_only_mode` | `VOX_ONLY_MODE` | `bool` | `False` | Pinned question remains visible during speech; spoken text is never rendered | `visualizer.py`, `app.py` |
 | `visualizer_aspect_ratio` | `VISUALIZER_ASPECT_RATIO` | `str` | `"16:9"` | Aspect ratio (`16:9` landscape / `9:16` vertical) | `visualizer.py`, `app.py` |
 | `visualizer_width` | `VISUALIZER_WIDTH` | `int` | `1920` (or `1080`) | Visualizer canvas width in pixels | `visualizer.py`, `ndi_streamer.py`, `render_worker.py` |
 | `visualizer_height` | `VISUALIZER_HEIGHT` | `int` | `1080` (or `1920`) | Visualizer canvas height in pixels | `visualizer.py`, `ndi_streamer.py`, `render_worker.py` |

@@ -158,7 +158,7 @@ def test_fast_thinking_budget_for_viewer_join():
     brain = AIBrain()
     prompt = "[VIEWER_JOINED] A sole viewer has entered the stream. (Concurrent viewers: 1)."
 
-    is_deep = brain._classify_prompt_depth(prompt)
+    is_deep, _ = brain._classify_prompt_depth(prompt)
     assert not is_deep, "Expected [VIEWER_JOINED] to classify as fast (not deep)"
 
     gen_cfg = brain._build_generate_content_config(is_deep=is_deep)
@@ -301,7 +301,7 @@ def test_motto_delay_configurable():
         vis = Visualizer(width=1920, height=1080)
         vis.set_subtitle("Testing custom motto delay.")
         for _ in range(10):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Testing custom motto delay.", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "Testing custom motto delay.", True, pinned_chat_message=None)
         assert vis.ai_text_state == "steady"
 
         vis.clear_subtitle()
@@ -309,7 +309,7 @@ def test_motto_delay_configurable():
 
         # Fade out takes ~6 frames at 60fps
         for _ in range(10):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", True, pinned_chat_message=None)
 
         # Should be in motto_pause with ~3.0s timer remaining
         assert vis.ai_text_state == "motto_pause"
@@ -318,13 +318,13 @@ def test_motto_delay_configurable():
 
         # Advance 60 frames (1.0s at 60fps) -> still in motto_pause with ~1.9s remaining
         for _ in range(60):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", True, pinned_chat_message=None)
         assert vis.ai_text_state == "motto_pause"
         assert 1.5 <= vis.motto_pause_timer <= 2.0
 
         # Advance another 130 frames (~2.16s) -> pause expires, motto enters fade_in
         for _ in range(130):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", True, pinned_chat_message=None)
         assert vis.ai_text_state in ("fade_in", "steady")
         assert vis.ai_text_current == config.motto_phrase
 
@@ -333,7 +333,7 @@ def test_motto_delay_configurable():
         vis2 = Visualizer(width=1920, height=1080)
         vis2.set_subtitle("Testing zero motto delay.")
         for _ in range(10):
-            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Testing zero motto delay.", pinned_chat_message=None)
+            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "Testing zero motto delay.", True, pinned_chat_message=None)
         assert vis2.ai_text_state == "steady"
 
         vis2.clear_subtitle()
@@ -341,7 +341,7 @@ def test_motto_delay_configurable():
 
         # Step through fade_out frames
         for _ in range(10):
-            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis2.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", True, pinned_chat_message=None)
 
         # With 0.0s delay, motto immediately transitions to fade_in/steady without hanging in motto_pause
         assert vis2.ai_text_state in ("fade_in", "steady")

@@ -1,7 +1,7 @@
 """
 Dedicated 60 FPS Rendering Process & Visualizer Proxy (Phase 5).
-Decouples Pygame 1080p60 GPU rendering and NDI video transmission into a dedicated
-multiprocessing worker process, communicating via shared memory for low-latency audio metrics
+Decouples Pygame 1080p60 GPU rendering and NDI video/audio transmission into a dedicated
+multiprocessing worker process, communicating via shared memory for low-latency audio metrics & audio ring buffer
 and a thread-safe Queue for state transitions and visual controls.
 """
 
@@ -22,18 +22,26 @@ from config import config
 logger = logging.getLogger("render_worker")
 
 # Shared memory format:
-# offset 0:  float32 rms (4 bytes)
-# offset 4:  uint8 is_speaking (1 byte)
-# offset 5:  uint8 padding [3 bytes]
-# offset 8:  float32 spectrum [32 bins * 4 bytes = 128 bytes]
-# offset 136: float64 timestamp (8 bytes)
-# Total size: 144 bytes
-AUDIO_SHM_SIZE = 144
+# offset 0:    float32 rms (4 bytes)
+# offset 4:    uint8 is_speaking (1 byte)
+# offset 5:    uint8 padding [3 bytes]
+# offset 8:    float32 spectrum [32 bins * 4 bytes = 128 bytes]
+# offset 136:  float64 timestamp (8 bytes)
+# offset 144:  uint32 write_pos (4 bytes)
+# offset 148:  uint32 read_pos (4 bytes)
+# offset 152:  uint32 available_samples (4 bytes)
+# offset 156:  uint8 padding [4 bytes]
+# offset 160:  float32 audio_ring_buffer [48000 frames * 2 channels * 4 bytes = 384000 bytes]
+# Total size:  384160 bytes
+RING_BUFFER_FRAMES = 48000
+AUDIO_METRICS_HEADER_SIZE = 160
+AUDIO_DATA_BYTE_SIZE = RING_BUFFER_FRAMES * 2 * 4  # 384000 bytes
+AUDIO_SHM_SIZE = AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE
 AUDIO_SHM_NAME = "iam_audio_metrics_shm"
 
 
 class AudioMetricsSharedMemory:
-    """Fast zero-copy shared memory interface for real-time audio reactivity."""
+    """Fast zero-copy shared memory interface for real-time audio reactivity and audio transmission."""
 
     def __init__(self, name: str = AUDIO_SHM_NAME, create: bool = False):
         self.name = name
@@ -79,6 +87,76 @@ class AudioMetricsSharedMemory:
         struct.pack_into("=fB3x", buf, 0, float(rms), 1 if is_speaking else 0)
         buf[8:136] = sp_padded.tobytes()
         struct.pack_into("=d", buf, 136, ts)
+
+    def write_audio_samples(self, audio: np.ndarray):
+        """Appends stereo float32 audio samples into the shared memory ring buffer."""
+        if not self.shm or audio is None or len(audio) == 0:
+            return
+        if audio.ndim == 1:
+            audio = np.column_stack((audio, audio))
+        elif audio.shape[1] == 1:
+            audio = np.column_stack((audio[:, 0], audio[:, 0]))
+        audio = np.ascontiguousarray(audio, dtype=np.float32)
+
+        n_samples = len(audio)
+        buf = self.shm.buf
+        write_pos, read_pos, avail = struct.unpack_from("=III", buf, 144)
+
+        audio_mem = np.frombuffer(
+            buf[AUDIO_METRICS_HEADER_SIZE : AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE],
+            dtype=np.float32,
+        ).reshape((RING_BUFFER_FRAMES, 2))
+
+        if write_pos + n_samples <= RING_BUFFER_FRAMES:
+            audio_mem[write_pos : write_pos + n_samples] = audio
+        else:
+            part1 = RING_BUFFER_FRAMES - write_pos
+            part2 = n_samples - part1
+            audio_mem[write_pos : RING_BUFFER_FRAMES] = audio[:part1]
+            part2_capped = min(part2, RING_BUFFER_FRAMES)
+            audio_mem[:part2_capped] = audio[part1 : part1 + part2_capped]
+
+        new_write_pos = (write_pos + n_samples) % RING_BUFFER_FRAMES
+        new_avail = min(RING_BUFFER_FRAMES, avail + n_samples)
+        struct.pack_into("=III", buf, 144, new_write_pos, read_pos, new_avail)
+
+    def read_audio_samples(self, num_samples: int = 800) -> np.ndarray:
+        """Reads exactly num_samples stereo float32 samples from the shared memory ring buffer."""
+        if not self.shm:
+            return np.zeros((num_samples, 2), dtype=np.float32)
+
+        buf = self.shm.buf
+        write_pos, read_pos, avail = struct.unpack_from("=III", buf, 144)
+
+        out_audio = np.zeros((num_samples, 2), dtype=np.float32)
+        to_read = min(num_samples, avail)
+
+        if to_read > 0:
+            audio_mem = np.frombuffer(
+                buf[AUDIO_METRICS_HEADER_SIZE : AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE],
+                dtype=np.float32,
+            ).reshape((RING_BUFFER_FRAMES, 2))
+            if read_pos + to_read <= RING_BUFFER_FRAMES:
+                out_audio[:to_read] = audio_mem[read_pos : read_pos + to_read]
+            else:
+                part1 = RING_BUFFER_FRAMES - read_pos
+                part2 = to_read - part1
+                out_audio[:part1] = audio_mem[read_pos : RING_BUFFER_FRAMES]
+                out_audio[part1:to_read] = audio_mem[:part2]
+
+            new_read_pos = (read_pos + to_read) % RING_BUFFER_FRAMES
+            new_avail = max(0, avail - to_read)
+            struct.pack_into("=III", buf, 144, write_pos, new_read_pos, new_avail)
+
+        return out_audio
+
+    def clear_audio(self):
+        """Resets the shared memory audio ring buffer."""
+        if not self.shm:
+            return
+        buf = self.shm.buf
+        struct.pack_into("=III", buf, 144, 0, 0, 0)
+        buf[AUDIO_METRICS_HEADER_SIZE : AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE] = b"\x00" * AUDIO_DATA_BYTE_SIZE
 
     def read(self) -> Dict[str, Any]:
         """Reads live audio metrics from shared memory in the render worker process."""
@@ -134,7 +212,7 @@ def render_worker_main(
 ):
     """
     Dedicated 60 FPS Pygame Render Worker process.
-    Owns the Visualizer canvas, window events, and NDI video broadcaster.
+    Owns the Visualizer canvas, window events, and single-owner NDI broadcaster.
     Runs completely decoupled from Python asyncio event loop and TTS synthesis.
     """
     # Set process title and Windows process priority for rock-solid 60 FPS cadence
@@ -157,10 +235,10 @@ def render_worker_main(
     from visualizer import Visualizer
     from ndi_streamer import NDIStreamer
 
-    # Attach to shared memory for audio metrics
+    # Attach to shared memory for audio metrics & audio ring buffer
     shm = AudioMetricsSharedMemory(name=shm_name, create=False)
 
-    # Initialize Visualizer and NDI Streamer in this process
+    # Initialize Visualizer and single-owner NDI Streamer in this process
     visualizer = Visualizer()
     ndi = NDIStreamer()
     ndi.open()
@@ -177,6 +255,7 @@ def render_worker_main(
     }
 
     target_frame_time = 1.0 / visualizer.fps  # ~16.666 ms
+    samples_per_frame = int(visualizer.sample_rate // visualizer.fps)  # 800 samples per 60fps frame @ 48kHz
     t_next_frame = time.perf_counter()
     frame_count = 0
     t_last_fps_log = time.time()
@@ -216,8 +295,9 @@ def render_worker_main(
             if stop_event.is_set():
                 break
 
-            # 2. Read live audio metrics from shared memory
+            # 2. Read live audio metrics and synchronized frame audio packet from shared memory
             audio_metrics = shm.read()
+            audio_packet = shm.read_audio_samples(samples_per_frame)
 
             # 3. Render high-res 1080p60 frame
             rgba_bytes = visualizer.render_frame(
@@ -231,9 +311,9 @@ def render_worker_main(
                 pinned_chat_message=state["pinned_chat_message"],
             )
 
-            # 4. Transmit video frame over NDI
+            # 4. Transmit frame-locked synchronized video + audio atomically over NDI
             if ndi.is_open:
-                ndi.send_video(rgba_bytes)
+                ndi.send_frame_sync(rgba_bytes, audio_packet)
 
             # 5. Export lightweight flags to proxy
             is_promo_active_val.value = 1 if getattr(visualizer, "is_promo_active", False) else 0
@@ -246,13 +326,18 @@ def render_worker_main(
             if time.time() - t_last_fps_log >= 10.0:
                 elapsed = time.time() - t_last_fps_log
                 fps = frame_count / elapsed
-                logger.info(f"🎨 [Render Worker] Rendering: {fps:.1f} FPS (NDI Video Active)")
+                logger.info(f"🎨 [Render Worker] Rendering: {fps:.1f} FPS (NDI Video & Audio Active)")
                 frame_count = 0
                 t_last_fps_log = time.time()
 
-            # 6. Precise 60 FPS pacing
+            # 6. Precise 60 FPS pacing with clock drift reset
             t_next_frame += target_frame_time
-            sleep_sec = t_next_frame - time.perf_counter()
+            now_perf = time.perf_counter()
+            # If render worker lagged by >50ms (3+ frames), reset timing cursor to current clock to avoid hitch bursts
+            if now_perf - t_next_frame > 0.050:
+                t_next_frame = now_perf
+
+            sleep_sec = t_next_frame - now_perf
             if sleep_sec > 0.002:
                 time.sleep(sleep_sec - 0.001)
             while time.perf_counter() < t_next_frame:
@@ -283,6 +368,7 @@ class VisualizerProxy:
         self.width = self.cfg.visualizer_width
         self.height = self.cfg.visualizer_height
         self.fps = self.cfg.visualizer_fps
+        self.sample_rate = getattr(self.cfg, "tts_sample_rate", 48000)
         self.current_mood = "chill"
         self.ai_text_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
 
@@ -344,6 +430,14 @@ class VisualizerProxy:
         """Fast path: updates audio shared memory from TTS audio callback or pump."""
         self.audio_shm.write(rms=rms, is_speaking=is_speaking, spectrum=spectrum, timestamp=timestamp)
 
+    def push_audio_samples(self, audio: np.ndarray):
+        """Pushes stereo float32 audio samples into shared memory for synchronized NDI broadcast."""
+        self.audio_shm.write_audio_samples(audio)
+
+    def clear_audio_buffer(self):
+        """Flushes the shared memory audio buffer."""
+        self.audio_shm.clear_audio()
+
     def set_mood(self, mood: str):
         """Sets visualizer color and particle mood."""
         self.current_mood = (mood or "neutral").strip().lower()
@@ -356,6 +450,7 @@ class VisualizerProxy:
 
     def fade_out_for_turn(self):
         """Initiates smooth fade-out for speech turn canvas preparation."""
+        self.ai_text_state = "fade_out"
         self._send_cmd("FADE_OUT_FOR_TURN", None)
 
     def fade_out_question(self):
@@ -365,6 +460,7 @@ class VisualizerProxy:
     def clear_subtitle(self):
         """Resets subtitle / question to subtle motto."""
         self.ai_text_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.ai_text_state = "fade_in"
         self._send_cmd("CLEAR_SUBTITLE", None)
 
     def trigger_celebration(self, duration: float = 5.0, count: int = 140):

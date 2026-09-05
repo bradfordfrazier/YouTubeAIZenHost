@@ -277,6 +277,7 @@ class Visualizer:
         self.width = width or self.cfg.visualizer_width  # 1920 (16:9) or 1080 (9:16)
         self.height = height or self.cfg.visualizer_height  # 1080 (16:9) or 1920 (9:16)
         self.fps = self.cfg.visualizer_fps  # 60
+        self.sample_rate = getattr(self.cfg, "tts_sample_rate", 48000)
         self.host_name = self.cfg.ai_host_name
         self.is_vertical = (self.height > self.width)
 
@@ -816,7 +817,7 @@ class Visualizer:
                 if self.window_size == (self.width, self.height):
                     self.window_surf.blit(self.screen, (0, 0))
                 else:
-                    pygame.transform.smoothscale(self.screen, self.window_size, self.window_surf)
+                    pygame.transform.scale(self.screen, self.window_size, self.window_surf)
                 pygame.display.flip()
 
         # Return full pristine RGBA buffer for NDI (always 1080x1920 or 1920x1080)
@@ -1139,7 +1140,7 @@ class Visualizer:
         pygame.draw.rect(self.screen, c_high, (bx, by, badge_w, badge_h), width=1, border_radius=badge_h // 2)
 
         label_str = f"•  {self.cohost_name.upper()}  •"
-        label_rend = self.font_god_badge.render(label_str, True, c_high)
+        label_rend = self._render_text(self.font_god_badge, label_str, c_high)
         self.screen.blit(label_rend, (cx - label_rend.get_width() // 2, by + (badge_h - label_rend.get_height()) // 2))
 
     def _draw_top_header(
@@ -1173,23 +1174,23 @@ class Visualizer:
             badge_text = "STANDBY"
 
         pygame.draw.circle(self.screen, dot_color, (30, dot_y), dot_r)
-        live_txt = self.font_badge.render(badge_text, True, dot_color)
+        live_txt = self._render_text(self.font_badge, badge_text, dot_color)
         self.screen.blit(live_txt, (48, txt_y))
 
         # Mood Badge
         c_prim = tuple(int(c) for c in self.c_primary)
-        mood_txt = self.font_badge.render(f"MOOD: {self.current_mood.upper()}", True, c_prim)
+        mood_txt = self._render_text(self.font_badge, f"MOOD: {self.current_mood.upper()}", c_prim)
 
         if self.is_vertical:
             self.screen.blit(mood_txt, (360, txt_y))
-            ndi_txt = self.font_badge.render("NDI: 9:16", True, (160, 200, 255))
+            ndi_txt = self._render_text(self.font_badge, "NDI: 9:16", (160, 200, 255))
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
         else:
             obs_color = (0, 240, 150) if obs_connected else (220, 180, 50)
-            obs_txt = self.font_badge.render(f"OBS WS: {'ACTIVE' if obs_connected else 'WAITING'}", True, obs_color)
+            obs_txt = self._render_text(self.font_badge, f"OBS WS: {'ACTIVE' if obs_connected else 'WAITING'}", obs_color)
             self.screen.blit(obs_txt, (360, txt_y))
             self.screen.blit(mood_txt, (640, txt_y))
-            ndi_txt = self.font_badge.render(f"NDI: {self.cfg.ndi_stream_name} (1080p60)", True, (160, 200, 255))
+            ndi_txt = self._render_text(self.font_badge, f"NDI: {self.cfg.ndi_stream_name} (1080p60)", (160, 200, 255))
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
 
     def _draw_cast_badge(self, surface: pygame.Surface, x: int, y: int, alpha: float = 1.0) -> int:
@@ -1199,9 +1200,7 @@ class Visualizer:
         """
         badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
         badge_tag = f"{badge_label}"
-        badge_txt = self.font_callout_tag.render(badge_tag, True, (240, 185, 255))
-        alpha_int = int(np.clip(alpha * 255, 0, 255))
-        badge_txt.set_alpha(alpha_int)
+        badge_txt = self._render_text(self.font_callout_tag, badge_tag, (240, 185, 255))
 
         pad_w = 6 if self.is_vertical else 5
         pad_h = 2 if self.is_vertical else 1
@@ -1214,6 +1213,8 @@ class Visualizer:
         # Border: vibrant neon purple accent
         pygame.draw.rect(pill_surf, (215, 140, 255, int(230 * alpha)), (0, 0, badge_w, badge_h), width=1, border_radius=4)
         pill_surf.blit(badge_txt, (pad_w, pad_h))
+        if alpha < 0.999:
+            pill_surf.set_alpha(int(np.clip(alpha * 255, 0, 255)))
 
         surface.blit(pill_surf, (x, y))
         return badge_w
@@ -1250,14 +1251,14 @@ class Visualizer:
 
         # "LIVE CHAT" Text
         text_x = icon_x + 28
-        tag_txt_sh = self.font_badge.render("LIVE CHAT", True, (0, 0, 0))
-        tag_txt = self.font_badge.render("LIVE CHAT", True, (255, 195, 60))
+        tag_txt_sh = self._render_text(self.font_badge, "LIVE CHAT", (0, 0, 0))
+        tag_txt = self._render_text(self.font_badge, "LIVE CHAT", (255, 195, 60))
         self.surf_chat_card.blit(tag_txt_sh, (text_x + 1, icon_y + 1))
         self.surf_chat_card.blit(tag_txt, (text_x, icon_y))
 
         # 2. Iconic Pulsing Live Broadcast Glow Dot + "FEED" Label
-        feed_lbl_sh = self.font_badge.render("FEED", True, (0, 0, 0))
-        feed_lbl = self.font_badge.render("FEED", True, (0, 240, 150))
+        feed_lbl_sh = self._render_text(self.font_badge, "FEED", (0, 0, 0))
+        feed_lbl = self._render_text(self.font_badge, "FEED", (0, 240, 150))
         feed_w = feed_lbl.get_width()
         feed_x = card_w - feed_w - pad_x
         feed_y = icon_y
@@ -1410,8 +1411,7 @@ class Visualizer:
 
             # Top right "PINNED QUESTION" badge pill inside pinned container
             pin_badge_tag = "PINNED QUESTION"
-            pin_badge_txt = self.font_callout_tag.render(pin_badge_tag, True, (255, 215, 0))
-            pin_badge_txt.set_alpha(pin_alpha_int)
+            pin_badge_txt = self._render_text(self.font_callout_tag, pin_badge_tag, (255, 215, 0))
             pin_badge_w = pin_badge_txt.get_width() + 16
             pin_badge_h = 20 if self.is_vertical else 18
             pin_badge_x = pin_box_w - pin_badge_w - 8
@@ -1423,8 +1423,8 @@ class Visualizer:
             # Author line inside pinned container (100% opaque text)
             pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
             pin_auth_str = f"{pin_clean_auth}{pin_sc_str}:"
-            auth_sh = self.font_chat_author.render(pin_auth_str, True, (0, 0, 0))
-            auth_rend = self.font_chat_author.render(pin_auth_str, True, pin_auth_col)
+            auth_sh = self._render_text(self.font_chat_author, pin_auth_str, (0, 0, 0))
+            auth_rend = self._render_text(self.font_chat_author, pin_auth_str, pin_auth_col)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
             pin_surf.blit(auth_rend, (10, 6))
 
@@ -1437,8 +1437,8 @@ class Visualizer:
             msg_y_start = 6 + auth_h - (2 if self.is_vertical else 0)
             for idx, l_text in enumerate(display_pin_lines):
                 line_y = msg_y_start + idx * line_h
-                line_sh = self.font_chat_msg.render(l_text, True, (0, 0, 0))
-                line_rend = self.font_chat_msg.render(l_text, True, (255, 255, 255))
+                line_sh = self._render_text(self.font_chat_msg, l_text, (0, 0, 0))
+                line_rend = self._render_text(self.font_chat_msg, l_text, (255, 255, 255))
                 pin_surf.blit(line_sh, (10 + sh_off, line_y + sh_off))
                 pin_surf.blit(line_rend, (10, line_y))
 
@@ -1528,8 +1528,8 @@ class Visualizer:
         recent_chats = list(reversed(prepared_chats))
 
         if not recent_chats and not is_pinned_at_top:
-            empty_txt_sh = self.font_chat_msg.render("(Waiting for live chat...)", True, (0, 0, 0))
-            empty_txt = self.font_chat_msg.render("(Waiting for live chat...)", True, (140, 165, 200))
+            empty_txt_sh = self._render_text(self.font_chat_msg, "(Waiting for live chat...)", (0, 0, 0))
+            empty_txt = self._render_text(self.font_chat_msg, "(Waiting for live chat...)", (140, 165, 200))
             self.surf_chat_card.blit(empty_txt_sh, (pad_x + 1, y_offset + 1))
             self.surf_chat_card.blit(empty_txt, (pad_x, y_offset))
         else:
@@ -1575,9 +1575,9 @@ class Visualizer:
 
                 # Standard & Active text rendering at exact same fixed coordinates
                 auth_str = f"{clean_author}{sc_badge_str}:"
-                auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
+                auth_sh = self._render_text(self.font_chat_author, auth_str, (0, 0, 0))
                 self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
-                auth_rend = self.font_chat_author.render(auth_str, True, author_color)
+                auth_rend = self._render_text(self.font_chat_author, auth_str, author_color)
                 self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
 
                 if is_cast:
@@ -1588,9 +1588,9 @@ class Visualizer:
                 msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
                 for line_idx, line_text in enumerate(display_lines):
                     line_y = msg_start_y + line_idx * line_h
-                    line_sh = self.font_chat_msg.render(line_text, True, (0, 0, 0))
+                    line_sh = self._render_text(self.font_chat_msg, line_text, (0, 0, 0))
                     self.surf_chat_card.blit(line_sh, (pad_x + sh_off, line_y + sh_off))
-                    line_rend = self.font_chat_msg.render(line_text, True, msg_color)
+                    line_rend = self._render_text(self.font_chat_msg, line_text, msg_color)
                     self.surf_chat_card.blit(line_rend, (pad_x, line_y))
 
                 y_offset += item_h + (12 if self.is_vertical else 10)
@@ -1791,7 +1791,7 @@ class Visualizer:
 
             if is_cast:
                 badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
-                badge_sample_txt = self.font_callout_tag.render(f"{badge_label}", True, (240, 185, 255))
+                badge_sample_txt = self._render_text(self.font_callout_tag, f"{badge_label}", (240, 185, 255))
                 pad_w = 6 if self.is_vertical else 5
                 badge_w = badge_sample_txt.get_width() + (pad_w * 2)
                 total_auth_w = auth_w + 8 + badge_w
@@ -1803,12 +1803,10 @@ class Visualizer:
                 badge_x = 0
                 badge_y = 0
 
-            auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
-            auth_sh.set_alpha(int(alpha_int * 0.9))
+            auth_sh = self._render_text(self.font_chat_author, auth_str, (0, 0, 0))
             self.surf_ai_text.fill((0, 0, 0, 0))
             self.surf_ai_text.blit(auth_sh, (auth_x + sh_off, y_start + sh_off))
-            auth_rend = self.font_chat_author.render(auth_str, True, author_color)
-            auth_rend.set_alpha(alpha_int)
+            auth_rend = self._render_text(self.font_chat_author, auth_str, author_color)
             self.surf_ai_text.blit(auth_rend, (auth_x, y_start))
 
             if is_cast:
@@ -1821,11 +1819,9 @@ class Visualizer:
                 line_x = (card_w - line_w) // 2
                 line_y = msg_y_start + idx * line_h
 
-                line_sh = self.font_ai_subtitle.render(line_txt, True, (0, 0, 0))
-                line_sh.set_alpha(int(alpha_int * 0.9))
+                line_sh = self._render_text(self.font_ai_subtitle, line_txt, (0, 0, 0))
                 self.surf_ai_text.blit(line_sh, (line_x + sh_off, line_y + sh_off))
-                line_rend = self.font_ai_subtitle.render(line_txt, True, (255, 255, 255))
-                line_rend.set_alpha(alpha_int)
+                line_rend = self._render_text(self.font_ai_subtitle, line_txt, (255, 255, 255))
                 self.surf_ai_text.blit(line_rend, (line_x, line_y))
 
             self.surf_ai_text.set_alpha(alpha_int)
@@ -1986,13 +1982,11 @@ class Visualizer:
                 line_x = (card_w - line_w) // 2
 
                 # Crisp dark drop shadow for sharp edge contrast
-                line_sh = self.font_ai_subtitle.render(line, True, (0, 0, 0))
-                line_sh.set_alpha(int(alpha_int * 0.9))
+                line_sh = self._render_text(self.font_ai_subtitle, line, (0, 0, 0))
                 self.surf_ai_text.blit(line_sh, (line_x + 2, cur_y + 2))
 
                 # Mood-matched vibrant text
-                line_rend = self.font_ai_subtitle.render(line, True, mood_color)
-                line_rend.set_alpha(alpha_int)
+                line_rend = self._render_text(self.font_ai_subtitle, line, mood_color)
                 self.surf_ai_text.blit(line_rend, (line_x, cur_y))
 
             self.surf_ai_text.set_alpha(alpha_int)
@@ -2168,8 +2162,8 @@ class Visualizer:
 
         # 2. Centered Title Row: Celestial Question Badge + Title (Centered Lockup)
         title_str = "Ask Anything"
-        title_rend = self.font_callout_title.render(title_str, True, (255, 250, 230))
-        sh_rend = self.font_callout_title.render(title_str, True, (180, 140, 20))
+        title_rend = self._render_text(self.font_callout_title, title_str, (255, 250, 230))
+        sh_rend = self._render_text(self.font_callout_title, title_str, (180, 140, 20))
 
         badge_r = 19 if self.is_vertical else 16
         lockup_gap = 14
@@ -2196,7 +2190,7 @@ class Visualizer:
         pygame.draw.circle(surf, (0, 240, 255, 140), (badge_cx, badge_cy), badge_r - 4, 1)
 
         # White Question Mark Glyph
-        q_rend = self.font_callout_icon.render("?", True, (255, 255, 255))
+        q_rend = self._render_text(self.font_callout_icon, "?", (255, 255, 255))
         surf.blit(q_rend, (badge_cx - q_rend.get_width() // 2, badge_cy - q_rend.get_height() // 2 - 1))
 
         # Title Blit with shadow
@@ -2205,11 +2199,11 @@ class Visualizer:
 
         # 3. Bottom Subtitle Row (Centered & fully visible)
         sub_str = "You already know the answer but I enjoy the theater"
-        sub_rend = self.font_callout_sub.render(sub_str, True, (195, 225, 255))
+        sub_rend = self._render_text(self.font_callout_sub, sub_str, (195, 225, 255))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)
         sub_y = 78 if self.is_vertical else 68
-        sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
+        sh_sub = self._render_text(self.font_callout_sub, sub_str, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 
@@ -2252,8 +2246,8 @@ class Visualizer:
 
         # 2. Centered Title Row: YouTube & Bell Badge + Title (Centered Lockup)
         title_str = "Subscribing Changes Nothing."
-        title_rend = self.font_callout_title.render(title_str, True, (255, 245, 245))
-        sh_rend = self.font_callout_title.render(title_str, True, (160, 20, 50))
+        title_rend = self._render_text(self.font_callout_title, title_str, (255, 245, 245))
+        sh_rend = self._render_text(self.font_callout_title, title_str, (160, 20, 50))
 
         pill_w, pill_h = (48, 30) if self.is_vertical else (40, 26)
         badge_area_w = pill_w + (16 if self.is_vertical else 12)
@@ -2320,11 +2314,11 @@ class Visualizer:
 
         # 3. Bottom Subtitle Row (Centered & fully visible)
         sub_str = "It is, however, appreciated • Ring bell for live alerts"
-        sub_rend = self.font_callout_sub.render(sub_str, True, (255, 220, 205))
+        sub_rend = self._render_text(self.font_callout_sub, sub_str, (255, 220, 205))
         sub_w = sub_rend.get_width()
         sub_x = max(20, (w - sub_w) // 2)
         sub_y = 78 if self.is_vertical else 68
-        sh_sub = self.font_callout_sub.render(sub_str, True, (0, 0, 0))
+        sh_sub = self._render_text(self.font_callout_sub, sub_str, (0, 0, 0))
         surf.blit(sh_sub, (sub_x + 1, sub_y + 1))
         surf.blit(sub_rend, (sub_x, sub_y))
 

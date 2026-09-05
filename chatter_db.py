@@ -88,6 +88,7 @@ class ChatterDB:
         self.db_path = Path(db_path).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()
         self.profiles: Dict[str, ChatterProfile] = {}
         self._cast_handles: Set[str] = {
             "existentialdave", "speedrunnerkyle", "astralbrenda", "trollchad",
@@ -159,16 +160,25 @@ class ChatterDB:
                     notes=[f"Archetype: {title}. {note}"],
                 )
 
+    def _schedule_save(self):
+        """Asynchronously writes an in-memory snapshot to disk without blocking the main event loop."""
+        out_data = {k: v.to_dict() for k, v in self.profiles.items()}
+        threading.Thread(target=self._write_snapshot_to_disk, args=(out_data,), daemon=True).start()
+
+    def _write_snapshot_to_disk(self, snapshot: Dict[str, Any]):
+        with self._save_lock:
+            try:
+                temp_path = self.db_path.with_suffix(".tmp")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(snapshot, f, indent=2, ensure_ascii=False)
+                temp_path.replace(self.db_path)
+            except Exception as e:
+                logger.warning(f"Failed to persist ChatterDB to {self.db_path}: {e}")
+
     def _save_unlocked(self):
-        """Writes in-memory profiles to disk atomically."""
-        try:
-            temp_path = self.db_path.with_suffix(".tmp")
-            out_data = {k: v.to_dict() for k, v in self.profiles.items()}
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(out_data, f, indent=2, ensure_ascii=False)
-            temp_path.replace(self.db_path)
-        except Exception as e:
-            logger.warning(f"Failed to persist ChatterDB to {self.db_path}: {e}")
+        """Synchronously writes in-memory profiles to disk atomically."""
+        out_data = {k: v.to_dict() for k, v in self.profiles.items()}
+        self._write_snapshot_to_disk(out_data)
 
     def get_returning_viewers(self) -> List[ChatterProfile]:
         """Returns profiles of real human returning viewers (strictly excludes cast members)."""
@@ -220,7 +230,7 @@ class ChatterDB:
                 self.profiles[norm] = p
             # Extract basic significant topics/keywords
             self._extract_topics(p, message)
-            self._save_unlocked()
+            self._schedule_save()
             return p
 
     def add_note(self, handle: str, note: str):
@@ -233,7 +243,7 @@ class ChatterDB:
                     p.notes.append(note)
                     if len(p.notes) > 10:
                         p.notes.pop(0)
-                    self._save_unlocked()
+                    self._schedule_save()
 
     def get_profile(self, handle: str) -> Optional[ChatterProfile]:
         """Looks up a chatter profile by handle."""

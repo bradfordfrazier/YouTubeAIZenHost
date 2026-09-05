@@ -34,9 +34,12 @@ async def run_smoothness_test():
         "synchronized at 60 frames per second over NDI directly to OBS Studio."
     )
     print(f"-> Synthesizing test audio ({len(speech_phrase)} chars)...")
-    await tts.queue_speech(speech_phrase)
-    buf_dur = len(tts._audio_buffer_ndi) / 48000
-    print(f"-> Queued Audio Duration: {buf_dur:.2f} seconds ({len(tts._audio_buffer_ndi)} samples)")
+    audio_data = await tts.synthesize(speech_phrase)
+    tts.begin_utterance()
+    tts.push_audio(audio_data)
+    tts.end_utterance()
+    buf_dur = tts.get_buffered_duration()
+    print(f"-> Queued Audio Duration: {buf_dur:.2f} seconds")
 
     # 2. Run 300 frames (5.0 seconds) of synchronized frame-locked broadcasting
     total_frames = 300
@@ -74,8 +77,12 @@ async def run_smoothness_test():
         t_used = t_frame_end - t_frame_start
         frame_durations.append(t_used)
 
-        sleep_time = max(0.001, target_frame_dt - t_used)
-        await asyncio.sleep(sleep_time)
+        t_target = t_start + (frame_idx + 1) * target_frame_dt
+        sleep_time = t_target - time.perf_counter()
+        if sleep_time > 0.002:
+            await asyncio.sleep(sleep_time - 0.001)
+        while time.perf_counter() < t_target:
+            pass
 
     t_total = time.perf_counter() - t_start
     actual_fps = total_frames / t_total

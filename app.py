@@ -746,6 +746,8 @@ class LocalCoHostApp:
             if self.active_turn_task and not self.active_turn_task.done():
                 self.active_turn_task.cancel()
             self.tts.clear_audio_buffer()
+            if hasattr(self.visualizer, "clear_audio_buffer"):
+                self.visualizer.clear_audio_buffer()
             event.priority = 0
             heapq.heappush(self.comment_queue, event)
             if self.new_comment_signal:
@@ -940,6 +942,8 @@ class LocalCoHostApp:
                 self.tts.begin_utterance()
                 first_audio_ts = time.perf_counter()
                 self.tts.push_audio(cached_g.audio)
+                if hasattr(self.visualizer, "push_audio_samples"):
+                    self.visualizer.push_audio_samples(cached_g.audio)
                 self.tts.end_utterance()
                 pushed_chunks = 1
 
@@ -949,102 +953,60 @@ class LocalCoHostApp:
                 )
                 await self.tts.wait_until_speech_completed()
             else:
-                # Sentence-Pipelined Generation & Speech Synthesis (Producer/Consumer Pattern)
-                sentence_queue: asyncio.Queue = asyncio.Queue()
-                collected_sentences: List[str] = []
+                # 3. Stream from Gemini AI Brain
+                async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
+                    ev_type = chunk_ev.get("type", "")
+                    if ev_type == "mood":
+                        active_mood = chunk_ev.get("mood", "chill")
+                        self.visualizer.set_mood(active_mood)
+                    elif ev_type == "token":
+                        if first_token_ts is None:
+                            first_token_ts = time.perf_counter()
+                    elif ev_type == "sentence":
+                        if first_sentence_ts is None:
+                            first_sentence_ts = time.perf_counter()
+                    elif ev_type == "complete":
+                        full_statement = chunk_ev.get("full_text", "").strip()
+                        active_mood = chunk_ev.get("mood", active_mood)
+                        is_completed = True
 
-                async def _stream_producer():
-                    nonlocal first_token_ts, first_sentence_ts, active_mood, full_statement, is_completed
-                    sent_count = 0
+                clean_speech = re.sub(r"@+", "@", full_statement).strip()
+
+                if is_completed and clean_speech:
+                    # 4. Synthesize complete statement (guarantees seamless audio buffer without mid-sentence dropouts)
                     try:
-                        async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
-                            ev_type = chunk_ev.get("type", "")
-                            if ev_type == "mood":
-                                active_mood = chunk_ev.get("mood", "chill")
-                                self.visualizer.set_mood(active_mood)
-                            elif ev_type == "token":
-                                if first_token_ts is None:
-                                    first_token_ts = time.perf_counter()
-                            elif ev_type == "sentence":
-                                if first_sentence_ts is None:
-                                    first_sentence_ts = time.perf_counter()
-                                s_text = chunk_ev.get("text", "").strip()
-                                s_mood = chunk_ev.get("mood", active_mood)
-                                if s_text:
-                                    sent_count += 1
-                                    await sentence_queue.put((s_text, s_mood))
-                            elif ev_type == "complete":
-                                full_statement = chunk_ev.get("full_text", "").strip()
-                                active_mood = chunk_ev.get("mood", active_mood)
-                                is_completed = True
-
-                        # Safety fallback: If stream completed but 0 sentence events were emitted
-                        if sent_count == 0 and full_statement:
-                            if first_sentence_ts is None:
-                                first_sentence_ts = time.perf_counter()
-                            s_list, _ = self.brain._extract_completed_sentences(full_statement + " ")
-                            if not s_list:
-                                s_list = [full_statement]
-                            for s in s_list:
-                                await sentence_queue.put((s, active_mood))
-                    except Exception as pe:
-                        logger.error(f"Error in turn streaming producer: {pe}", exc_info=True)
-                    finally:
-                        await sentence_queue.put(None)  # Sentinel
-
-                prod_task = asyncio.create_task(_stream_producer())
-
-                # Consumer: Synthesizes and pushes chunks as they stream in
-                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
-
-                while True:
-                    item = await sentence_queue.get()
-                    if item is None:
-                        break
-                    s_text, s_mood = item
-                    s_clean = re.sub(r"@+", "@", s_text).strip()
-                    if not s_clean:
-                        continue
-                    collected_sentences.append(s_clean)
-
-                    # Synthesize chunk (bounded by concurrency semaphore)
-                    try:
-                        s_audio = await self.tts.synthesize(s_clean, mood=s_mood)
+                        s_audio = await self.tts.synthesize(clean_speech, mood=active_mood)
                     except TypeError:
-                        s_audio = await self.tts.synthesize(s_clean)
+                        s_audio = await self.tts.synthesize(clean_speech)
 
                     if s_audio is not None and len(s_audio) > 0:
-                        if pushed_chunks == 0:
-                            # Question display hold before pushing first chunk
-                            if question_text and min_time_before_fade_out > 0:
-                                elapsed = time.perf_counter() - t_question_shown
-                                remaining_hold = min_time_before_fade_out - elapsed
-                                if remaining_hold > 0.05:
-                                    logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
-                                    await asyncio.sleep(remaining_hold)
+                        # Question display hold before pushing audio
+                        if question_text and min_time_before_fade_out > 0:
+                            elapsed = time.perf_counter() - t_question_shown
+                            remaining_hold = min_time_before_fade_out - elapsed
+                            if remaining_hold > 0.05:
+                                logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
+                                await asyncio.sleep(remaining_hold)
 
-                            if question_text:
-                                if is_vox_only:
-                                    logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
-                                elif hasattr(self.visualizer, "fade_out_question"):
-                                    self.visualizer.fade_out_question()
-                                    if q_fade_out_sec > 0:
-                                        logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
-                                        await asyncio.sleep(q_fade_out_sec)
+                        is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+                        if question_text:
+                            if is_vox_only:
+                                logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
+                            elif hasattr(self.visualizer, "fade_out_question"):
+                                self.visualizer.fade_out_question()
+                                if q_fade_out_sec > 0:
+                                    logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
+                                    await asyncio.sleep(q_fade_out_sec)
 
-                            self.tts.begin_utterance()
-                            first_audio_ts = time.perf_counter()
-
+                        self.tts.begin_utterance()
+                        first_audio_ts = time.perf_counter()
                         self.tts.push_audio(s_audio)
-                        pushed_chunks += 1
+                        if hasattr(self.visualizer, "push_audio_samples"):
+                            self.visualizer.push_audio_samples(s_audio)
+                        self.tts.end_utterance()
+                        pushed_chunks = 1
 
-                await prod_task
-
-                if pushed_chunks > 0:
-                    self.tts.end_utterance()
-                    await self.tts.wait_until_speech_completed()
-
-                clean_speech = full_statement or " ".join(collected_sentences)
+                        await self.tts.wait_until_speech_completed()
 
             if pushed_chunks > 0 and clean_speech:
                 t_total = time.perf_counter() - t_start
@@ -1160,6 +1122,8 @@ class LocalCoHostApp:
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
             self.tts.clear_audio_buffer()
+            if hasattr(self.visualizer, "clear_audio_buffer"):
+                self.visualizer.clear_audio_buffer()
         except Exception as e:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
@@ -2269,10 +2233,13 @@ class LocalCoHostApp:
 
     def _ndi_audio_pump_worker(self):
         """
-        High-priority isochronous audio pump thread for NDI.
-        Pumps 480 audio samples (10ms @ 48kHz) directly to NDI, completely
-        decoupled from video rendering delays to guarantee zero buffer underruns in OBS.
+        Fallback high-priority isochronous audio pump thread for standalone NDI.
+        When VisualizerProxy is active, NDI video + audio are broadcast atomically
+        inside render_worker.py, so this worker is bypassed to eliminate sender conflicts.
         """
+        if isinstance(self.visualizer, VisualizerProxy):
+            return
+
         packet_samples = 480
         target_interval = packet_samples / 48000.0  # 0.010 s
         t_next = time.perf_counter()
@@ -2326,6 +2293,15 @@ class LocalCoHostApp:
                     ai_subtitle=self.current_ai_subtitle,
                 )
 
+                # 1b. Write audio metrics into shared memory for the render worker
+                metrics = self.tts.get_audio_metrics()
+                if hasattr(self.visualizer, "write_audio_metrics"):
+                    self.visualizer.write_audio_metrics(
+                        rms=metrics.get("rms", 0.0),
+                        is_speaking=metrics.get("is_speaking", False),
+                        spectrum=metrics.get("spectrum"),
+                    )
+
                 # 2. Check if Pygame preview window was closed
                 if getattr(self.visualizer, "should_quit", False):
                     logger.info("Visualizer window closed by user (QUIT event). Shutting down...")
@@ -2378,7 +2354,11 @@ class LocalCoHostApp:
         logger.info(f"Local OBS WebSocket: {self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}")
         logger.info("=" * 65)
 
-        self.ndi.open()
+        # Open in-process NDI Streamer only if visualizer is NOT running via dedicated render worker proxy
+        if not isinstance(self.visualizer, VisualizerProxy):
+            self.ndi.open()
+        else:
+            logger.info("🎬 [Dedicated Render Worker] NDI Video + Audio broadcasting managed atomically in dedicated render process.")
 
         # Perform startup health check on primary TTS backend (e.g. remote Chatterbox server)
         try:
@@ -2386,8 +2366,8 @@ class LocalCoHostApp:
         except Exception as e:
             logger.warning(f"Error during initial TTS health check: {e}")
 
-        # Start high-priority dedicated NDI audio pump thread
-        if getattr(self.cfg, "ndi_audio_enabled", True) and not self.ndi.is_mock:
+        # Start high-priority dedicated NDI audio pump thread only in fallback in-process mode
+        if not isinstance(self.visualizer, VisualizerProxy) and getattr(self.cfg, "ndi_audio_enabled", True) and not self.ndi.is_mock:
             self.ndi_audio_running = True
             self.ndi_audio_thread = threading.Thread(
                 target=self._ndi_audio_pump_worker,

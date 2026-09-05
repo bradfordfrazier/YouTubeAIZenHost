@@ -126,14 +126,6 @@ class TTSEngine:
         if max_val > 0.95:
             data = (data / max_val) * 0.90
 
-        # Apply subtle fade-in / fade-out (5ms = 240 samples) to eliminate click artifacts
-        fade_samples = min(240, len(data) // 4)
-        if fade_samples > 0:
-            fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
-            fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)[:, None]
-            data[:fade_samples] *= fade_in
-            data[-fade_samples:] *= fade_out
-
         return data.astype(np.float32)
 
     async def check_health(self) -> bool:
@@ -301,6 +293,10 @@ class TTSEngine:
         """Returns the duration in seconds of audio currently queued in the playback buffer."""
         with self._buffer_lock:
             return len(self._audio_buffer_ndi) / self.sample_rate
+
+    def get_buffered_duration(self) -> float:
+        """Returns the duration in seconds of audio currently queued in the playback buffer."""
+        return self.remaining_speech_duration
 
     def begin_utterance(self):
         """Begins a new utterance turn, resetting sample counters and marking utterance as open."""
@@ -475,18 +471,32 @@ class TTSEngine:
         Guarantees zero buffer underruns, zero drift, and smooth audio scaling.
         """
         n = num_samples
-        self._last_local_pop_time = time.time()
+        now = time.time()
+        self._last_local_pop_time = now
         with self._buffer_lock:
             if len(self._audio_buffer_local) >= n:
                 packet_audio = self._audio_buffer_local[:n]
                 self._audio_buffer_local = self._audio_buffer_local[n:]
+                has_audio = True
             elif len(self._audio_buffer_local) > 0:
                 rem = len(self._audio_buffer_local)
                 packet_audio = np.zeros((n, 2), dtype=np.float32)
                 packet_audio[:rem] = self._audio_buffer_local
                 self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
+                has_audio = True
             else:
                 packet_audio = np.zeros((n, 2), dtype=np.float32)
+                has_audio = False
+
+            ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 0.5
+            if not ndi_active:
+                self.is_speaking = has_audio
+
+        if not ndi_active:
+            roll_len = min(n, 1024)
+            self._analysis_window = np.roll(self._analysis_window, -roll_len, axis=0)
+            self._analysis_window[-roll_len:] = packet_audio[:roll_len]
+            self._update_metrics()
 
         if volume != 1.0:
             vol = max(0.0, min(2.0, volume))

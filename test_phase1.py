@@ -23,8 +23,7 @@ def test_config_persona_and_moods():
     prompt = config.ai_system_prompt
     assert "I AM" in prompt, "ai_system_prompt must define I AM identity"
     assert "universal consciousness" in prompt.lower()
-    assert "zen master" in prompt.lower()
-    assert "ego" in prompt.lower()
+    assert "enlightenment" in prompt.lower()
     assert "savage" in prompt and "transcendent" in prompt and "deadpan" in prompt
 
     # Verify all 12 moods in tts_mood_exaggeration_map

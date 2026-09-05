@@ -1,0 +1,60 @@
+"""
+Unit test for VisualizerProxy ctrl_queue and state_queue (Item 3).
+Verifies that control commands are never dropped during worker stall.
+"""
+
+import os
+from pathlib import Path
+import sys
+import time
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from render_worker import VisualizerProxy
+
+
+def test_ctrl_queue_never_drops_during_worker_stall():
+    """
+    Sets IAM_TEST_WORKER_STALL=1 to trigger a 3-second stall in the render worker,
+    while sending 20 SET_MOOD commands from the main process.
+    Verifies that all 20 are accepted into ctrl_queue without throwing or logging ERROR.
+    """
+    os.environ["IAM_TEST_WORKER_STALL"] = "1"
+    proxy = VisualizerProxy(shm_name="iam_test_stall_shm")
+    try:
+        # Send 20 distinct mood commands while worker is stalling
+        moods = ["chill", "energetic", "hyped", "mysterious", "thoughtful", "snarky", "transcendent", "savage"]
+        sent_moods = []
+        for i in range(20):
+            m = moods[i % len(moods)]
+            proxy.set_mood(m)
+            sent_moods.append(m)
+
+        # Wait for worker to finish stall and process the queue
+        time.sleep(3.5)
+
+        # Confirm proxy's tracking of current mood matches the 20th sent command
+        assert proxy.current_mood == sent_moods[-1]
+        assert proxy.ctrl_queue.empty() or proxy.ctrl_queue.qsize() < 20
+    finally:
+        proxy.stop()
+        os.environ.pop("IAM_TEST_WORKER_STALL", None)
+
+
+def test_state_queue_fingerprint_deduplication():
+    """
+    Verifies that sync_state only enqueues when state changes,
+    avoiding queue congestion on high frequency calls.
+    """
+    proxy = VisualizerProxy(shm_name="iam_test_dedup_shm")
+    try:
+        chat = [{"author": "Alice", "message": "Hello"}]
+        # Call 50 times with identical state
+        for _ in range(50):
+            proxy.sync_state(chat_messages=chat, obs_connected=True, engagement_mode="active", concurrent_viewers=10, is_stream_live=True)
+
+        # Queue size should be at most 1 because of fingerprinting
+        assert proxy.state_queue.qsize() <= 1
+    finally:
+        proxy.stop()

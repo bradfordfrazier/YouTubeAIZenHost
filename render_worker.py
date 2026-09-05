@@ -10,6 +10,7 @@ import logging
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import os
+import queue
 import struct
 import sys
 import time
@@ -287,7 +288,8 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
 
 
 def render_worker_main(
-    cmd_queue: mp.Queue,
+    ctrl_queue: mp.Queue,
+    state_queue: mp.Queue,
     shm_name: str,
     should_quit_val: mp.Value,
     is_promo_active_val: mp.Value,
@@ -355,10 +357,16 @@ def render_worker_main(
 
     try:
         while not stop_event.is_set():
-            # 1. Drain all pending control commands from orchestrator
-            while not cmd_queue.empty():
+            if os.environ.get("IAM_TEST_WORKER_STALL") == "1":
+                os.environ["IAM_TEST_WORKER_STALL"] = "0"
+                time.sleep(3.0)
+
+            # 1. Drain pending control commands from orchestrator (bounded to 64 per frame)
+            drained_ctrl = 0
+            while not ctrl_queue.empty() and drained_ctrl < 64:
                 try:
-                    cmd, arg = cmd_queue.get_nowait()
+                    cmd, arg = ctrl_queue.get_nowait()
+                    drained_ctrl += 1
                 except Exception:
                     break
 
@@ -379,19 +387,30 @@ def render_worker_main(
                 elif cmd == "TRIGGER_PROMO":
                     ptype, dur = arg
                     visualizer.trigger_promo(promo_type=ptype, duration=dur)
-                elif cmd == "SYNC_STATE":
-                    state.update(arg)
                 elif cmd == "STOP":
                     stop_event.set()
                     break
 
+            if drained_ctrl >= 64:
+                logger.warning("⚠️ [Render Worker] Control queue hit maximum drain bound (64 commands in single frame).")
+
             if stop_event.is_set():
                 break
 
-            # 2. Read live audio metrics from shared memory for EQ/particle reactivity
+            # 2. Drain state queue (taking only the newest state)
+            newest_state = None
+            while not state_queue.empty():
+                try:
+                    newest_state = state_queue.get_nowait()
+                except Exception:
+                    break
+            if newest_state is not None:
+                state.update(newest_state)
+
+            # 3. Read live audio metrics from shared memory for EQ/particle reactivity
             audio_metrics = shm.read()
 
-            # 3. Render high-res 1080p60 frame
+            # 4. Render high-res 1080p60 frame
             rgba_bytes = visualizer.render_frame(
                 audio_metrics=audio_metrics,
                 chat_messages=state["chat_messages"],
@@ -403,11 +422,11 @@ def render_worker_main(
                 pinned_chat_message=state["pinned_chat_message"],
             )
 
-            # 4. Transmit video frame asynchronously over NDI (audio is clocked independently in ndi_audio_pump)
+            # 5. Transmit video frame asynchronously over NDI (audio is clocked independently in ndi_audio_pump)
             if ndi.is_open:
                 ndi.send_video(rgba_bytes)
 
-            # 5. Export lightweight flags to proxy
+            # 6. Export lightweight flags to proxy
             is_promo_active_val.value = 1 if getattr(visualizer, "is_promo_active", False) else 0
             if getattr(visualizer, "should_quit", False):
                 should_quit_val.value = 1
@@ -422,7 +441,7 @@ def render_worker_main(
                 frame_count = 0
                 t_last_fps_log = time.time()
 
-            # 6. Precise 60 FPS pacing for video (audio is clocked independently in ndi_audio_pump)
+            # 7. Precise 60 FPS pacing for video (audio is clocked independently in ndi_audio_pump)
             t_next_frame += target_frame_time
             now_perf = time.perf_counter()
             # If rendering lagged by >250ms, reset video timing cursor (dropping video frames on hitch is fine; audio is unaffected)
@@ -466,10 +485,13 @@ class VisualizerProxy:
         self.sample_rate = getattr(self.cfg, "tts_sample_rate", 48000)
         self.current_mood = "chill"
         self.ai_text_target = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
+        self.current_pinned: Optional[Dict] = None
 
         # Shared memory and IPC objects
         self.audio_shm = AudioMetricsSharedMemory(name=self.shm_name, create=True)
-        self.cmd_queue: mp.Queue = mp.Queue(maxsize=1000)
+        self.ctrl_queue: mp.Queue = mp.Queue(maxsize=256)
+        self.state_queue: mp.Queue = mp.Queue(maxsize=4)
+        self._last_state_fingerprint: Optional[Tuple] = None
         self.should_quit_val: mp.Value = mp.Value("b", 0)
         self.is_promo_active_val: mp.Value = mp.Value("b", 0)
         self.stop_event: mp.Event = mp.Event()
@@ -487,7 +509,8 @@ class VisualizerProxy:
         self.process = mp.Process(
             target=render_worker_main,
             args=(
-                self.cmd_queue,
+                self.ctrl_queue,
+                self.state_queue,
                 self.shm_name,
                 self.should_quit_val,
                 self.is_promo_active_val,
@@ -504,9 +527,11 @@ class VisualizerProxy:
         if not self.process or not self.process.is_alive():
             self.check_and_restart_if_dead()
         try:
-            self.cmd_queue.put_nowait((cmd, arg))
-        except Exception:
-            pass
+            self.ctrl_queue.put((cmd, arg), timeout=0.5)
+        except queue.Full:
+            logger.error(f"❌ [VisualizerProxy] Control queue is full! Dropped command: {cmd}")
+        except Exception as e:
+            logger.error(f"❌ [VisualizerProxy] Error sending command {cmd}: {e}")
 
     def check_and_restart_if_dead(self) -> bool:
         """Crash resilience: restarts the render worker if it died unexpectedly."""
@@ -576,9 +601,32 @@ class VisualizerProxy:
         is_stream_live: bool = True,
         ai_subtitle: str = "",
     ):
-        """Synchronizes orchestrator state with the rendering process."""
+        """Synchronizes orchestrator state with the rendering process if changed."""
+        msgs = list(chat_messages)[-50:]
+        last_msg_id = ""
+        if msgs:
+            last = msgs[-1]
+            last_msg_id = last.get("id") or hash((last.get("author", ""), last.get("message", ""), last.get("timestamp", 0)))
+
+        pinned_id = None
+        if pinned_chat_message and isinstance(pinned_chat_message, dict):
+            pinned_id = pinned_chat_message.get("id") or hash((pinned_chat_message.get("author", ""), pinned_chat_message.get("message", "")))
+
+        fp = (
+            len(msgs),
+            last_msg_id,
+            pinned_id,
+            engagement_mode,
+            concurrent_viewers,
+            is_stream_live,
+            obs_connected,
+        )
+        if fp == self._last_state_fingerprint:
+            return
+        self._last_state_fingerprint = fp
+
         state_dict = {
-            "chat_messages": list(chat_messages)[-50:],
+            "chat_messages": msgs,
             "pinned_chat_message": pinned_chat_message,
             "obs_connected": obs_connected,
             "engagement_mode": engagement_mode,
@@ -586,7 +634,18 @@ class VisualizerProxy:
             "is_stream_live": is_stream_live,
             "ai_subtitle": ai_subtitle,
         }
-        self._send_cmd("SYNC_STATE", state_dict)
+
+        try:
+            self.state_queue.put_nowait(state_dict)
+        except queue.Full:
+            try:
+                self.state_queue.get_nowait()
+            except Exception:
+                pass
+            try:
+                self.state_queue.put_nowait(state_dict)
+            except Exception as e:
+                logger.debug(f"State queue full on retry: {e}")
 
     @property
     def should_quit(self) -> bool:

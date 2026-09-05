@@ -16,27 +16,44 @@ from app import CommentEvent, LocalCoHostApp
 
 
 def test_trigger_hygiene_no_trigger_on_common_words():
-    """'again lol' -> no trigger; 'god that game was trash' -> no trigger."""
+    """'w', 'l', 'gg', 'lol', 'real', 'game', 'play', 'win', 'lose', 'god that game was trash' -> no trigger."""
     brain = AIBrain()
     brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
 
-    trig, reason = brain.should_trigger_response("again lol")
-    assert not trig
-    assert reason == "no_trigger_keywords"
-
-    trig, reason = brain.should_trigger_response("god that game was trash")
-    assert not trig
-    assert reason == "no_trigger_keywords"
+    for word in ["w", "l", "gg", "lol", "real", "game", "play", "win", "lose", "again lol", "god that game was trash", "the bot died"]:
+        trig, reason = brain.should_trigger_response(word)
+        assert not trig, f"Expected '{word}' not to trigger, but triggered with reason: {reason}"
+        assert reason == "no_trigger_keywords"
 
 
 def test_trigger_hygiene_direct_mention():
-    """'@IAM why do we dream?' -> direct_mention."""
+    """'@IAM why do we dream?', 'ai, what is life?', 'hey god' -> direct_mention."""
     brain = AIBrain()
     brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
 
-    trig, reason = brain.should_trigger_response("@IAM why do we dream?")
-    assert trig
-    assert "direct_mention" in reason
+    for phrase in ["@IAM why do we dream?", "@MassiveGodComplex thoughts?", "ai, explain this", "hey god give us wisdom", "bot: roast me"]:
+        trig, reason = brain.should_trigger_response(phrase)
+        assert trig, f"Expected '{phrase}' to trigger, but got False ({reason})"
+        assert "direct_mention" in reason or "chat_question" in reason
+
+
+def test_trigger_viewer_count_sampling():
+    """High viewer counts (> 25) engage probabilistic sampling on generic chat keywords."""
+    brain = AIBrain()
+    # Active with 50 viewers
+    brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=50, is_chat_active=True)
+
+    # When random exceeds sampling probability, should be sampled out
+    with patch("random.random", return_value=0.90):
+        trig, reason = brain.should_trigger_response("roast the team")
+        assert not trig
+        assert "sampled_out" in reason
+
+    # When random is within probability, should trigger
+    with patch("random.random", return_value=0.10):
+        trig, reason = brain.should_trigger_response("roast the team")
+        assert trig
+        assert "chat_interaction" in reason
 
 
 def test_prompt_depth_classifier_deep():

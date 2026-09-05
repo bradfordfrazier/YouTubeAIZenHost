@@ -97,11 +97,10 @@ class NDIStreamer:
                 else:
                     logger.info(f"NDI VideoSendFrame FourCC verified: FOURCC_VIDEO_TYPE_RGBA ({actual_fourcc})")
 
-                # 2. Configure Audio Frame (48000Hz Stereo Float32 with 4800-sample buffer capacity)
-                # Sized to support both 60 FPS frame chunks (800 samples) and 10ms pump bursts (480 samples)
-                # Eliminates channel stride drift, garbage memory injection, and NDI audio distortion in OBS
-                self.audio_frame_buffer_size = max(4800, self.samples_per_frame * 4)
-                self.audio_frame = cyndilib.AudioSendFrame(self.audio_frame_buffer_size, self.channels, self.sample_rate)
+                # 2. Configure Audio Frame (48000Hz Stereo Float32 with exact frame buffer capacity)
+                # Exactly self.samples_per_frame (800 samples @ 60fps / 48kHz = exactly 3200 bytes/channel)
+                # Eliminates channel stride drift, uninitialized buffer memory injection, and pegging OBS audio meter
+                self.audio_frame = cyndilib.AudioSendFrame(self.samples_per_frame, self.channels, self.sample_rate)
 
                 # 3. Create and configure Sender (unclocked so Python loop drives precise 60 FPS clock)
                 self.sender = cyndilib.Sender(
@@ -149,6 +148,18 @@ class NDIStreamer:
         else:
             audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
 
+        # Ensure exact match with self.samples_per_frame (800 samples) to prevent uninitialized memory gaps
+        target_samples = self.samples_per_frame
+        curr_samples = audio_out.shape[1] if audio_out.ndim == 2 else 0
+
+        if curr_samples < target_samples:
+            padded = np.zeros((2, target_samples), dtype=np.float32)
+            if curr_samples > 0:
+                padded[:, :curr_samples] = audio_out[:, :curr_samples]
+            audio_out = padded
+        elif curr_samples > target_samples:
+            audio_out = np.ascontiguousarray(audio_out[:, :target_samples], dtype=np.float32)
+
         with self._lock:
             try:
                 # Rotate double buffer so previous frame remains alive during NDI asynchronous read
@@ -167,14 +178,7 @@ class NDIStreamer:
 
                 # Asynchronous video transmission + frame-locked synchronized audio
                 self.sender.write_video_async(target_buf)
-                if audio_out.shape[1] > 0:
-                    max_chunk = getattr(self.audio_frame, "max_num_samples", 4800) if self.audio_frame else 4800
-                    if audio_out.shape[1] <= max_chunk:
-                        self.sender.write_audio(audio_out)
-                    else:
-                        for chunk_start in range(0, audio_out.shape[1], max_chunk):
-                            chunk = np.ascontiguousarray(audio_out[:, chunk_start : chunk_start + max_chunk])
-                            self.sender.write_audio(chunk)
+                self.sender.write_audio(audio_out)
             except Exception as e:
                 logger.error(f"Error in synchronized NDI broadcast: {e}")
 
@@ -221,14 +225,19 @@ class NDIStreamer:
             else:
                 audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
 
+            target_samples = self.samples_per_frame
+            curr_samples = audio_out.shape[1] if audio_out.ndim == 2 else 0
+            if curr_samples == 0:
+                return
+
             with self._lock:
-                max_chunk = getattr(self.audio_frame, "max_num_samples", 4800) if self.audio_frame else 4800
-                if audio_out.shape[1] <= max_chunk:
-                    self.sender.write_audio(audio_out)
-                else:
-                    for chunk_start in range(0, audio_out.shape[1], max_chunk):
-                        chunk = np.ascontiguousarray(audio_out[:, chunk_start : chunk_start + max_chunk])
-                        self.sender.write_audio(chunk)
+                for chunk_start in range(0, curr_samples, target_samples):
+                    chunk = audio_out[:, chunk_start : chunk_start + target_samples]
+                    if chunk.shape[1] < target_samples:
+                        padded = np.zeros((2, target_samples), dtype=np.float32)
+                        padded[:, : chunk.shape[1]] = chunk
+                        chunk = padded
+                    self.sender.write_audio(np.ascontiguousarray(chunk, dtype=np.float32))
         except Exception as e:
             logger.error(f"Error streaming audio packet over NDI: {e}")
 

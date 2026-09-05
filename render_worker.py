@@ -316,15 +316,7 @@ def render_worker_main(
     Owns the Visualizer canvas, window events, and single-owner NDI broadcaster.
     Runs completely decoupled from Python asyncio event loop and TTS synthesis.
     """
-    # Set process title and Windows process priority for rock-solid 60 FPS cadence
-    try:
-        import win32api, win32process, win32con
-        pid = win32api.GetCurrentProcessId()
-        handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
-        win32process.SetPriorityClass(handle, win32process.ABOVE_NORMAL_PRIORITY_CLASS)
-    except Exception:
-        pass
-
+    # Worker process runs at Normal priority (audio pump thread is elevated independently)
     # Ensure clean logging in worker process
     logging.basicConfig(
         level=logging.INFO,

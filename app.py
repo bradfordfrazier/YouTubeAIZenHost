@@ -2631,6 +2631,17 @@ def main():
         if args.performance_mode == "eco_low_spec":
             config.visualizer_particle_count = 40
 
+    # Optional Windows main process priority elevation
+    if os.environ.get("IAM_ELEVATE_MAIN") == "1":
+        try:
+            import win32api, win32process, win32con
+            pid = win32api.GetCurrentProcessId()
+            handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
+            win32process.SetPriorityClass(handle, win32process.ABOVE_NORMAL_PRIORITY_CLASS)
+            logger.info("⚡ [Main Process] Process priority elevated to ABOVE_NORMAL_PRIORITY_CLASS.")
+        except Exception as e:
+            logger.debug(f"Main process priority elevation note: {e}")
+
     app = LocalCoHostApp()
 
     # Clean signal handling for Ctrl+C, Ctrl+Break, and termination signals

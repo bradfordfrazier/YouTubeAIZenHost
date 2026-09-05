@@ -27,6 +27,7 @@ import numpy as np
 from ai_brain import AIBrain
 from cast_engine import CastEngine
 from config import config
+from greeting_cache import GreetingCache
 from ndi_streamer import NDIStreamer
 from session_log import SessionLogger
 from tts_engine import TTSEngine
@@ -391,6 +392,7 @@ class CommentEvent:
     max_age_sec: float = 90.0
     force: bool = False
     chat_item: Optional[Dict[str, Any]] = None
+    cached_greeting: Optional[Any] = None
 
 
 class LocalCoHostApp:
@@ -410,6 +412,7 @@ class LocalCoHostApp:
         self.ndi = NDIStreamer()
         self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
         self.cast = CastEngine()
+        self.greeting_cache = GreetingCache.get_instance(max_size=getattr(self.cfg, "greeting_cache_size", 3))
 
         # OBS State
         self.obs_client = None
@@ -553,9 +556,32 @@ class LocalCoHostApp:
                     f"Acknowledge the arrival on {chan_handle} with transcendent, charismatic presence. "
                     f"Do not ask for chat comments or plead for engagement."
                 )
-            logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). Immediately performing comment event: {prompt}...")
-            self.visualizer.fade_out_for_turn()
-            self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=2, force=False)
+
+            cached_greeting = None
+            if (
+                getattr(self.cfg, "greeting_cache_enabled", True)
+                and hasattr(self, "greeting_cache")
+                and self.greeting_cache.has_greeting()
+            ):
+                cached_greeting = self.greeting_cache.pop_greeting()
+
+            if cached_greeting:
+                logger.info(
+                    f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). "
+                    f"Dispatched instant pre-synthesized greeting (<5ms latency): '[{cached_greeting.mood.upper()}]: {cached_greeting.full_text}'"
+                )
+                self.visualizer.fade_out_for_turn()
+                self._trigger_ai_turn(
+                    prompt_trigger=prompt,
+                    event_type="greeting",
+                    priority=2,
+                    force=False,
+                    cached_greeting=cached_greeting,
+                )
+            else:
+                logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). Immediately performing comment event: {prompt}...")
+                self.visualizer.fade_out_for_turn()
+                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=2, force=False)
         else:
             logger.info(f"⚡ [Room Wake-Up] Viewer entered empty room (0 -> {viewers} active). Room transitioned to ACTIVE.")
 
@@ -645,6 +671,7 @@ class LocalCoHostApp:
         max_age_sec: Optional[float] = None,
         force: bool = False,
         chat_item: Optional[Dict] = None,
+        cached_greeting: Optional[Any] = None,
     ):
         """Thread-safe and async-safe enqueueing of AI comment turns with priority and backpressure."""
         if not prompt_trigger or not self.running:
@@ -696,6 +723,7 @@ class LocalCoHostApp:
             max_age_sec=ttl,
             force=force,
             chat_item=chat_item,
+            cached_greeting=cached_greeting,
         )
 
         if force:
@@ -861,32 +889,60 @@ class LocalCoHostApp:
         full_statement = ""
         is_completed = False
         active_mood = "energetic"
-        try:
-            # 3. Stream from Gemini AI Brain
-            async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
-                ev_type = chunk_ev.get("type", "")
-                if ev_type == "mood":
-                    active_mood = chunk_ev.get("mood", "chill")
-                    self.visualizer.set_mood(active_mood)
-                elif ev_type == "complete":
-                    full_text = chunk_ev.get("full_text", "").strip()
-                    mood = chunk_ev.get("mood", active_mood)
-                    full_statement = full_text
-                    is_completed = True
-                    self.visualizer.set_mood(mood)
+        cached_g = getattr(event, "cached_greeting", None)
+        audio = None
+        clean_speech = ""
 
-            # 4. Synthesize speech and begin typewriter display
-            clean_speech = re.sub(r"@+", "@", full_statement).strip()
-            words = clean_speech.split()
+        try:
+            if cached_g and cached_g.audio is not None and len(cached_g.audio) > 0:
+                # Instant Greeting Cache Hit: Zero-Latency pre-synthesized speech execution (<5ms / 0.0s TTFT & TTS)
+                full_statement = cached_g.full_text
+                clean_speech = cached_g.full_text
+                active_mood = cached_g.mood
+                self.visualizer.set_mood(active_mood)
+                audio = cached_g.audio
+                is_completed = True
+                dur_sec = len(audio) / 48000.0
+                logger.info(
+                    f"⚡ [Instant AI Speech] Broadcasting pre-synthesized greeting audio "
+                    f"([{active_mood.upper()}], {dur_sec:.2f}s audio, 0.0s TTFT & TTS): '{clean_speech}'..."
+                )
+            else:
+                # 3. Stream from Gemini AI Brain
+                async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
+                    ev_type = chunk_ev.get("type", "")
+                    if ev_type == "mood":
+                        active_mood = chunk_ev.get("mood", "chill")
+                        self.visualizer.set_mood(active_mood)
+                    elif ev_type == "complete":
+                        full_text = chunk_ev.get("full_text", "").strip()
+                        mood = chunk_ev.get("mood", active_mood)
+                        full_statement = full_text
+                        is_completed = True
+                        self.visualizer.set_mood(mood)
+
+                # 4. Synthesize speech and begin typewriter display
+                clean_speech = re.sub(r"@+", "@", full_statement).strip()
+                words = clean_speech.split()
+                if (
+                    is_completed
+                    and len(clean_speech) >= 12
+                    and len(words) >= 3
+                    and clean_speech[-1] in ".!?\"'”’)"
+                ):
+                    # 1. Pre-synthesize TTS audio in background while question is STILL steadily displayed on screen
+                    logger.info(f"🔊 [AI Speech] Pre-synthesizing audio for: '{clean_speech}'...")
+                    audio = await self.tts.synthesize(clean_speech)
+                else:
+                    clean_speech = ""
+                    audio = None
+
             if (
                 is_completed
-                and len(clean_speech) >= 12
-                and len(words) >= 3
-                and clean_speech[-1] in ".!?\"'”’)"
+                and clean_speech
+                and audio is not None
+                and len(audio) > 0
             ):
-                # 1. Pre-synthesize TTS audio in background while question is STILL steadily displayed on screen
-                logger.info(f"🔊 [AI Speech] Pre-synthesizing audio for: '{clean_speech}'...")
-                audio = await self.tts.synthesize(clean_speech)
 
                 # 2. Question displayed while answer was generating and synthesizing; hold if needed to satisfy minimum reading duration
                 if question_text and min_time_before_fade_out > 0:
@@ -1636,11 +1692,13 @@ class LocalCoHostApp:
 
     async def youtube_viewer_poller_task(self):
         """Periodically polls active YouTube concurrent viewer count and calculates chat velocity."""
-        poll_interval = self.cfg.viewer_count_poll_interval
         if not self.cfg.auto_track_live_viewers:
             return
 
-        logger.info(f"Starting YouTube Live Concurrent Viewer Poller (every {poll_interval}s)...")
+        logger.info(
+            f"Starting YouTube Live Concurrent Viewer Poller "
+            f"(Active: every {self.cfg.viewer_count_poll_interval}s, 0-Viewers: every {self.cfg.viewer_0_poll_interval}s)..."
+        )
         while self.running:
             try:
                 now = time.time()
@@ -1665,7 +1723,13 @@ class LocalCoHostApp:
             except Exception as e:
                 logger.debug(f"Viewer poller cycle note: {e}")
 
-            await asyncio.sleep(poll_interval)
+            # Polling cadence: use viewer_0_poll_interval when in empty room (0 viewers), otherwise standard viewer_count_poll_interval
+            current_interval = (
+                self.cfg.viewer_0_poll_interval
+                if self.concurrent_viewers == 0
+                else self.cfg.viewer_count_poll_interval
+            )
+            await asyncio.sleep(current_interval)
 
     async def _async_get_console_line(self) -> Optional[str]:
         """Non-blocking Windows console line reader that never blocks Ctrl+C or locks mouse."""
@@ -2066,12 +2130,15 @@ class LocalCoHostApp:
                 metrics = self.session_log.get_stream_health_metrics() if self.session_log else {}
                 cb_status = "TRIPPED (Cooldown)" if getattr(self.brain, "circuit_breaker_tripped", False) else "HEALTHY"
                 cache_lvl = self.brain.reflection_cache.size() if hasattr(self.brain, "reflection_cache") else 0
+                greet_lvl = self.greeting_cache.size() if hasattr(self, "greeting_cache") else 0
+                max_refl = getattr(self.cfg, "reflection_cache_size", 4)
+                max_greet = getattr(self.cfg, "greeting_cache_size", 3)
 
                 hud = (
                     f"\n{'='*65}\n"
                     f"📡 [STREAM TELEMETRY HUD] Uptime: {uptime_str} | Mode: {self.engagement_mode.upper()} | Viewers: {self.concurrent_viewers}\n"
                     f"🗣️ AI Turns: {metrics.get('total_turns', 0)} | Cast: {metrics.get('total_cast_questions', 0)} | Chats: {metrics.get('total_chats', 0)} | Avg Latency: {metrics.get('avg_latency_sec', 0.0)}s\n"
-                    f"🧠 Cache Level: {cache_lvl}/4 | Mood: {self.brain.current_mood.upper()} | TTS: {self.cfg.tts_backend.upper()} | Circuit Breaker: {cb_status}\n"
+                    f"🧠 Caches: Reflection {cache_lvl}/{max_refl}, Greeting {greet_lvl}/{max_greet} | Mood: {self.brain.current_mood.upper()} | TTS: {self.cfg.tts_backend.upper()} | Circuit Breaker: {cb_status}\n"
                     f"{'='*65}"
                 )
                 logger.info(hud)
@@ -2260,6 +2327,9 @@ class LocalCoHostApp:
 
         if getattr(self.cfg, "reflection_cache_enabled", True) and hasattr(self.brain, "reflection_cache"):
             self.tasks.append(asyncio.create_task(self.brain.reflection_cache.replenish_worker(self.brain), name="reflection_cache_worker"))
+
+        if getattr(self.cfg, "greeting_cache_enabled", True) and hasattr(self, "greeting_cache"):
+            self.tasks.append(asyncio.create_task(self.greeting_cache.replenish_worker(self.brain, self.tts, self.cfg, poll_interval=getattr(self.cfg, "greeting_cache_poll_interval_sec", 15.0)), name="greeting_cache_worker"))
 
         try:
             results = await asyncio.gather(*self.tasks, return_exceptions=True)

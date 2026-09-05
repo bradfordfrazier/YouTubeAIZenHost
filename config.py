@@ -94,6 +94,7 @@ class AppConfig:
     youtube_video_id: str = os.getenv("YOUTUBE_VIDEO_ID", "")
     chat_poll_interval: float = _get_float("CHAT_POLL_INTERVAL", 0.5)
     viewer_count_poll_interval: float = _get_float("VIEWER_POLL_INTERVAL", 20.0)
+    viewer_0_poll_interval: float = _get_float("VIEWER_0_POLL_INTERVAL", _get_float("VIEWER_POLL_INTERVAL", 5.0))
     auto_track_live_viewers: bool = os.getenv("AUTO_TRACK_LIVE_VIEWERS", "true").lower() in ("true", "1", "yes")
     chat_idle_timeout_sec: float = _get_float("CHAT_IDLE_TIMEOUT_SEC", 120.0)
 
@@ -349,6 +350,9 @@ class AppConfig:
     gemini_deep_model: Optional[str] = os.getenv("GEMINI_DEEP_MODEL", None)
     reflection_cache_enabled: bool = os.getenv("REFLECTION_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
     reflection_cache_size: int = int(os.getenv("REFLECTION_CACHE_SIZE", "4"))
+    greeting_cache_enabled: bool = os.getenv("GREETING_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+    greeting_cache_size: int = int(os.getenv("GREETING_CACHE_SIZE", "3"))
+    greeting_cache_poll_interval_sec: float = float(os.getenv("GREETING_CACHE_POLL_INTERVAL_SEC", "15.0"))
 
     # --------------------------------------------------------------------------
     # Backwards Compatibility Accessors

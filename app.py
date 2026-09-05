@@ -927,23 +927,8 @@ class LocalCoHostApp:
                 is_completed = True
                 dur_sec = len(cached_g.audio) / 48000.0
 
-                # Question displayed while cached greeting is queued; hold if needed to satisfy minimum reading duration
-                if question_text and min_time_before_fade_out > 0:
-                    elapsed = time.perf_counter() - t_question_shown
-                    remaining_hold = min_time_before_fade_out - elapsed
-                    if remaining_hold > 0.05:
-                        logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
-                        await asyncio.sleep(remaining_hold)
-
-                is_vox_only = self.cfg.vox_only_mode
                 if question_text:
-                    if is_vox_only:
-                        logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
-                    elif hasattr(self.visualizer, "fade_out_question"):
-                        self.visualizer.fade_out_question()
-                        if q_fade_out_sec > 0:
-                            logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
-                            await asyncio.sleep(q_fade_out_sec)
+                    logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
                 self.tts.begin_utterance()
                 first_audio_ts = time.perf_counter()
@@ -977,23 +962,8 @@ class LocalCoHostApp:
                         if s_audio is not None and len(s_audio) > 0:
                             if first_audio_ts is None:
                                 first_audio_ts = time.perf_counter()
-                                # Question display hold before pushing first audio chunk
-                                if question_text and min_time_before_fade_out > 0:
-                                    elapsed = time.perf_counter() - t_question_shown
-                                    remaining_hold = min_time_before_fade_out - elapsed
-                                    if remaining_hold > 0.05:
-                                        logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
-                                        await asyncio.sleep(remaining_hold)
-
-                                is_vox_only = self.cfg.vox_only_mode
                                 if question_text:
-                                    if is_vox_only:
-                                        logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
-                                    elif hasattr(self.visualizer, "fade_out_question"):
-                                        self.visualizer.fade_out_question()
-                                        if q_fade_out_sec > 0:
-                                            logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
-                                            await asyncio.sleep(q_fade_out_sec)
+                                    logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
                             self.tts.push_audio(s_audio)
                             pushed_chunks += 1

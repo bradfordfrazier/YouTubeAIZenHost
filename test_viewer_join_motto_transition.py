@@ -208,6 +208,7 @@ def test_greeting_fade_out_to_motto_lifecycle():
 def test_greeting_dissolves_smoothly_when_next_chat_question_arrives():
     """Verifies that when a chat question arrives during/after greeting, the greeting is NOT cut off and dissolves smoothly."""
     vis = Visualizer(width=1920, height=1080)
+    vis.cfg.vox_only_mode = False
 
     greeting = "Welcome, traveler! Drop your luggage and ask whatever is on your mind."
     vis.set_subtitle(greeting)

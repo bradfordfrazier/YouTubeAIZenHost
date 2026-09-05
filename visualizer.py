@@ -620,7 +620,6 @@ class Visualizer:
             self.ai_text_current = ""
             self.ai_text_alpha = 0.0
             self.ai_text_state = "idle_empty"
-            self._active_pinned_message = None
 
         # If promo overlay is currently active or entering/displaying, smoothly transition it to exit without jumping
         if self.promo_state in ("entrance", "display"):
@@ -664,6 +663,10 @@ class Visualizer:
     def set_pinned(self, message: Optional[Dict]):
         """Explicitly sets or updates the active pinned chat message."""
         self._active_pinned_message = message
+        if message and isinstance(message, dict):
+            msg = message.get("message", "").strip()
+            if msg and msg == self.last_completed_question_text:
+                self.last_completed_question_text = ""
 
     def clear_pinned(self):
         """Explicitly clears the active pinned chat message."""
@@ -741,7 +744,7 @@ class Visualizer:
         dt = 1.0 / self.fps
         self.time_elapsed += dt
         self._update_palette_lerp(dt)
-        if ai_subtitle is not None:
+        if ai_subtitle:
             self.set_subtitle(ai_subtitle)
 
         # Extract audio metrics
@@ -782,7 +785,8 @@ class Visualizer:
         # Maintain active pinned message in chat panel until Oracle response completely dissolves
         motto = self.cfg.motto_phrase
         has_active_statement = bool(
-            (self.subtitle_target_text and self.subtitle_target_text != motto)
+            is_speaking
+            or (self.subtitle_target_text and self.subtitle_target_text != motto)
             or (self.ai_text_current and self.ai_text_current != motto and self.ai_text_alpha > 0.05)
         )
 
@@ -1645,6 +1649,7 @@ class Visualizer:
                 if self.ai_text_current and self.ai_text_alpha > 0.005:
                     self.ai_text_state = "fade_out"
                     self.ai_text_target = ""
+                    self.subtitle_target_text = ""
                     self.question_fade_alpha = 0.0
                     self.question_fade_timer = 0.0
                     self.question_fade_state = "waiting_for_dissolve"
@@ -1887,7 +1892,6 @@ class Visualizer:
             if self.ai_text_alpha <= 0.0:
                 self.ai_text_alpha = 0.0
                 self.ai_text_y_drift = 6.0
-                self._active_pinned_message = None
                 if self.question_fade_state == "waiting_for_dissolve":
                     self.ai_text_current = ""
                     self.ai_text_target = ""

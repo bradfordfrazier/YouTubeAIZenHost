@@ -11,7 +11,7 @@ import logging
 import re
 import threading
 import time
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import aiohttp
 import numpy as np
@@ -70,6 +70,8 @@ class TTSEngine:
 
         # Dual independent sample buffers for NDI and Local Windows Audio
         self.ndi_buffer_enabled: bool = True
+        self.ndi_sink: Optional[Callable[[np.ndarray], None]] = None
+        self.ndi_clear_sink: Optional[Callable[[], None]] = None
         self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
         self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
         self._last_ndi_pop_time = 0.0
@@ -325,6 +327,11 @@ class TTSEngine:
             self._utterance_chunk_count = 0
             self._first_push_time = 0.0
             self.is_speaking = False
+        if self.ndi_clear_sink is not None:
+            try:
+                self.ndi_clear_sink()
+            except Exception as e:
+                logger.error(f"Error invoking ndi_clear_sink: {e}")
 
     async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: Optional[float] = None):
         """
@@ -379,13 +386,14 @@ class TTSEngine:
 
             await asyncio.sleep(poll_interval)
 
-    def push_audio(self, audio: np.ndarray):
+    def push_audio(self, audio: np.ndarray) -> np.ndarray:
         """
         Pushes pre-synthesized audio into playback buffers with zero latency,
         applying 5ms crossfades and inter-sentence gap silence between chunks.
+        Returns the fully processed array (after fades and gap prepend).
         """
         if audio is None or len(audio) == 0:
-            return
+            return np.zeros((0, 2), dtype=np.float32)
 
         if audio.ndim == 1:
             audio = np.column_stack((audio, audio))
@@ -437,6 +445,11 @@ class TTSEngine:
                 f"Queued {dur:.2f}s pre-synthesized audio "
                 f"(chunk #{self._utterance_chunk_count}, total buffered: {total_buf_sec:.2f}s)"
             )
+
+        if self.ndi_sink is not None:
+            self.ndi_sink(audio)
+
+        return audio
 
     def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:
         """

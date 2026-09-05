@@ -429,6 +429,8 @@ class LocalCoHostApp:
         self.visualizer = VisualizerProxy()
         if isinstance(self.visualizer, VisualizerProxy):
             self.tts.ndi_buffer_enabled = False
+            self.tts.ndi_sink = self.visualizer.push_audio_samples
+            self.tts.ndi_clear_sink = self.visualizer.clear_audio_buffer
         self.ndi = NDIStreamer()
         self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
         self.cast = CastEngine()
@@ -748,8 +750,6 @@ class LocalCoHostApp:
             if self.active_turn_task and not self.active_turn_task.done():
                 self.active_turn_task.cancel()
             self.tts.clear_audio_buffer()
-            if hasattr(self.visualizer, "clear_audio_buffer"):
-                self.visualizer.clear_audio_buffer()
             event.priority = 0
             heapq.heappush(self.comment_queue, event)
             if self.new_comment_signal:
@@ -944,8 +944,6 @@ class LocalCoHostApp:
                 self.tts.begin_utterance()
                 first_audio_ts = time.perf_counter()
                 self.tts.push_audio(cached_g.audio)
-                if hasattr(self.visualizer, "push_audio_samples"):
-                    self.visualizer.push_audio_samples(cached_g.audio)
                 self.tts.end_utterance()
                 pushed_chunks = 1
 
@@ -994,8 +992,6 @@ class LocalCoHostApp:
                                             await asyncio.sleep(q_fade_out_sec)
 
                             self.tts.push_audio(s_audio)
-                            if hasattr(self.visualizer, "push_audio_samples"):
-                                self.visualizer.push_audio_samples(s_audio)
                             pushed_chunks += 1
                         sentence_queue.task_done()
                     self.tts.end_utterance()
@@ -1040,8 +1036,6 @@ class LocalCoHostApp:
                             first_audio_ts = time.perf_counter()
                         self.tts.begin_utterance()
                         self.tts.push_audio(s_audio)
-                        if hasattr(self.visualizer, "push_audio_samples"):
-                            self.visualizer.push_audio_samples(s_audio)
                         self.tts.end_utterance()
                         pushed_chunks = 1
 
@@ -1162,8 +1156,6 @@ class LocalCoHostApp:
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
             self.tts.clear_audio_buffer()
-            if hasattr(self.visualizer, "clear_audio_buffer"):
-                self.visualizer.clear_audio_buffer()
         except Exception as e:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:

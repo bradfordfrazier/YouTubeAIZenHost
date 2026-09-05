@@ -250,10 +250,77 @@ class AudioMetricsSharedMemory:
                 pass
 
 
+class AudioAnalysisProcessor:
+    """Computes RMS amplitude, speaking state, and 32-band FFT spectrum for visualizer reactivity."""
+
+    def __init__(self, sample_rate: int = 48000, num_spectrum_bands: int = 32):
+        self.sample_rate = sample_rate
+        self.num_spectrum_bands = num_spectrum_bands
+        self.smoothed_spectrum = np.zeros(num_spectrum_bands, dtype=np.float32)
+        self.current_rms = 0.0
+        self.is_speaking = False
+        self._analysis_window = np.zeros((1024, 2), dtype=np.float32)
+        self._hanning_window = np.hanning(1024).astype(np.float32)
+
+        fft_freqs = np.fft.rfftfreq(1024, 1.0 / self.sample_rate)
+        min_freq = 40.0
+        max_freq = 16000.0
+        freq_bins = np.logspace(np.log10(min_freq), np.log10(max_freq), num_spectrum_bands + 1)
+        self._band_slices = []
+        for i in range(num_spectrum_bands):
+            f_low = freq_bins[i]
+            f_high = freq_bins[i + 1]
+            indices = np.where((fft_freqs >= f_low) & (fft_freqs < f_high))[0]
+            if len(indices) > 0:
+                self._band_slices.append((int(indices[0]), int(indices[-1]) + 1))
+            else:
+                self._band_slices.append((0, 0))
+
+    def process(self, packet: np.ndarray) -> Dict[str, Any]:
+        """Processes a stereo packet (e.g. 800 samples) and returns audio metrics."""
+        n = len(packet)
+        roll_len = min(n, 1024)
+        self._analysis_window = np.roll(self._analysis_window, -roll_len, axis=0)
+        self._analysis_window[-roll_len:] = packet[:roll_len]
+
+        mono = np.mean(self._analysis_window, axis=1)
+        rms = float(np.sqrt(np.mean(mono**2)))
+        self.current_rms = rms
+        self.is_speaking = rms > 0.005
+
+        if rms < 1e-4:
+            self.smoothed_spectrum *= 0.85
+        else:
+            windowed = mono * self._hanning_window
+            fft_vals = np.abs(np.fft.rfft(windowed))
+
+            bands = np.zeros(self.num_spectrum_bands, dtype=np.float32)
+            for i, (i_low, i_high) in enumerate(self._band_slices):
+                if i_high > i_low:
+                    val = float(np.mean(fft_vals[i_low:i_high]))
+                    bands[i] = min(1.0, val * 0.15)
+
+            attack = 0.7
+            decay = 0.25
+            mask = bands > self.smoothed_spectrum
+            self.smoothed_spectrum = np.where(
+                mask,
+                self.smoothed_spectrum * (1.0 - attack) + bands * attack,
+                self.smoothed_spectrum * (1.0 - decay) + bands * decay,
+            ).astype(np.float32)
+
+        return {
+            "rms": self.current_rms,
+            "is_speaking": self.is_speaking,
+            "spectrum": self.smoothed_spectrum.copy(),
+        }
+
+
 def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=48000):
     """
     Dedicated time-critical audio pump thread inside the render worker process.
     Runs on an independent 16.6667ms real-time audio clock decoupled from Pygame rendering.
+    Continuously analyzes outgoing audio packets and updates shared memory metrics for avatar reactivity.
     """
     try:
         import ctypes
@@ -264,6 +331,7 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
     except Exception as e:
         logger.debug(f"Audio pump thread priority note: {e}")
 
+    analyzer = AudioAnalysisProcessor(sample_rate=sample_rate)
     interval = samples_per_packet / sample_rate  # 16.6667 ms
     t_next = time.perf_counter()
     t_last_log = time.perf_counter()
@@ -280,6 +348,14 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
             max_interval_ms = dt_call_ms
 
         packet = shm.read_audio_samples(samples_per_packet)  # (800, 2) float32, zeros if empty
+        metrics = analyzer.process(packet)
+        shm.write(
+            rms=metrics["rms"],
+            is_speaking=metrics["is_speaking"],
+            spectrum=metrics["spectrum"],
+            timestamp=now_call,
+        )
+
         if ndi.is_open:
             ndi.send_audio_packet(packet)
 

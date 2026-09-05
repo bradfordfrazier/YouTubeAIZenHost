@@ -166,4 +166,26 @@ def test_shm_page_alignment_and_loud_failure():
         AudioMetricsSharedMemory(name="non_existent_shm_test_segment_xyz", create=False)
 
 
+def test_audio_analysis_processor_metrics_and_speaking_state():
+    """Verifies that AudioAnalysisProcessor extracts RMS, speaking state, and multi-band spectrum from audio."""
+    from render_worker import AudioAnalysisProcessor
+
+    analyzer = AudioAnalysisProcessor(sample_rate=48000, num_spectrum_bands=32)
+
+    # 1. Silence packet -> is_speaking is False, rms < 1e-4
+    silence = np.zeros((800, 2), dtype=np.float32)
+    m_silence = analyzer.process(silence)
+    assert m_silence["is_speaking"] is False
+    assert m_silence["rms"] < 1e-4
+
+    # 2. 440 Hz Sine Tone -> is_speaking is True, rms > 0.1, non-zero spectrum
+    t = np.linspace(0, 800 / 48000.0, 800, endpoint=False)
+    tone = np.column_stack((0.5 * np.sin(2 * np.pi * 440 * t), 0.5 * np.sin(2 * np.pi * 440 * t))).astype(np.float32)
+    m_tone = analyzer.process(tone)
+    assert m_tone["is_speaking"] is True
+    assert m_tone["rms"] > 0.1
+    assert np.any(m_tone["spectrum"] > 0.0)
+    assert len(m_tone["spectrum"]) == 32
+
+
 

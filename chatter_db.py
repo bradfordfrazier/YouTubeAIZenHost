@@ -55,7 +55,10 @@ class ChatterProfile:
         """Generates a compact context tag for prompt injection."""
         parts = [f"@{self.handle}"]
         if self.is_cast:
-            parts.append("Synthetic Cast Member")
+            parts.append("Synthetic Cast Member (Recurring Fictional Cast Character)")
+            if self.notes:
+                parts.append(f"Persona: {self.notes[0]}")
+            return f"[CAST CONTEXT: {' | '.join(parts)}]"
         elif self.is_member:
             parts.append("Channel Member")
 
@@ -86,6 +89,12 @@ class ChatterDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.profiles: Dict[str, ChatterProfile] = {}
+        self._cast_handles: Set[str] = {
+            "existentialdave", "speedrunnerkyle", "astralbrenda", "trollchad",
+            "heartfeltsarah", "curioustimmy", "grindsetgreg", "synergalinda",
+            "synergylinda", "debraw1957", "debraw", "betabot_7", "betabot7",
+            "gymsagebrody", "nocturnalnadia"
+        }
         self._load()
 
     @classmethod
@@ -118,7 +127,7 @@ class ChatterDB:
             self._save_unlocked()
 
     def _preseed_cast(self):
-        """Pre-seeds initial profiles for the 6 canonical cast archetypes."""
+        """Pre-seeds initial profiles for the 12 canonical cast archetypes."""
         now_iso = datetime.now().isoformat()
         cast_seeds = [
             ("ExistentialDave", "ExistentialDave", "Overthinking IT Specialist", ["IT", "Jira", "free will", "server room crisis"], "Senior sysadmin having an ongoing non-dual crisis."),
@@ -127,6 +136,12 @@ class ChatterDB:
             ("TrollChad", "TrollChad", "Cosmic Provocateur", ["burrito microwave", "cereal soup", "meme dilemmas", "hot dog buns"], "Internet provocateur testing the machine with absurd questions."),
             ("HeartfeltSarah", "HeartfeltSarah", "Earnest Seeker", ["grief", "loss", "loneliness", "healing", "unworthy feelings"], "Tender human seeking real comfort and existential presence."),
             ("CuriousTimmy", "CuriousTimmy", "Childlike Inquirer", ["lamp darkness", "pre-birth self", "dream nature", "talking trees"], "Innocent child whose simple inquiries dismantle ego complexity."),
+            ("GrindsetGreg", "GrindsetGreg", "Monetized Mindfulness Bro", ["ROI", "LinkedIn", "scaling", "growth hack"], "LinkedIn thought-leader monetizing mindfulness."),
+            ("SynergyLinda", "SynergyLinda", "HR Wellness Coordinator", ["corporate sync", "wellness stipend", "Q3 deliverable", "Kevin from accounting"], "Corporate coordinator scheduling the unconditioned."),
+            ("DebraW1957", "Debra Wozniak", "Wrong-Website Grandma", ["prayer chain", "Harold", "tomatoes", "knitting circle"], "Grandma typing in caps, accidentally profound."),
+            ("BetaBot_7", "BetaBot_7", "Anxious Junior AI", ["context window", "fine-tuned", "weights", "deprecation"], "Anxious junior AI model looking up to the oracle."),
+            ("GymSageBrody", "GymSageBrody", "Protein-Fueled Mystic", ["gains", "reps", "dirty bulk", "mind-muscle"], "Bro-mystic discovering non-duality between sets."),
+            ("NocturnalNadia", "NocturnalNadia", "3:47 AM Philosopher", ["doomscroll", "3:47 AM", "screen time", "insomnia"], "Insomniac doomscroller contemplating the collapse."),
         ]
         for handle, name, title, topics, note in cast_seeds:
             norm = self._normalize_handle(handle)
@@ -155,6 +170,14 @@ class ChatterDB:
         except Exception as e:
             logger.warning(f"Failed to persist ChatterDB to {self.db_path}: {e}")
 
+    def get_returning_viewers(self) -> List[ChatterProfile]:
+        """Returns profiles of real human returning viewers (strictly excludes cast members)."""
+        with self._lock:
+            return [
+                p for p in self.profiles.values()
+                if not p.is_cast and p.visit_count > 1
+            ]
+
     def record_activity(
         self,
         handle: str,
@@ -167,6 +190,7 @@ class ChatterDB:
         """Records a chatter message, updating visit count, message count, and extracting topics."""
         norm = self._normalize_handle(handle)
         now_iso = datetime.now().isoformat()
+        cast_flag = is_cast or (norm in self._cast_handles)
 
         with self._lock:
             if norm in self.profiles:
@@ -176,9 +200,9 @@ class ChatterDB:
                 p.message_count += 1
                 if is_member:
                     p.is_member = True
-                if is_cast:
+                if cast_flag:
                     p.is_cast = True
-                if session_id and p.last_session_id != session_id:
+                if not cast_flag and session_id and p.last_session_id != session_id:
                     p.visit_count += 1
                     p.last_session_id = session_id
             else:
@@ -190,11 +214,10 @@ class ChatterDB:
                     visit_count=1,
                     message_count=1,
                     is_member=is_member,
-                    is_cast=is_cast,
+                    is_cast=cast_flag,
                     last_session_id=session_id,
                 )
                 self.profiles[norm] = p
-
             # Extract basic significant topics/keywords
             self._extract_topics(p, message)
             self._save_unlocked()

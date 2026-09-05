@@ -1,157 +1,176 @@
 """
-Phase 4 Test Suite: Intelligence Leverage & Dynamic Thinking Architecture (D1, D2, D3).
-Validates dynamic two-tier thinking budget, intent classification,
-pre-computed reflection cache, and zero-latency spontaneous commentary.
+Test Suite for Phase 4: Synthetic Cast Transparency.
+Verifies:
+1. Config: cast_badge_label configuration.
+2. ChatterDB: Cast profiles, context snippets, and exclusion from returning viewer statistics.
+3. AI Brain: Cast chat formatting and fictional character fourth-wall prompt guidance.
+4. Visualizer: Rendering of [CAST] badges in 16:9 landscape and 9:16 vertical modes.
 """
 
-import asyncio
+import os
+import shutil
+import tempfile
 import time
+from pathlib import Path
+import pygame
 
-from ai_brain import AIBrain
 from config import config
-from reflection_cache import ReflectionCache, CachedReflection
+from chatter_db import ChatterDB, ChatterProfile
+from ai_brain import AIBrain
+from visualizer import Visualizer
 
 
-def test_intent_classification_and_depth():
-    print("\n" + "=" * 50)
-    print("TEST 1: Intent Classification for Two-Tier Thinking (D1, D3)")
-    print("=" * 50)
+def test_config_cast_badge():
+    """Verify cast_badge_label in config."""
+    assert hasattr(config, "cast_badge_label")
+    assert config.cast_badge_label == "CAST"
 
+
+def test_chatter_db_cast_transparency():
+    """Verify ChatterDB cast context formatting and exclusion from returning viewers."""
+    test_dir = Path(tempfile.mkdtemp())
+    try:
+        db_path = str(test_dir / "chatter_db_test.json")
+        db = ChatterDB(db_path=db_path)
+
+        # 1. Cast profile should have [CAST CONTEXT: ...] snippet
+        cast_profile = db.get_profile("ExistentialDave")
+        assert cast_profile is not None
+        assert cast_profile.is_cast is True
+        snippet = cast_profile.generate_context_snippet()
+        assert "[CAST CONTEXT:" in snippet
+        assert "Synthetic Cast Member (Recurring Fictional Cast Character)" in snippet
+        assert "Visit #" not in snippet
+
+        # 2. Record activity for cast member across sessions: visit_count should NOT increase
+        db.record_activity("ExistentialDave", "ExistentialDave", "Is free will a bug?", is_cast=True, session_id="sess_1")
+        db.record_activity("ExistentialDave", "ExistentialDave", "Jira ticket updated", is_cast=True, session_id="sess_2")
+        p = db.get_profile("ExistentialDave")
+        assert p.visit_count == 1
+        assert p.is_cast is True
+
+        # 3. Real chatter should have normal [CHATTER CONTEXT: ...] snippet and increment visit_count
+        db.record_activity("AliceRealViewer", "Alice", "Hello I AM!", is_cast=False, session_id="sess_1")
+        db.record_activity("AliceRealViewer", "Alice", "Back again!", is_cast=False, session_id="sess_2")
+        alice = db.get_profile("AliceRealViewer")
+        assert alice.is_cast is False
+        assert alice.visit_count == 2
+        alice_snippet = alice.generate_context_snippet()
+        assert "[CHATTER CONTEXT:" in alice_snippet
+        assert "Visit #2" in alice_snippet
+
+        # 4. get_returning_viewers must strictly exclude cast
+        returning = db.get_returning_viewers()
+        returning_handles = [r.handle for r in returning]
+        assert "AliceRealViewer" in returning_handles
+        assert "ExistentialDave" not in returning_handles
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_ai_brain_cast_context_and_prompts():
+    """Verify AI Brain cast formatting in chat buffer and prompt guidance."""
     brain = AIBrain()
 
-    # Fast triggers (should return False)
-    fast_triggers = [
-        "[NEW_CHATTER_GREETING] @Neo just arrived!",
-        "[CELEBRATION] @Alice joined as member!",
-        "[VIEWER_JOINED] Traveler joined",
-        "[CHAT_ENCOURAGEMENT] Chat is quiet",
-        "Chat message from @Gamer: 'Hey I Am what's up!'",
-        "Chat message from @Bob: 'LOL that was hilarious'",
+    # Add cast message and real viewer message
+    brain.add_chat_message("ExistentialDave", "Can you speedrun enlightenment?", is_cast=True, cast_persona="existential_it")
+    brain.add_chat_message("BobRealUser", "What is the meaning of life?", is_cast=False)
+
+    # Build context prompt
+    prompt = brain._build_context_prompt()
+    assert "Cast @ExistentialDave [CAST]: Can you speedrun enlightenment?" in prompt
+    assert "Viewer @BobRealUser: What is the meaning of life?" in prompt
+
+    # Prompt guidance for cast question
+    cast_turn_prompt = brain._build_context_prompt(override_prompt="Cast member @ExistentialDave (Overthinking IT Specialist) asks: 'Is death a kernel panic?'")
+    assert "Special Mode: SYNTHETIC CAST INTERACTION" in cast_turn_prompt
+    assert "FICTIONAL CHARACTER FOURTH-WALL GUIDANCE" in cast_turn_prompt
+    assert "@ExistentialDave" in cast_turn_prompt
+
+
+def test_visualizer_cast_badge_rendering():
+    """Verify visualizer renders cast badges on 16:9 and 9:16 layouts without errors."""
+    output_dir = Path("artifacts")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    chat_messages = [
+        {"author": "ExistentialDave", "message": "Does the universe have garbage collection?", "is_cast": True, "author_type": "cast", "is_superchat": False},
+        {"author": "RealViewer123", "message": "How do I find peace?", "is_cast": False, "author_type": "viewer", "is_superchat": False},
+        {"author": "AstralBrenda", "message": "Can you read my aura?", "is_cast": True, "author_type": "cast", "is_superchat": False},
+        {"author": "CryptoFan", "message": "To the moon!", "is_superchat": True, "amount": "$10.00", "is_cast": False},
     ]
-    for trig in fast_triggers:
-        assert brain._classify_prompt_depth(trig) is False, f"Expected FAST for '{trig}'"
-    print(f"-> Verified {len(fast_triggers)} fast banter/greeting triggers")
 
-    # Deep triggers (should return True)
-    deep_triggers = [
-        "Chat message from @Sarah: 'I lost someone I love and grief feels unbearable. Where did they go?'",
-        "Cast member @ExistentialDave asks: 'Where is the observer in consciousness?'",
-        "Chat message from @Neo: 'What is the true nature of free will and the void?'",
-        "Chat message from @Philosopher: 'Why does anything exist rather than nothing?'",
-        "Chat message from @Seeker: 'What happens to the soul after death?'",
-    ]
-    for trig in deep_triggers:
-        assert brain._classify_prompt_depth(trig) is True, f"Expected DEEP for '{trig}'"
-    print(f"-> Verified {len(deep_triggers)} deep philosophical/existential triggers")
+    pinned_cast = {
+        "author": "ExistentialDave",
+        "message": "Does the universe have garbage collection, or do abandoned egos leak forever?",
+        "is_cast": True,
+        "author_type": "cast",
+        "is_superchat": False,
+    }
 
-    # Verify config generation
-    cfg_fast = brain._build_generate_content_config(is_deep=False)
-    cfg_deep = brain._build_generate_content_config(is_deep=True)
+    pinned_real = {
+        "author": "RealViewer123",
+        "message": "How do I find peace in a chaotic world?",
+        "is_cast": False,
+        "author_type": "viewer",
+        "is_superchat": False,
+    }
 
-    if cfg_fast and cfg_deep:
-        # If new Google GenAI SDK is active
-        if hasattr(cfg_fast, "thinking_config") and cfg_fast.thinking_config:
-            assert cfg_fast.thinking_config.thinking_budget in (64, 128) or hasattr(cfg_fast.thinking_config, "thinking_level")
-        if hasattr(cfg_deep, "thinking_config") and cfg_deep.thinking_config:
-            assert cfg_deep.thinking_config.thinking_budget in (512, 1024) or hasattr(cfg_deep.thinking_config, "thinking_level")
-        assert cfg_deep.max_output_tokens >= cfg_fast.max_output_tokens
+    # Test 16:9 Landscape Mode
+    os.environ["VISUALIZER_ASPECT_RATIO"] = "16:9"
+    os.environ["VISUALIZER_HEADLESS"] = "true"
+    viz_16_9 = Visualizer()
+    viz_16_9.set_mood("transcendent")
 
-    print("[PASS] Intent classification & two-tier config verified!")
+    audio_metrics = {"rms": 0.04, "spectrum": [0.02]*32, "is_speaking": False}
 
-
-async def test_reflection_cache_operations():
-    print("\n" + "=" * 50)
-    print("TEST 2: Pre-Computed Spontaneous Reflection Cache (D2)")
-    print("=" * 50)
-
-    cache = ReflectionCache(max_size=3)
-    assert cache.size() == 0
-    assert cache.has_reflection() is False
-
-    # 1. Add reflections
-    item1 = CachedReflection(
-        theme="The illusion of separation",
-        mood="thoughtful",
-        full_text="You are not a drop in the ocean. You are the entire ocean in a drop.",
-        created_at=time.time(),
+    # Render frame with pinned cast question
+    frame_16_9 = viz_16_9.render_frame(
+        audio_metrics=audio_metrics,
+        chat_messages=chat_messages,
+        ai_subtitle="",
+        pinned_chat_message=pinned_cast,
     )
-    item2 = CachedReflection(
-        theme="The nature of time",
-        mood="transcendent",
-        full_text="The clock is a collective agreement to pretend eternity has a schedule.",
-        created_at=time.time(),
+    assert frame_16_9 is not None
+    assert len(frame_16_9) == 1920 * 1080 * 4
+
+    # Save test screenshot
+    surf_16_9 = viz_16_9.screen.copy()
+    pygame.image.save(surf_16_9, str(output_dir / "test_phase4_16_9_cast.png"))
+
+    # Test 9:16 Vertical Mode
+    os.environ["VISUALIZER_ASPECT_RATIO"] = "9:16"
+    viz_9_16 = Visualizer()
+    viz_9_16.set_mood("snarky")
+
+    frame_9_16 = viz_9_16.render_frame(
+        audio_metrics=audio_metrics,
+        chat_messages=chat_messages,
+        ai_subtitle="",
+        pinned_chat_message=pinned_cast,
     )
+    assert frame_9_16 is not None
+    assert len(frame_9_16) == 1080 * 1920 * 4
 
-    await cache.add_reflection(item1)
-    await cache.add_reflection(item2)
-    assert cache.size() == 2
-    assert cache.has_reflection() is True
+    surf_9_16 = viz_9_16.screen.copy()
+    pygame.image.save(surf_9_16, str(output_dir / "test_phase4_9_16_cast.png"))
 
-    # 2. Pop reflection in 0.0s
-    t0 = time.perf_counter()
-    popped = await cache.pop_reflection()
-    dt = time.perf_counter() - t0
-    assert popped is not None
-    assert popped.theme == "The illusion of separation"
-    assert popped.mood == "thoughtful"
-    assert dt < 0.005, f"Cache pop took too long ({dt*1000:.2f}ms)"
-    print(f"-> Popped cached reflection in {dt*1000:.3f}ms: '{popped.full_text}'")
-
-    # 3. Pop second
-    popped2 = await cache.pop_reflection()
-    assert popped2.theme == "The nature of time"
-    assert cache.size() == 0
-
-    # 4. Pop empty
-    popped3 = await cache.pop_reflection()
-    assert popped3 is None
-    print("[PASS] ReflectionCache operations verified!")
-
-
-async def test_zero_latency_stream_delivery():
-    print("\n" + "=" * 50)
-    print("TEST 3: Zero-Latency Spontaneous Reflection Delivery")
-    print("=" * 50)
-
-    brain = AIBrain()
-    # Prime reflection cache
-    test_reflection = CachedReflection(
-        theme="Imperfection",
-        mood="transcendent",
-        full_text="The cracked bowl lets the light through.",
-        created_at=time.time(),
+    # Render frame with real viewer pinned question
+    frame_real = viz_16_9.render_frame(
+        audio_metrics=audio_metrics,
+        chat_messages=chat_messages,
+        ai_subtitle="",
+        pinned_chat_message=pinned_real,
     )
-    await brain.reflection_cache.add_reflection(test_reflection)
+    assert frame_real is not None
+    pygame.image.save(viz_16_9.screen.copy(), str(output_dir / "test_phase4_16_9_real.png"))
 
-    # Trigger spontaneous reflection stream
-    events = []
-    t0 = time.perf_counter()
-    async for ev in brain.generate_response_stream("[SPONTANEOUS_REFLECTION]"):
-        events.append(ev)
-    elapsed = time.perf_counter() - t0
-
-    assert any(e.get("is_precomputed") for e in events), "Expected precomputed flag in stream response"
-    complete_ev = next(e for e in events if e["type"] == "complete")
-    assert complete_ev["full_text"] == "The cracked bowl lets the light through."
-    assert complete_ev["mood"] == "transcendent"
-    assert elapsed < 0.05, f"Stream delivery took too long ({elapsed*1000:.2f}ms)"
-    print(f"-> Instant Spontaneous Reflection delivered in {elapsed*1000:.2f}ms: '{complete_ev['full_text']}'")
-    print("[PASS] Zero-latency spontaneous stream verified!")
-
-
-async def run_all_phase4_tests():
-    print("\n" + "#" * 60)
-    print("RUNNING PHASE 4 VERIFICATION TEST SUITE")
-    print("#" * 60)
-
-    test_intent_classification_and_depth()
-    await test_reflection_cache_operations()
-    await test_zero_latency_stream_delivery()
-
-    print("\n" + "#" * 60)
-    print("ALL PHASE 4 TESTS PASSED PERFECTLY!")
-    print("#" * 60)
+    print("Successfully rendered 16:9 and 9:16 test frames with [CAST] badges!")
 
 
 if __name__ == "__main__":
-    asyncio.run(run_all_phase4_tests())
+    test_config_cast_badge()
+    test_chatter_db_cast_transparency()
+    test_ai_brain_cast_context_and_prompts()
+    test_visualizer_cast_badge_rendering()
+    print("All Phase 4 tests passed successfully!")

@@ -148,7 +148,7 @@ class GreetingCache:
 
                 # Pre-synthesize 48kHz audio in background
                 logger.debug(f"Pre-synthesizing greeting audio ({len(clean_speech)} chars, mood={active_mood})...")
-                audio = await tts.synthesize(clean_speech)
+                audio = await tts.synthesize(clean_speech, mood=active_mood)
 
                 if audio is not None and len(audio) > 0:
                     item = CachedGreeting(

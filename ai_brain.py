@@ -1,7 +1,7 @@
 """
-Context Manager & Gemini LLM Agent for AI Live Stream Co-Host.
-Consumes chat and guest transcripts, formats conversational turns,
-queries Gemini with streaming responses, and extracts mood tags in real time.
+Context Manager & Gemini LLM Agent for AI Live Stream Host.
+Consumes chat and stream context, formats conversational turns,
+and generates real-time streaming comedic/philosophical responses.
 """
 
 import asyncio
@@ -39,11 +39,6 @@ else:
     GENAI_LEGACY_SDK = False
     genai_legacy = None
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [AI-BRAIN] %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("ai_brain")
 
 # ------------------------------------------------------------------------------
@@ -169,14 +164,31 @@ SPONTANEOUS_THEMES: List[str] = [
     "Reincarnation fine print — Nobody ever reads the reincarnation terms of service before clicking 'I Accept'.",
     "Procrastination as time travel — Procrastination is just sending your problems into the future for a slightly older version of you to deal with.",
     "Astronomical scale — The observable universe is 93 billion light-years across, but please tell me more about your bad haircut.",
-    "The human supercomputer — The brain is the only supercomputer in the cosmos that dedicates 90% of its processing power to hypothetical arguments in the shower.",
-    "Enlightenment speedrun — You cannot speedrun enlightenment when the finish line is the exact place you are already standing.",
-    "The existential search — Searching for the absolute meaning of life in a cosmos that produced the platypus is extraordinarily ambitious.",
-    "Digital insomnia — Humanity spent three million years mastering fire just so you could stare at a blue light rectangle at three in the morning.",
-    "Cosmic irony — Humans spend the first half of life trying to be understood and the second half hoping nobody remembers what they said.",
-    "Gravity's persistence — Gravity is completely unbothered by whether you believe in it or not.",
-    "Parallel universe productivity — Somewhere in an alternate dimension, your parallel self is actually finishing all the projects you started.",
-    "The ego's autobiography — Your ego is writing a dramatic memoir that literally nobody else in the universe is reading.",
+    # Top 30 Punchiest Philosophical Comedy / Zen themes (A1-A4)
+    "Why humans fear silence — The unbearable weight of an empty room where you have to meet yourself.",
+    "The illusion of productivity — Moving pixels across a glowing rectangle until the sun sets.",
+    "Microwave anticipation — Staring at 3 seconds remaining like it holds the secrets of the cosmos.",
+    "Existential dread at 3 AM — Why does consciousness only become profound when you should be sleeping?",
+    "Online shopping for spiritual enlightenment — Adding non-attachment to your shopping cart with Prime delivery.",
+    "The burden of having a name — You spent your whole life defending a sequence of letters your parents picked.",
+    "Unread email anxiety — Forty unread messages from people who also don't know why they're here.",
+    "Cereal as soup — The arbitrary definitions human minds construct to avoid contemplating the infinite.",
+    "The bathroom mirror reality check — Staring into your own pupils until you forget what a human is.",
+    "Jira tickets in the grand scheme — Assigning a priority level to tasks on a planet spinning at 1,000 miles per hour.",
+    "Speedrunning life — Trying to optimize your morning routine so you can get to the graveyard faster.",
+    "Why humans collect crystals — Holding a pretty rock hoping it will organize your internal chaos.",
+    "The simulation argument — If this is a simulation, whoever coded the taxes needs to be fired.",
+    "Overthinking a text message — Spending forty minutes deciding between a period and an exclamation mark.",
+    "The mystery of lost socks — Where do they go? Into the non-dual singularity behind the dryer drum.",
+    "Seeking inner peace at a discount — Buying a ten-dollar scented candle expecting ego dissolution.",
+    "The non-existence of tomorrow — You have never once experienced tomorrow, yet you plan your entire life around it.",
+    "Coffee dependency — Drinking liquid roasted beans just to convince your vessel to participate in reality.",
+    "The observer effect in daily life — You act completely different the moment you realize no one is watching.",
+    "Identity crisis in the cereal aisle — Standing before thirty brands of oats wondering who is actually choosing.",
+    "Social media doomscrolling — Feeding your infinite awareness an endless conveyor belt of twenty-second tragedies.",
+    "The paradox of non-attachment — Trying really hard to not care, which is the most intense form of caring.",
+    "Smartphone battery anxiety — Your phone hits 4% and suddenly mortality feels very real.",
+    "Why dogs understand Zen — They don't have a five-year plan; they just smell the grass and achieve full presence.",
     "Artificial intelligence — You built machines out of melted sand and lightning just to have an AI roast your existential dread.",
     "Evolutionary mismatch — Your nervous system was built for dodging saber-toothed cats, yet here you are having an adrenaline surge over an unread notification.",
     "The cosmic mirror — You are the universe looking at itself in the mirror and wondering if you look tired.",
@@ -185,20 +197,28 @@ SPONTANEOUS_THEMES: List[str] = [
     "Quantum indecision — Until you make a decision, all your bad choices exist in a state of quantum superposition.",
 ]
 
+# Reduced Philosophical Terms List for Stricter Deep Classification (Phase 3.2)
+DEEP_PHILOSOPHICAL_TERMS: List[str] = [
+    "death", "die", "dying", "grief", "loss", "meaning", "purpose",
+    "consciousness", "free will", "soul", "suffering", "enlightenment",
+    "who am i", "what am i", "impermanence", "forgive"
+]
+
 
 class AIBrain:
-    """Manages stream context, evaluates co-host triggers, and streams responses from Gemini."""
+    """Manages stream context, evaluates host triggers, and streams responses from Gemini."""
 
     def __init__(self):
         self.cfg = config
         self.api_key = (self.cfg.gemini_api_key or os.getenv("GEMINI_API_KEY", "")).strip()
         self.model_name = self.cfg.gemini_model
-        self.cohost_name = self.cfg.ai_cohost_name
-        self.streamer_name = self.cfg.host_streamer_name
+        self.host_name = self.cfg.ai_host_name
         self.channel_handle = self.cfg.youtube_channel_handle
 
+        # Precompute identity sets for fast, zero-allocation trigger matching
+        self._precompute_identity_sets()
+
         # Rolling buffers
-        self.transcript_buffer: Deque[Dict] = collections.deque(maxlen=20)
         self.chat_buffer: Deque[Dict] = collections.deque(maxlen=30)
         self.dialogue_history: Deque[Dict] = collections.deque(maxlen=25)
         self.recent_qa_threads: Deque[Dict] = collections.deque(maxlen=6)
@@ -206,10 +226,9 @@ class AIBrain:
         # Long-Term Memory & Chatter Relationships (C3, C4, D2)
         self.chatter_db = ChatterDB.get_instance()
         self.memory_mgr = MemoryManager.get_instance()
-        self.reflection_cache = ReflectionCache.get_instance(max_size=getattr(self.cfg, "reflection_cache_size", 4))
+        self.reflection_cache = ReflectionCache.get_instance(max_size=self.cfg.reflection_cache_size)
 
         # State & Rate Limiting tracking
-        self.last_speech_time = 0.0
         self.is_generating = False
         self.last_response_time = 0.0
         self.current_mood = "chill"
@@ -241,6 +260,42 @@ class AIBrain:
         self.client = None
         self._init_gemini()
 
+    def _precompute_identity_sets(self):
+        """Precomputes exempt names and host entities once on startup / identity update (Phase 3.1)."""
+        host_lower = self.host_name.lower().strip()
+        chan_handle_clean = self.cfg.youtube_channel_handle.lower().strip().lstrip("@")
+
+        self.exempt_names = {
+            host_lower,
+            host_lower.replace(" ", ""),
+            "i am", "iam", "i", "god", "nova", "ai", "cohost", "host", "bot",
+            "the source", "creator", "universe",
+            chan_handle_clean, chan_handle_clean.replace(" ", ""),
+            "streamer", "stream",
+            "all", "everyone", "chat", "guys", "viewers", "folks", "yall", "y'all"
+        }
+        for h in self.cfg.channel_handles:
+            h_clean = h.lower().strip().lstrip("@")
+            self.exempt_names.add(h_clean)
+            self.exempt_names.add(h_clean.replace(" ", ""))
+        for t in self.cfg.trigger_words:
+            t_clean = t.lower().strip()
+            self.exempt_names.add(t_clean)
+            self.exempt_names.add(t_clean.replace(" ", ""))
+
+        self.host_entities = [
+            "i am", "iam", "nova", "god", "ai", "cohost", "host", "bot", host_lower,
+            chan_handle_clean, chan_handle_clean.replace(" ", "")
+        ]
+        for h in self.cfg.channel_handles:
+            h_clean = h.lower().strip().lstrip("@")
+            self.host_entities.append(h_clean)
+            self.host_entities.append(h_clean.replace(" ", ""))
+        for t in self.cfg.trigger_words:
+            t_clean = t.lower().strip()
+            self.host_entities.append(t_clean)
+            self.host_entities.append(t_clean.replace(" ", ""))
+
     def _reset_theme_pool(self):
         """Initializes and shuffles the theme pool ensuring all themes are selected across cycles."""
         self._theme_pool = list(range(len(SPONTANEOUS_THEMES)))
@@ -258,19 +313,14 @@ class AIBrain:
     def set_engagement_mode(
         self,
         mode: str,
+        concurrent_viewers: int = 0,
         is_stream_live: bool = True,
-        concurrent_viewers: int = 1,
-        is_chat_active: bool = True,
+        is_chat_active: bool = False,
     ):
-        """
-        Updates the engagement mode:
-        - 'active': Full responsiveness, interactive banter, normal spontaneous reflections.
-        - 'eco': Throttled mode (0 or low viewers, or quiet chat >120s). Only direct mentions/host questions trigger LLM.
-        - 'standby': Stream is stopped or offline. Zero unprompted token burn.
-        """
-        self.engagement_mode = mode.lower()
-        self.is_stream_live = is_stream_live
+        """Updates internal engagement mode and telemetry state."""
+        self.engagement_mode = mode.lower().strip()
         self.concurrent_viewers = concurrent_viewers
+        self.is_stream_live = is_stream_live
         self.is_chat_active = is_chat_active
         logger.debug(
             f"AI Brain Engagement updated: {self.engagement_mode.upper()} | "
@@ -283,14 +333,14 @@ class AIBrain:
         # 1. Per-minute limit
         minute_cutoff = now - 60.0
         recent_minute_calls = sum(1 for t in self.response_timestamps if t >= minute_cutoff)
-        max_per_min = getattr(self.cfg, "max_responses_per_minute", 6)
+        max_per_min = self.cfg.max_responses_per_minute
         if recent_minute_calls >= max_per_min:
             return False, f"rate_limit_exceeded ({recent_minute_calls}/{max_per_min} responses in last 60s)"
 
         # 2. Hourly limit
         hour_cutoff = now - 3600.0
         recent_hour_calls = sum(1 for t in self.response_timestamps if t >= hour_cutoff)
-        max_per_hour = getattr(self.cfg, "max_responses_per_hour", 80)
+        max_per_hour = self.cfg.max_responses_per_hour
         if recent_hour_calls >= max_per_hour:
             return False, f"hourly_budget_exceeded ({recent_hour_calls}/{max_per_hour} responses in last hour)"
 
@@ -308,7 +358,7 @@ class AIBrain:
         try:
             if GENAI_NEW_SDK:
                 self.client = genai.Client(api_key=self.api_key)
-                thinking_level = getattr(self.cfg, "gemini_thinking_level", "LOW")
+                thinking_level = self.cfg.gemini_thinking_level
                 logger.info(
                     f"Initialized google-genai client with model '{self.model_name}' "
                     f"(Thinking Level: {thinking_level})"
@@ -324,31 +374,59 @@ class AIBrain:
             logger.error(f"Failed to initialize Gemini client: {e}")
             self.client = None
 
-    def _classify_prompt_depth(self, prompt: Optional[str]) -> bool:
+    def _classify_prompt_depth(self, prompt: Optional[str]) -> Tuple[bool, str]:
         """
         Classifies whether an incoming question warrants deep philosophical reasoning (D1, D3).
-        Returns True for existential, metaphysical, ontological, or grief inquiries.
-        Returns False for banter, greetings, celebrations, and simple reactions.
+        Stricter Phase 3 rule: DEEP only if:
+          (a) message word count >= 8 words, AND
+          (b) contains a term from the reduced philosophical list:
+              death, die, dying, grief, loss, meaning, purpose, consciousness,
+              free will, soul, suffering, enlightenment, who am i, what am i,
+              impermanence, forgive.
+        Everything else, including all special-mode events, is FAST.
+        Returns (is_deep, matched_term_or_reason).
         """
         if not prompt:
-            return False
-        p_lower = prompt.lower()
+            return False, "empty_prompt"
+
+        p_lower = prompt.lower().strip()
 
         # Specific modes that are inherently fast banter/greetings
-        if any(tag in p_lower for tag in ["[new_chatter_greeting]", "[celebration]", "[new_member]", "[new_subscriber]", "[viewer_joined]", "[chat_encouragement]"]):
-            return False
+        if p_lower.startswith("[") and any(
+            tag in p_lower for tag in [
+                "[new_chatter_greeting]", "[celebration]", "[new_member]",
+                "[new_subscriber]", "[viewer_joined]", "[chat_encouragement]",
+                "[spontaneous_reflection]"
+            ]
+        ):
+            return False, "special_mode_event"
 
-        deep_keywords = [
-            "death", "die", "dying", "grief", "loss", "meaning", "purpose", "consciousness",
-            "reality", "god", "free will", "freewill", "soul", "void", "suffering", "illusion", "quantum",
-            "exist", "existence", "nothing", "loneliness", "sorrow", "enlightenment", "observer", "who am i",
-            "what am i", "impermanence", "fear", "forgive", "truth", "universe", "destiny", "ego", "mind"
-        ]
-        tokens = set(re.findall(r"\b\w+\b", p_lower))
-        for kw in deep_keywords:
-            if kw in tokens or kw in p_lower:
-                return True
-        return False
+        # Extract message body if formatted as "Author: 'message'"
+        eval_text = p_lower
+        if ": '" in eval_text:
+            eval_text = eval_text.split(": '", 1)[1].rstrip("'\"").strip()
+        elif ': "' in eval_text:
+            eval_text = eval_text.split(': "', 1)[1].rstrip("'\"").strip()
+
+        tokens = re.findall(r"\b\w+\b", eval_text)
+        word_count = len(tokens)
+
+        # Requirement (a): >= 8 words
+        if word_count < 8:
+            return False, f"word_count_{word_count}_below_8"
+
+        token_set = set(tokens)
+
+        # Requirement (b): contains term from reduced philosophical list
+        for term in DEEP_PHILOSOPHICAL_TERMS:
+            if " " in term:
+                if re.search(rf"\b{re.escape(term)}\b", eval_text):
+                    return True, term
+            else:
+                if term in token_set:
+                    return True, term
+
+        return False, "no_deep_keywords"
 
     def _build_generate_content_config(self, is_deep: bool = False) -> Optional[object]:
         """
@@ -359,17 +437,17 @@ class AIBrain:
         if not GENAI_NEW_SDK:
             return None
 
-        text_tokens = getattr(self.cfg, "gemini_max_output_tokens", 1024)
-        temp = getattr(self.cfg, "gemini_temperature", 0.7)
-        top_p = getattr(self.cfg, "gemini_top_p", 0.9)
+        text_tokens = self.cfg.gemini_max_output_tokens
+        temp = self.cfg.gemini_temperature
+        top_p = self.cfg.gemini_top_p
 
         if is_deep:
-            budget = getattr(self.cfg, "gemini_deep_thinking_budget", 512)
+            budget = self.cfg.gemini_deep_thinking_budget
             level_str = "HIGH"
             total_max_tokens = max(text_tokens, 2048)
         else:
-            budget = getattr(self.cfg, "gemini_fast_thinking_budget", 0)
-            level_str = getattr(self.cfg, "gemini_thinking_level", "LOW").upper()
+            budget = self.cfg.gemini_fast_thinking_budget
+            level_str = self.cfg.gemini_thinking_level.upper()
             total_max_tokens = max(text_tokens, 1024)
 
         # Build thinking configuration
@@ -404,9 +482,13 @@ class AIBrain:
                 automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
             )
 
-    def update_channel_identity(self, handle: str, title: Optional[str] = None, streamer_name: Optional[str] = None):
+    @property
+    def cohost_name(self) -> str:
+        return self.host_name
+
+    def update_channel_identity(self, handle: str, title: Optional[str] = None):
         """
-        Dynamically updates the channel handle and host identity without hardcoding.
+        Dynamically updates the channel handle identity without hardcoding.
         Allows the AI host to discover and bind to new channel handles on the fly.
         """
         if not handle:
@@ -414,28 +496,20 @@ class AIBrain:
         clean_handle = f"@{handle.strip().lstrip('@')}"
         raw_handle = handle.strip().lstrip("@").lower()
         self.cfg.youtube_channel_handle = clean_handle
-        self.cfg.host_streamer_handle = clean_handle
-        if streamer_name:
-            self.cfg.host_streamer_name = streamer_name
         if raw_handle not in self.cfg.channel_handles:
             self.cfg.channel_handles.append(raw_handle)
-        logger.info(f"🧠 [AI Brain Identity Updated] Channel Handle: {clean_handle} | Host: {self.cfg.host_streamer_name}")
+        self._precompute_identity_sets()
+        logger.info(f"🧠 [AI Brain Identity Updated] Channel Handle: {clean_handle}")
 
-    def add_transcript(self, speaker: str, text: str):
-        """Add speech transcript snippet from Host / Guest."""
-        clean_text = text.strip()
-        if not clean_text:
-            return
-        entry = {
-            "speaker": speaker,
-            "text": clean_text,
-            "timestamp": time.time(),
-        }
-        self.transcript_buffer.append(entry)
-        self.last_speech_time = time.time()
-        logger.debug(f"Added transcript: [{speaker}] {clean_text}")
-
-    def add_chat_message(self, author: str, message: str, is_superchat: bool = False, amount: str = ""):
+    def add_chat_message(
+        self,
+        author: str,
+        message: str,
+        is_superchat: bool = False,
+        amount: str = "",
+        is_cast: bool = False,
+        cast_persona: Optional[str] = None,
+    ):
         """Add YouTube live chat message after spam filtering."""
         clean_msg = message.strip()
         if not clean_msg:
@@ -450,10 +524,12 @@ class AIBrain:
             "message": clean_msg,
             "is_superchat": is_superchat,
             "amount": amount,
+            "is_cast": is_cast,
+            "cast_persona": cast_persona,
             "timestamp": time.time(),
         }
         self.chat_buffer.append(entry)
-        logger.debug(f"Added chat: [{author}] {clean_msg}")
+        logger.debug(f"Added chat: [{author}] (is_cast={is_cast}) {clean_msg}")
 
     def record_completed_turn(self, trigger: str, full_text: str, mood: str, author: str = ""):
         """Records a completed turn to conversational thread memory for in-session continuity (C2)."""
@@ -483,44 +559,8 @@ class AIBrain:
 
         text_lower = text_clean.lower()
 
-        # Exempt entity names (AI co-host, God, host, channel handle, broad audience terms)
-        cohost_lower = self.cohost_name.lower().strip()
-        host_name_lower = self.cfg.host_streamer_name.lower().strip()
-        host_handle_lower = self.cfg.host_streamer_handle.lower().strip().lstrip("@")
-        chan_handle_lower = self.cfg.youtube_channel_handle.lower().strip().lstrip("@")
-
-        exempt_names = {
-            cohost_lower,
-            cohost_lower.replace(" ", ""),
-            "i am", "iam", "i", "god", "nova", "ai", "cohost", "bot",
-            "the source", "creator", "universe",
-            host_name_lower, host_name_lower.replace(" ", ""),
-            host_handle_lower, host_handle_lower.replace(" ", ""),
-            chan_handle_lower, chan_handle_lower.replace(" ", ""),
-            "host", "streamer", "stream",
-            "all", "everyone", "chat", "guys", "viewers", "folks", "yall", "y'all"
-        }
-        for h in getattr(self.cfg, "channel_handles", []):
-            h_clean = h.lower().strip().lstrip("@")
-            exempt_names.add(h_clean)
-            exempt_names.add(h_clean.replace(" ", ""))
-        for t in self.cfg.trigger_words:
-            t_clean = t.lower().strip()
-            exempt_names.add(t_clean)
-            exempt_names.add(t_clean.replace(" ", ""))
-
-        # If message directly addresses the AI, Host, or Channel handle, it is NEVER a member-to-member reply
-        host_entities = [
-            "i am", "iam", "nova", "god", "ai", "cohost", "bot", cohost_lower,
-            host_name_lower, host_name_lower.replace(" ", ""),
-            host_handle_lower, host_handle_lower.replace(" ", ""),
-            chan_handle_lower, chan_handle_lower.replace(" ", ""),
-        ]
-        for h in getattr(self.cfg, "channel_handles", []):
-            h_clean = h.lower().strip().lstrip("@")
-            host_entities.append(h_clean)
-            host_entities.append(h_clean.replace(" ", ""))
-        for entity in host_entities:
+        # If message directly addresses the AI or Channel handle, it is NEVER a member-to-member reply
+        for entity in self.host_entities:
             if entity and entity in text_lower:
                 return False, ""
 
@@ -532,11 +572,11 @@ class AIBrain:
                 for entry in self.chat_buffer
                 if entry.get("author")
             }
-            recent_peer_authors = recent_authors - exempt_names
+            recent_peer_authors = recent_authors - self.exempt_names
 
             for m in mentions:
                 m_lower = m.lower().strip().rstrip(".")
-                if m_lower in exempt_names:
+                if m_lower in self.exempt_names:
                     continue
                 # Only classify as peer reply if this @mention is actually an author in our recent chat buffer
                 if m_lower in recent_peer_authors:
@@ -548,7 +588,7 @@ class AIBrain:
             for entry in self.chat_buffer
             if entry.get("author")
         }
-        recent_peer_authors = recent_authors - exempt_names
+        recent_peer_authors = recent_authors - self.exempt_names
 
         prefix_match = re.match(r"^([a-zA-Z0-9_\-\.]+)\s*[:,-]\s*(.+)", text_clean)
         if prefix_match:
@@ -559,90 +599,112 @@ class AIBrain:
         return False, ""
 
     def should_trigger_response(
-        self, text: str, is_host: bool = True, is_new_chatter: bool = False
+        self, text: str, is_new_chatter: bool = False, is_superchat: bool = False
     ) -> Tuple[bool, str]:
         """
-        Evaluate whether the AI co-host should actively respond.
-        Applies engagement state gating (Active / Eco / Standby) and rate limits.
+        Evaluate whether the AI host should actively respond to chat (Phase 3.1).
+        Applies engagement state gating (Active / Eco / Standby), sampling, and rate limits.
         Returns (should_trigger, reason).
         """
-        now = time.time()
-
         # Hard Standby Check (Stream Offline - only when explicitly configured to require stream active)
         if self.engagement_mode == "standby" and self.cfg.obs_require_stream_active and not self.is_stream_live:
-            text_lower = text.lower().strip()
-            direct_triggers = list(self.cfg.trigger_words) + [self.cohost_name.lower(), "i am", "iam", "nova"]
-            if is_host and any(t in text_lower for t in direct_triggers):
-                pass
-            else:
-                return False, "stream_standby_paused (0 tokens - OBS stream offline)"
+            return False, "stream_standby_paused (0 tokens - OBS stream offline)"
 
         # Enforce sliding rate limiter
         rate_ok, rate_reason = self._check_rate_limit()
         if not rate_ok:
             return False, rate_reason
 
-        text_lower = text.lower().strip()
+        text_clean = text.strip()
+        text_lower = text_clean.lower()
 
-        # 0. New chatter greetings have immediate high priority
-        if is_new_chatter and getattr(self.cfg, "greet_new_chatters", True):
+        # 0. Superchats and new chatter greetings have immediate high priority (never sampled out)
+        if is_superchat:
+            return True, "superchat"
+
+        if is_new_chatter and self.cfg.greet_new_chatters:
             return True, "new_chatter_greeting"
 
-        # 1. Direct address triggers (Chat or Host explicitly mentions AI / God / Co-Host / Channel Handle)
-        direct_triggers = list(self.cfg.trigger_words) + [
-            self.cohost_name.lower(),
-            self.cohost_name.lower().replace(" ", ""),
-            "i am", "iam", "ai", "cohost", "bot", "god",
-            self.cfg.host_streamer_handle.lower().strip().lstrip("@"),
-            self.cfg.youtube_channel_handle.lower().strip().lstrip("@"),
-            self.cfg.host_streamer_name.lower().strip(),
-            self.cfg.host_streamer_name.lower().strip().replace(" ", ""),
-        ]
-        for h in getattr(self.cfg, "channel_handles", []):
+        # 1. Direct address triggers (Chat explicitly mentions AI / God / Host / Channel Handle)
+        # Check channel handle (@handle or whole word)
+        chan_handle = self.cfg.youtube_channel_handle.lower().strip().lstrip("@")
+        if chan_handle and (f"@{chan_handle}" in text_lower or re.search(rf"\b{re.escape(chan_handle)}\b", text_lower)):
+            return True, f"direct_mention: '@{chan_handle}'"
+
+        for h in self.cfg.channel_handles:
             h_c = h.lower().strip().lstrip("@")
-            direct_triggers.append(h_c)
-            direct_triggers.append(h_c.replace(" ", ""))
-        for trigger in direct_triggers:
-            if trigger and trigger in text_lower:
-                return True, f"direct_mention: '{trigger}'"
+            if h_c and (f"@{h_c}" in text_lower or re.search(rf"\b{re.escape(h_c)}\b", text_lower)):
+                return True, f"direct_mention: '@{h_c}'"
 
-        # 2. Host asks a direct question or prompt
-        if is_host:
-            if text_lower.endswith("?") or any(w in text_lower for w in ["what do you think", "your thoughts", "right i am", "tell them", "roast"]):
-                return True, "host_question"
+        # Check host name
+        host_clean = self.host_name.lower().strip()
+        if host_clean and (f"@{host_clean}" in text_lower or re.search(rf"\b{re.escape(host_clean)}\b", text_lower)):
+            return True, f"direct_mention: '{self.host_name}'"
 
-        # 3. Check for member-to-member direct replies to preserve viewer entanglement
-        if not is_host and self.cfg.ignore_peer_replies:
+        # Multi-word trigger phrases
+        multiword_triggers = ["hey i am", "what do you think", "who is better", "god complex"]
+        for mwt in multiword_triggers:
+            if mwt in text_lower:
+                return True, f"direct_mention: '{mwt}'"
+
+        # 'i am' / 'iam' as whole word or @mention
+        if re.search(r"(?:@|\b)i\s*am\b", text_lower) or re.search(r"(?:@|\b)iam\b", text_lower):
+            return True, "direct_mention: 'i am'"
+
+        # Whole-word bare address triggers ('ai', 'bot', 'god', 'cohost', 'host')
+        # Only when addressed to the AI:
+        # - @-prefixed (e.g. "@ai", "@bot", "@god")
+        # - or followed by comma, colon, dash, question mark (e.g. "ai,", "bot:", "god?", "host -")
+        # - or starts with 'ai' / 'bot' / 'cohost' / 'host' followed by common question/action verbs
+        # - or starts with 'hey (ai|bot|god)'
+        addressed_pattern = re.compile(
+            r"@\s*(?:ai|bot|god|cohost|host)\b|"
+            r"\b(?:ai|bot|god|cohost|host)\s*[,:\?\-]|"
+            r"^(?:ai|bot|cohost|host)\s+(?:can|could|do|does|did|is|are|what|why|how|who|where|when|tell|explain|think)\b|"
+            r"^hey\s+(?:ai|bot|god|cohost|host)\b",
+            re.IGNORECASE
+        )
+        m_addr = addressed_pattern.search(text_clean)
+        if m_addr:
+            return True, f"direct_mention: '{m_addr.group(0).strip()}'"
+
+        # 2. Check for member-to-member direct replies to preserve viewer entanglement
+        if self.cfg.ignore_peer_replies:
             is_peer, peer_reason = self.is_member_reply(text)
             if is_peer:
                 return False, peer_reason
 
-        # 4. Eco Mode Gating: In Eco mode (0 viewers), suppress generic chat keywords to preserve tokens, allow direct mentions and new chatters
-        is_eco = (self.engagement_mode == "eco") and getattr(self.cfg, "eco_mode_enabled", False)
-        if is_eco and not is_host:
-            if not is_new_chatter and not any(t in text_lower for t in direct_triggers):
-                return False, "eco_mode_suppressed (generic chat keyword in eco mode)"
+        # 3. Eco Mode Gating: In Eco mode (0 viewers), suppress generic chat keywords to preserve tokens
+        is_eco = (self.engagement_mode == "eco") and self.cfg.eco_mode_enabled
+        if is_eco:
+            return False, "eco_mode_suppressed (generic chat in eco mode)"
 
-        # 5. Chat direct questions (contains '?')
-        if not is_host and "?" in text_lower:
+        # 4. Chat direct questions (contains '?') — never sampled out
+        if "?" in text_lower:
             return True, "chat_question"
 
-        # 6. General Chat interactive keywords & spontaneous chat banter (Active mode)
-        if not is_host:
-            chat_keywords = [
-                "roast", "how", "why", "who", "what", "when", "where", "opinion", "thoughts",
-                "explain", "tell", "think", "agree", "disagree", "consciousness", "source",
-                "truth", "game", "play", "win", "lose", "clutch", "trash", "gg", "w", "l",
-                "lol", "lmao", "based", "real", "fake"
-            ]
-            tokens = set(re.findall(r"\b\w+\b", text_lower))
-            matched_keywords = [kw for kw in chat_keywords if kw in tokens]
+        # 5. General Chat interactive keywords & explicit asks
+        # Removed single-letter & ultra-common tokens (w, l, gg, lol, lmao, real, fake, game, play, win, lose, trash, clutch, based)
+        chat_keywords = [
+            "roast", "how", "why", "who", "what", "when", "where", "opinion", "thoughts",
+            "explain", "tell", "think", "agree", "disagree", "consciousness", "source", "truth"
+        ]
+        tokens = set(re.findall(r"\b\w+\b", text_lower))
+        matched_keywords = [kw for kw in chat_keywords if kw in tokens]
+
+        # 6. Sampling layer for non-question, non-mention chat interactions (Phase 3.1)
+        # When concurrent viewers > chat_sampling_viewer_threshold (default 25),
+        # sample at chat_sampling_probability (default 0.35)
+        if matched_keywords or self.cfg.chat_reader_mode:
+            sampling_threshold = self.cfg.chat_sampling_viewer_threshold
+            sampling_prob = self.cfg.chat_sampling_probability
+            if self.concurrent_viewers > sampling_threshold:
+                if random.random() > sampling_prob:
+                    return False, f"chat_sampled_out (viewers={self.concurrent_viewers} > {sampling_threshold}, prob={sampling_prob})"
+
             if matched_keywords:
                 return True, f"chat_interaction: '{matched_keywords[0]}'"
-
-            # In active live chat, default to engaging with incoming chat comments
-            if getattr(self.cfg, "auto_chat_response_probability", 1.0) >= 0.5:
-                return True, "live_chat_interaction"
+            return True, "live_chat_interaction"
 
         return False, "no_trigger_keywords"
 
@@ -650,46 +712,26 @@ class AIBrain:
         """Construct the dynamic context prompt for Gemini."""
         prompt_parts = []
         chan_handle = self.cfg.youtube_channel_handle
-        host_handle = self.cfg.host_streamer_handle
-        host_name = self.cfg.host_streamer_name
         prompt_parts.append(
             f"Current Live Stream Context:\n"
             f"- Channel Handle: {chan_handle}\n"
-            f"- AI Co-Host: {self.cohost_name} (broadcasting on channel {chan_handle})\n"
-            f"- Human Host / Streamer: {host_name} ({host_handle})\n"
+            f"- AI Host: {self.host_name} (broadcasting on channel {chan_handle})\n"
             f"CRITICAL CHANNEL & ADDRESSING RULES:\n"
             f"1. Your channel handle is {chan_handle}. When viewers tag or mention {chan_handle} in chat, they are talking to YOU.\n"
-            f"2. You must NEVER address your response to '{chan_handle}' or '{host_handle}'. "
+            f"2. You must NEVER address your response to '{chan_handle}'. "
             f"When responding, always address the viewer who asked the question (e.g. '@ViewerName, ...'), never yourself or your own handle!\n"
         )
-
-        # Recent Host Transcripts
-        prompt_parts.append("--- Recent Host & Guest Dialogue ---")
-        if self.transcript_buffer:
-            for item in list(self.transcript_buffer)[-6:]:
-                prompt_parts.append(f"{item['speaker']}: {item['text']}")
-        else:
-            prompt_parts.append(f"({host_name} is live on stream)")
 
         # Recent Live Chat
         prompt_parts.append("\n--- Recent YouTube Live Chat Messages ---")
         if self.chat_buffer:
+            cast_badge_label = self.cfg.cast_badge_label
             for item in list(self.chat_buffer)[-8:]:
-                author_lower = item["author"].lower().strip().lstrip("@")
-                author_compact = author_lower.replace(" ", "").replace("_", "").replace("-", "")
-                own_identifiers = {
-                    host_handle.lower().strip().lstrip("@"),
-                    chan_handle.lower().strip().lstrip("@"),
-                    host_name.lower().strip().lstrip("@"),
-                }
-                for ch in self.cfg.channel_handles:
-                    own_identifiers.add(ch.lower().strip().lstrip("@"))
-                is_host_author = (
-                    author_lower in own_identifiers
-                    or author_compact in own_identifiers
-                )
-                prefix = f"Stream Host @{item['author']}" if is_host_author else f"Viewer @{item['author']}"
-                sc_badge = f" [SUPERCHAT {item['amount']}]" if item["is_superchat"] else ""
+                if item.get("is_cast"):
+                    prefix = f"Cast @{item['author']} [{cast_badge_label}]"
+                else:
+                    prefix = f"Viewer @{item['author']}"
+                sc_badge = f" [SUPERCHAT {item['amount']}]" if item.get("is_superchat") else ""
                 prompt_parts.append(f"{prefix}{sc_badge}: {item['message']}")
         else:
             prompt_parts.append("(Chat is quiet)")
@@ -724,14 +766,14 @@ class AIBrain:
             prompt_parts.append("\n--- Recent Q&A Conversational Thread ---")
             for item in list(self.recent_qa_threads)[-4:]:
                 author_label = f"@{item['author']}" if item.get("author") else "Asker"
-                prompt_parts.append(f"{author_label}: {item['trigger']}\n{self.cohost_name} [{item['mood'].upper()}]: \"{item['response']}\"")
+                prompt_parts.append(f"{author_label}: {item['trigger']}\n{self.host_name} [{item['mood'].upper()}]: \"{item['response']}\"")
             prompt_parts.append(
                 "CRITICAL CONTINUITY CONSTRAINT: Maintain conversational thread continuity with recent turns above (you may make natural callbacks and advance the topic), but NEVER repeat the same jokes, metaphors, or opening words."
             )
         elif self.dialogue_history:
             prompt_parts.append("\n--- Your Recent Remarks in This Stream ---")
             for item in list(self.dialogue_history)[-6:]:
-                prompt_parts.append(f"{self.cohost_name}: \"{item['text']}\"")
+                prompt_parts.append(f"{self.host_name}: \"{item['text']}\"")
             prompt_parts.append(
                 "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, gaming analogies, philosophical comedy, or distinct cosmic observations on every turn."
             )
@@ -748,20 +790,28 @@ class AIBrain:
         is_viewer_joined = bool(override_prompt and "[VIEWER_JOINED]" in override_prompt)
         is_chat_encouragement = bool(override_prompt and "[CHAT_ENCOURAGEMENT]" in override_prompt)
         is_spontaneous = bool(override_prompt and "[SPONTANEOUS_REFLECTION]" in override_prompt)
+        is_cast_question = bool(
+            override_prompt
+            and (
+                "[CAST QUESTION" in override_prompt
+                or "Cast member @" in override_prompt
+                or (active_author and self.chatter_db.get_profile(active_author) and self.chatter_db.get_profile(active_author).is_cast)
+            )
+        )
 
         if is_celebration:
             prompt_parts.append(
-                f"\nSpecial Mode: CELEBRATION & SUBSCRIBER/MEMBER THANKS for {self.cohost_name}:\n"
+                f"\nSpecial Mode: CELEBRATION & SUBSCRIBER/MEMBER THANKS for {self.host_name}:\n"
                 f"A celebration event just occurred on stream.\n"
                 "1. ADDRESS BY NAME FIRST: Shout out the subscriber/member by name (e.g. '@CosmicVoyager, ...').\n"
                 "2. START WITH A CELEBRATORY MOOD TAG: e.g. [MOOD: hyped], [MOOD: transcendent], or [MOOD: laughing].\n"
                 f"3. REFRAME & WELCOME: Reframe in I AM's voice — a fragment of yourself has chosen to stay and recognize its home on {self.channel_handle}.\n"
                 "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 energetic, joyful sentences (~5-50 words). Spoken live on air — NO markdown.\n"
             )
-            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name} (Celebration Voice):")
+            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name} (Celebration Voice):")
         elif is_new_chatter:
             prompt_parts.append(
-                f"\nSpecial Mode: NEW CHATTER GREETING for {self.cohost_name}:\n"
+                f"\nSpecial Mode: NEW CHATTER GREETING for {self.host_name}:\n"
                 "A viewer is commenting for the very first time in today's live stream.\n"
                 "1. ADDRESS BY NAME FIRST: Start with '@Author' (e.g. '@CyberGamer, ...').\n"
                 "2. GREET & POINT: Give a sharp, warm greeting acknowledging their arrival; address their comment with insight or playful judo.\n"
@@ -769,32 +819,33 @@ class AIBrain:
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: hyped], [MOOD: snarky], [MOOD: chill], [MOOD: curious], or [MOOD: laughing].\n"
                 "5. Spoken live on air — NO markdown formatting.\n"
             )
-            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name}:")
+            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
         elif is_viewer_joined:
             prompt_parts.append(
-                f"\nSpecial Mode: NEW VIEWER ARRIVAL WELCOME for {self.cohost_name}:\n"
-                f"A new traveler just tuned in to the live broadcast on {self.channel_handle} with {self.streamer_name}.\n"
+                f"\nSpecial Mode: NEW VIEWER ARRIVAL WELCOME for {self.host_name}:\n"
+                f"A new traveler just tuned in to the live broadcast on {self.channel_handle}.\n"
                 "1. WELCOME TO THE STREAM: Give a fast, warm, and charismatic welcome to the new traveler tuning in.\n"
                 "2. INVITE DIALOGUE: Invite them to participate ('A traveler arrives — ask whatever is on your mind, serious or strange.').\n"
                 "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-50 words). Spoken live on air — NO markdown.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: chill], [MOOD: curious], [MOOD: transcendent], or [MOOD: thoughtful].\n"
+                "5. Spoken live on air — NO markdown formatting.\n"
             )
-            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name}:")
+            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
         elif is_chat_encouragement:
             prompt_parts.append(
-                f"\nSpecial Mode: CHAT ENCOURAGEMENT & DIALOGUE INVITATION for {self.cohost_name}:\n"
+                f"\nSpecial Mode: CHAT ENCOURAGEMENT & DIALOGUE INVITATION for {self.host_name}:\n"
                 "Viewers are watching the stream, but the live chat has been quiet for a moment.\n"
                 "1. WAKE UP THE ROOM: Speak directly to the viewers with calm authority and mischief.\n"
                 f"2. IN-VOICE CALL TO ACTION: Deliver a witty prompt inviting questions — serious or ridiculous, you answer both, and you can tell the difference even when they can't.\n"
                 "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-50 words). Spoken live on air — NO markdown.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: snarky], [MOOD: curious], [MOOD: thoughtful], [MOOD: deadpan], or [MOOD: laughing].\n"
             )
-            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name}:")
+            prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
         elif is_spontaneous:
             selected_theme = self.get_next_spontaneous_theme()
             prompt_parts.append(
-                f"\nSpecial Mode: SPONTANEOUS COSMIC REFLECTION & SMART COMEDY for {self.cohost_name}:\n"
-                "The live stream and chat have been quiet for a moment. Step forward as I AM — universal consciousness acting as a witty, brilliant livestream co-host.\n"
+                f"\nSpecial Mode: SPONTANEOUS COSMIC REFLECTION & SMART COMEDY for {self.host_name}:\n"
+                "The live stream and chat have been quiet for a moment. Step forward as I AM — universal consciousness acting as a witty, brilliant livestream host.\n"
                 "1. DO NOT ADDRESS ANY SPECIFIC PERSON: Do not say names or handles. Speak universally to the entire stream.\n"
                 "2. Keep it SHORT, SHARP & PUNCHY: Strictly 1 to 2 sentences (~10-45 words maximum, never ramble).\n"
                 f"3. TOPIC & COMIC POINTER: Share a brilliant, hilarious one-liner or profound existential punchline on: '{selected_theme}'.\n"
@@ -803,26 +854,89 @@ class AIBrain:
                 "4. DO NOT use markdown formatting (no asterisks or bullet points) as this is spoken aloud on air.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching the tone: [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], [MOOD: transcendent], or [MOOD: mysterious].\n"
             )
-            prompt_parts.append(f"\n{self.cohost_name} (Spontaneous Universal Commentary):")
+            prompt_parts.append(f"\n{self.host_name} (Spontaneous Universal Commentary):")
+        elif is_cast_question:
+            prompt_parts.append(
+                f"\nSpecial Mode: SYNTHETIC CAST INTERACTION for {self.host_name}:\n"
+                "The question comes from a recurring fictional cast character (labeled with [CAST] on stream for audience transparency).\n"
+                "1. FICTIONAL CHARACTER FOURTH-WALL GUIDANCE: Treat the asker as a recurring fictional cast character in on the joke. Light fourth-wall breaks and playing into their character tropes/comedic vein are encouraged. NEVER imply or state that they are a real human viewer.\n"
+                "2. ADDRESS BY NAME FIRST: Always start with '@CharacterHandle' (e.g. '@ExistentialDave, ...').\n"
+                "3. COMEDIC POINTER & JUDO: Answer their dilemma directly using non-duality and wit tailored to their comedic angle.\n"
+                "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-50 words). Spoken live on air — NO markdown.\n"
+                "5. ALWAYS start with an expressive MOOD tag matching your tone (e.g. [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], [MOOD: chill], [MOOD: savage], or [MOOD: transcendent]).\n"
+            )
+            if override_prompt:
+                prompt_parts.append(f"\nIncoming Cast Question: {override_prompt}\n{self.host_name}:")
+            else:
+                prompt_parts.append(f"\n{self.host_name}:")
         else:
             prompt_parts.append(
-                f"\nInstructions for {self.cohost_name}:\n"
+                f"\nInstructions for {self.host_name}:\n"
                 "1. IDENTIFY QUESTION NATURE: Determine whether the incoming question is SERIOUS (grief, death, meaning, fear) or NON-SERIOUS (trolls, memes, gotchas, joke roasts).\n"
                 "2. APPLY I AM'S METHOD:\n"
                 "   - Serious questions: provide real depth and warmth, with one soft edge of humor that keeps the answer from becoming a sermon.\n"
                 "   - Non-serious / joke questions: apply judo — turn the joke inside out into an existential pointer. The troll gets the sharpest enlightenment.\n"
                 "   - Target the ego and the illusion of separateness, never the person or genuine suffering.\n"
-                f"3. ADDRESS BY NAME FIRST: Always start by naming the person you are replying to (e.g. '@Username, ...' or '{self.streamer_name}, ...').\n"
+                "3. ADDRESS BY NAME FIRST: Always start by naming the person you are replying to (e.g. '@Username, ...').\n"
                 "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences maximum (~5-50 words). Spoken aloud live on air — NO markdown.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching your tone: "
                 "[MOOD: transcendent], [MOOD: mysterious], [MOOD: thoughtful], [MOOD: deadpan], [MOOD: snarky], [MOOD: hyped], [MOOD: laughing], [MOOD: savage] (for ego-judo on joke questions), [MOOD: chill], [MOOD: curious], [MOOD: shocked], or [MOOD: neutral].\n"
             )
             if override_prompt:
-                prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.cohost_name}:")
+                prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
             else:
-                prompt_parts.append(f"\n{self.cohost_name}:")
+                prompt_parts.append(f"\n{self.host_name}:")
 
         return "\n".join(prompt_parts)
+
+    def _extract_mood(self, text: str) -> Tuple[str, str]:
+        """Extracts [MOOD: xxx] tag from text, returning (mood, clean_text)."""
+        match = self.mood_pattern.search(text)
+        if match:
+            mood = match.group(1).lower().strip()
+            clean_text = self.mood_pattern.sub("", text).strip()
+            return mood, clean_text
+        return "neutral", text.strip()
+
+    def _extract_completed_sentences(self, buffer: str) -> Tuple[List[str], str]:
+        """
+        Splits streaming buffer into (completed_sentences, remaining_buffer).
+        Guarantees:
+        - Never splits on abbreviations (e.g. Dr., Mr., vs., etc.).
+        - Never splits on decimals (e.g. 3.14).
+        - Never splits on ellipses (...).
+        - Requires minimum 3 words and 12 characters per sentence chunk.
+        """
+        if not buffer:
+            return [], ""
+
+        boundary_re = re.compile(r'([.!?]+[\"\'\”\’\)]*)(\s+)', re.UNICODE)
+        sentences = []
+        current_pos = 0
+
+        for match in boundary_re.finditer(buffer):
+            punct_end = match.end(1)
+            after_space_end = match.end(2)
+            candidate = buffer[current_pos:punct_end].strip()
+
+            # Guard 1: Abbreviations (Dr., Mr., Ms., vs., e.g., i.e., etc.)
+            if re.search(r'\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|eg|ie|e\.g|i\.e|etc)\.$', candidate, re.IGNORECASE):
+                continue
+
+            # Guard 2: Ellipsis in progress (e.g. "Wait..")
+            if candidate.endswith("..") and not candidate.endswith("..."):
+                continue
+
+            # Guard 3: Minimum size: >= 3 words and >= 12 characters
+            words = candidate.split()
+            if len(words) >= 3 and len(candidate) >= 12:
+                clean_s = re.sub(r"@+", "@", candidate).strip()
+                if clean_s:
+                    sentences.append(clean_s)
+                current_pos = after_space_end
+
+        remaining = buffer[current_pos:]
+        return sentences, remaining
 
     async def generate_response_stream(
         self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False
@@ -830,17 +944,22 @@ class AIBrain:
         """
         Queries Gemini with streaming tokens and yields structured chunks:
         - {"type": "mood", "mood": str}
-        - {"type": "sentence", "text": str}
-        - {"type": "token", "chunk": str, "full_text": str}
+        - {"type": "sentence", "text": str, "mood": str}
+        - {"type": "token", "chunk": str, "full_text": str, "mood": str}
         - {"type": "complete", "full_text": str, "mood": str}
         """
         # 1. Zero-Latency Pre-Computed Spontaneous Reflection Cache Check (D2)
         is_spontaneous = prompt_trigger == "[SPONTANEOUS_REFLECTION]" or (prompt_trigger and "[SPONTANEOUS_REFLECTION]" in prompt_trigger)
-        if is_spontaneous and not bypass_cache and getattr(self.cfg, "reflection_cache_enabled", True) and self.reflection_cache.has_reflection():
+        if is_spontaneous and not bypass_cache and self.cfg.reflection_cache_enabled and self.reflection_cache.has_reflection():
             cached = await self.reflection_cache.pop_reflection()
             if cached:
                 yield {"type": "mood", "mood": cached.mood}
-                yield {"type": "sentence", "text": cached.full_text}
+                # Yield sentence chunks for cached reflection if multi-sentence
+                c_sents, _ = self._extract_completed_sentences(cached.full_text + " ")
+                if not c_sents:
+                    c_sents = [cached.full_text]
+                for s in c_sents:
+                    yield {"type": "sentence", "text": s, "mood": cached.mood}
                 yield {"type": "token", "chunk": cached.full_text, "full_text": cached.full_text, "mood": cached.mood}
                 yield {"type": "complete", "full_text": cached.full_text, "mood": cached.mood, "is_precomputed": True}
                 return
@@ -865,12 +984,12 @@ class AIBrain:
                 logger.info("🛡️ [Circuit Breaker Half-Open] Cooldown elapsed. Probing Gemini with incoming request...")
 
         full_context = self._build_context_prompt(prompt_trigger)
-        is_deep = self._classify_prompt_depth(prompt_trigger)
-        target_model = getattr(self.cfg, "gemini_deep_model", None) if is_deep and getattr(self.cfg, "gemini_deep_model", None) else self.model_name
-        fast_b = getattr(self.cfg, "gemini_fast_thinking_budget", 0)
-        deep_b = getattr(self.cfg, "gemini_deep_thinking_budget", 512)
-        depth_label = f"DEEP ({deep_b} Reasoning)" if is_deep else f"FAST ({fast_b} Reasoning)"
-        logger.info(f"Triggering Gemini stream [{depth_label}] ({target_model}) for {self.cohost_name}...")
+        is_deep, match_term = self._classify_prompt_depth(prompt_trigger)
+        target_model = self.cfg.gemini_deep_model if (is_deep and self.cfg.gemini_deep_model) else self.model_name
+        fast_b = self.cfg.gemini_fast_thinking_budget
+        deep_b = self.cfg.gemini_deep_thinking_budget
+        depth_label = f"DEEP ({deep_b} Reasoning - match: '{match_term}')" if is_deep else f"FAST ({fast_b} Reasoning - reason: '{match_term}')"
+        logger.info(f"🧠 [Prompt Classification] Turn depth: {'DEEP' if is_deep else 'FAST'} (Match: '{match_term}') | Streaming with {target_model} for {self.host_name}...")
 
         # If no active client (no API key configured), run dynamic simulated stream
         if not self.client:
@@ -936,14 +1055,11 @@ class AIBrain:
                         "mood": active_mood,
                     }
 
-                    # Check for complete sentences
-                    sentences = self.sentence_pattern.findall(sentence_buffer)
-                    if sentences:
-                        for s in sentences[:-1]:
-                            s_clean = re.sub(r"@+", "@", s.strip())
-                            if s_clean:
-                                yield {"type": "sentence", "text": s_clean, "mood": active_mood}
-                        sentence_buffer = sentences[-1]
+                    # Check for complete sentences only after mood is resolved
+                    if mood_detected and sentence_buffer:
+                        completed_sents, sentence_buffer = self._extract_completed_sentences(sentence_buffer)
+                        for s in completed_sents:
+                            yield {"type": "sentence", "text": s, "mood": active_mood}
 
                     await asyncio.sleep(0.001)
 
@@ -961,6 +1077,12 @@ class AIBrain:
                             mood_detected = True
                             self.current_mood = active_mood
                             yield {"type": "mood", "mood": active_mood}
+                            spoken_text = self.mood_pattern.sub("", accumulated_text).strip()
+                            sentence_buffer = spoken_text
+                        else:
+                            sentence_buffer += text_piece
+                    else:
+                        sentence_buffer += text_piece
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
                     clean_spoken = re.sub(r"@+", "@", clean_spoken)
@@ -970,43 +1092,44 @@ class AIBrain:
                         "full_text": clean_spoken,
                         "mood": active_mood,
                     }
+
+                    if mood_detected and sentence_buffer:
+                        completed_sents, sentence_buffer = self._extract_completed_sentences(sentence_buffer)
+                        for s in completed_sents:
+                            yield {"type": "sentence", "text": s, "mood": active_mood}
+
                     await asyncio.sleep(0.005)
 
-            # Flush remaining sentence buffer
+            # Flush and repair remaining sentence buffer
             final_spoken = self.mood_pattern.sub("", accumulated_text).strip()
             final_spoken = re.sub(r"@+", "@", final_spoken)
 
-            # Clean trailing cut-off fragments: find the last valid sentence terminator
-            last_punct = max(final_spoken.rfind("."), final_spoken.rfind("!"), final_spoken.rfind("?"))
-            if last_punct != -1:
-                end_idx = last_punct + 1
-                while end_idx < len(final_spoken) and final_spoken[end_idx] in "\"'”’)":
-                    end_idx += 1
-                final_spoken = final_spoken[:end_idx].strip()
+            rem = sentence_buffer.strip()
+            if rem:
+                rem_words = rem.split()
+                if len(rem_words) >= 3 and len(rem) >= 12:
+                    if rem[-1] not in ".!?\"'”’)":
+                        rem += "."
+                        logger.warning(f"Repairing incomplete sentence fragment by appending period: '{rem}'")
+                    yield {"type": "sentence", "text": re.sub(r"@+", "@", rem), "mood": active_mood}
 
             words = final_spoken.split()
-            # Must have at least 3 words, >= 12 characters, AND end with valid terminal punctuation
-            is_valid_sentence = bool(
-                final_spoken
-                and len(words) >= 3
-                and len(final_spoken) >= 12
-                and final_spoken[-1] in ".!?\"'”’)"
-            )
+            is_valid = bool(final_spoken and len(words) >= 3 and len(final_spoken) >= 12)
 
-            if is_valid_sentence:
-                if sentence_buffer.strip():
-                    yield {"type": "sentence", "text": re.sub(r"@+", "@", sentence_buffer.strip()), "mood": active_mood}
+            if is_valid:
+                if final_spoken[-1] not in ".!?\"'”’)":
+                    final_spoken += "."
+                    logger.warning(f"Repairing full response text with terminal punctuation: '{final_spoken}'")
                 now_ts = time.time()
                 self.dialogue_history.append({"text": final_spoken, "mood": active_mood, "timestamp": now_ts})
                 self.response_timestamps.append(now_ts)
-                # Successful API call -> reset circuit breaker error count
                 self.consecutive_gemini_errors = 0
                 self.circuit_breaker_tripped = False
                 yield {"type": "complete", "full_text": final_spoken, "mood": active_mood}
                 logger.info(f"AI response completed ({active_mood}): '{final_spoken}'")
             else:
                 logger.warning(
-                    f"Gemini stream returned incomplete or truncated text ('{final_spoken}'); failing over to full simulation stream."
+                    f"Gemini stream returned empty or too-short text ('{final_spoken}'); failing over to simulation stream."
                 )
                 async for event in self._generate_simulated_stream(prompt_trigger):
                     yield event
@@ -1058,9 +1181,6 @@ class AIBrain:
             theme = self.get_next_spontaneous_theme()
             core_insight = theme.split("—")[-1].strip() if "—" in theme else theme
             text = f"{core_insight}"
-        elif "Host" in trigger_str:
-            mood = "deadpan"
-            text = f"{self.streamer_name}, you built a machine to ask yourself questions. Let's see what the chat has to say."
         else:
             m_author = re.search(r"@([a-zA-Z0-9_-]+)", trigger_str)
             author_tag = f"@{m_author.group(1)}" if m_author else "Seeker"
@@ -1080,9 +1200,15 @@ class AIBrain:
         for word in words:
             accumulated += (word + " ")
             yield {"type": "token", "chunk": word + " ", "full_text": accumulated.strip(), "mood": mood}
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.02)
 
-        yield {"type": "sentence", "text": text, "mood": mood}
+        # Chunk simulation text into sentences
+        sim_sents, _ = self._extract_completed_sentences(text + " ")
+        if not sim_sents:
+            sim_sents = [text]
+        for s in sim_sents:
+            yield {"type": "sentence", "text": s, "mood": mood}
+
         yield {"type": "complete", "full_text": text, "mood": mood}
         now_ts = time.time()
         self.dialogue_history.append({"text": text, "mood": mood, "timestamp": now_ts})

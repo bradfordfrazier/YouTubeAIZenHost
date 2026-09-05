@@ -1,7 +1,7 @@
 """
 End-to-End All-Local In-Memory Integration Test.
 Runs LocalCoHostApp in-process on the OBS Host machine,
-simulates live speech transcripts, YouTube chat, and OBS events,
+simulates live questions, YouTube chat, and OBS events,
 and validates complete in-memory pipeline flow to TTS, Visualizer, and NDI broadcast.
 """
 
@@ -58,24 +58,25 @@ async def run_e2e_test():
     assert app.engagement_mode == "active", f"Expected active mode, got {app.engagement_mode}"
     print(f"   Mode: {app.engagement_mode.upper()} | Viewers: {app.concurrent_viewers}")
 
-    # 3. Simulate Host Speech Transcript
-    print("-> [Step 3: Host Speech -> 'Nova, what do you think about our new single PC setup?']")
-    host_text = "Nova, what do you think about our new single PC setup?"
-    app.current_host_transcript = host_text
-    app.brain.add_transcript("Host", host_text)
-    should_trig, reason = app.brain.should_trigger_response(host_text, is_host=True)
+    # 3. Simulate Direct Viewer Question
+    print("-> [Step 3: Viewer Question -> '@I Am what is consciousness?']")
+    question_text = "@I Am what is consciousness?"
+    chat_item_q = {"author": "ZenSeeker", "message": question_text, "is_superchat": False, "amount": "", "timestamp": time.time()}
+    app.chat_history.append(chat_item_q)
+    app.brain.add_chat_message("ZenSeeker", question_text, False, "")
+    should_trig, reason = app.brain.should_trigger_response(question_text)
     if should_trig:
-        app._trigger_ai_turn(prompt_trigger=f"Host said: '{host_text}'")
+        app._trigger_ai_turn(prompt_trigger=f"Chat message from @ZenSeeker: '{question_text}'", event_type="direct_mention", priority=2, chat_item=chat_item_q)
     await asyncio.sleep(2.0)
 
     # 4. Simulate Live Chat Comment
-    print("-> [Step 4: Viewer Chat -> @CyberGamer: 'Nova is crushing it!']")
-    chat_msg = "Nova is crushing it!"
+    print("-> [Step 4: Viewer Chat -> @CyberGamer: 'I Am is crushing it!']")
+    chat_msg = "I Am is crushing it!"
     app.chat_history.append({"author": "CyberGamer", "message": chat_msg, "is_superchat": False, "amount": "", "timestamp": time.time()})
     app.brain.add_chat_message("CyberGamer", chat_msg, False, "")
-    should_trig, reason = app.brain.should_trigger_response(chat_msg, is_host=False)
+    should_trig, reason = app.brain.should_trigger_response(chat_msg)
     if should_trig:
-        app._trigger_ai_turn(prompt_trigger=f"Chat message from @CyberGamer: '{chat_msg}'")
+        app._trigger_ai_turn(prompt_trigger=f"Chat message from @CyberGamer: '{chat_msg}'", event_type="chat", priority=4)
     await asyncio.sleep(2.0)
 
     # 5. Simulate Superchat
@@ -83,13 +84,13 @@ async def run_e2e_test():
     sc_msg = "Hyped for tonight's broadcast!!"
     app.chat_history.append({"author": "VIP_Supporter", "message": sc_msg, "is_superchat": True, "amount": "$20.00", "timestamp": time.time()})
     app.brain.add_chat_message("VIP_Supporter", sc_msg, True, "$20.00")
-    app._trigger_ai_turn(prompt_trigger=f"Chat message from @VIP_Supporter: '{sc_msg}'")
+    app._trigger_ai_turn(prompt_trigger=f"Chat message from @VIP_Supporter: '{sc_msg}'", event_type="superchat", priority=1)
     await asyncio.sleep(2.0)
 
-    # 6. Simulate Host Celebration Trigger
-    print("-> [Step 6: Celebration Event -> 'Bradford: Celebrate!']")
+    # 6. Simulate Celebration Trigger
+    print("-> [Step 6: Celebration Event -> 'Celebrate!']")
     app.visualizer.trigger_celebration(duration=5.0)
-    app._trigger_ai_turn(prompt_trigger="[CELEBRATION] Host Bradford called for a celebration: 'Celebrate!'. Hyped celebration response!")
+    app._trigger_ai_turn(prompt_trigger="[CELEBRATION] Celebration called: 'Celebrate!'. Hyped celebration response!", event_type="superchat", priority=1)
     await asyncio.sleep(2.0)
 
     # 7. Simulate New Channel Member Event

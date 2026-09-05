@@ -21,11 +21,6 @@ except ImportError:
     cyndilib = None
     CYNDILIB_AVAILABLE = False
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [NDI-STREAMER] %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("ndi_streamer")
 
 

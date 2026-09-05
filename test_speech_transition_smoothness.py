@@ -13,7 +13,6 @@ def test_speech_transition_smoothness():
 
     spectrum = np.zeros(32, dtype=np.float32)
     chat_messages = []
-    host_transcript = ""
     ai_subtitle = ""
 
     flare_lens = []
@@ -24,7 +23,7 @@ def test_speech_transition_smoothness():
     # 1. Idle state for 30 frames
     for f in range(30):
         audio_metrics = {"rms": 0.0, "spectrum": spectrum, "is_speaking": False}
-        vis.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis.render_frame(audio_metrics, chat_messages, ai_subtitle)
         speech_intensities.append(vis.speech_intensity)
 
     assert vis.speech_intensity < 0.01, f"Expected idle speech_intensity ~0, got {vis.speech_intensity}"
@@ -32,7 +31,7 @@ def test_speech_transition_smoothness():
     # 2. Speaking on words for 30 frames (rms = 0.15, is_speaking = True)
     for f in range(30):
         audio_metrics = {"rms": 0.15, "spectrum": spectrum, "is_speaking": True}
-        vis.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis.render_frame(audio_metrics, chat_messages, ai_subtitle)
         speech_intensities.append(vis.speech_intensity)
 
     assert vis.speech_intensity > 0.95, f"Expected active speech_intensity > 0.95, got {vis.speech_intensity}"
@@ -40,7 +39,7 @@ def test_speech_transition_smoothness():
     # 3. Speaking in-between words for 20 frames (rms = 0.0, is_speaking = True)
     for f in range(20):
         audio_metrics = {"rms": 0.0, "spectrum": spectrum, "is_speaking": True}
-        vis.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis.render_frame(audio_metrics, chat_messages, ai_subtitle)
         speech_intensities.append(vis.speech_intensity)
 
     assert vis.speech_intensity > 0.95, f"Expected between-words speech_intensity to stay high, got {vis.speech_intensity}"
@@ -49,7 +48,7 @@ def test_speech_transition_smoothness():
     decay_intensities = []
     for f in range(60):
         audio_metrics = {"rms": 0.0, "spectrum": spectrum, "is_speaking": False}
-        vis.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis.render_frame(audio_metrics, chat_messages, ai_subtitle)
         speech_intensities.append(vis.speech_intensity)
         decay_intensities.append(vis.speech_intensity)
 

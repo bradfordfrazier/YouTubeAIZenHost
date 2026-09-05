@@ -12,7 +12,7 @@ from pathlib import Path
 import random
 import re
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pygame
@@ -277,7 +277,7 @@ class Visualizer:
         self.width = width or self.cfg.visualizer_width  # 1920 (16:9) or 1080 (9:16)
         self.height = height or self.cfg.visualizer_height  # 1080 (16:9) or 1920 (9:16)
         self.fps = self.cfg.visualizer_fps  # 60
-        self.cohost_name = self.cfg.ai_cohost_name
+        self.host_name = self.cfg.ai_host_name
         self.is_vertical = (self.height > self.width)
 
         # Enable Windows Per-Monitor DPI Awareness so the desktop window matches physical pixels
@@ -329,7 +329,7 @@ class Visualizer:
             pygame.event.set_grab(False)
             pygame.mouse.set_visible(True)
             caption_mode = "Vertical 9:16 (1080x1920)" if self.is_vertical else "Landscape 16:9 (1920x1080)"
-            pygame.display.set_caption(f"AI Co-Host Broadcast Visualizer - {caption_mode}")
+            pygame.display.set_caption(f"AI Host Broadcast Visualizer - {caption_mode}")
 
             # On Windows, ensure window is 100% inside the visible monitor work area without hanging off boundaries
             if os.name == "nt":
@@ -378,13 +378,10 @@ class Visualizer:
         self.clock = pygame.time.Clock()
 
         # Resolution-Aware High-Legibility Typography
-        # In 9:16 vertical mode (1080x1920), font sizes are scaled up to broadcast/mobile standards
-        # so text remains crisp, prominent, and readable in OBS dock previews and on mobile devices.
         if self.is_vertical:
             self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
             self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
             self.font_ai_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 36, bold=True)
-            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 18)
             self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 24, bold=True)
             self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 30, bold=True)
@@ -398,7 +395,6 @@ class Visualizer:
             self.font_title = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 28, bold=True)
             self.font_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 22)
             self.font_ai_subtitle = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 34, bold=True)
-            self.font_host_transcript = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 26, bold=True)
             self.font_small = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 16)
             self.font_badge = pygame.font.SysFont("Consolas, Segoe UI, sans-serif", 18, bold=True)
             self.font_chat_author = pygame.font.SysFont("Segoe UI, Arial, sans-serif", 24, bold=True)
@@ -425,8 +421,9 @@ class Visualizer:
         self.celebration_particles: List[CelebrationParticle] = []
         self.celebration_timer: float = 0.0
 
-        # Promotional Callout Overlays ("Ask Me Your Questions", "Like & Subscribe")
+        # Promotional Callout Overlays ("Ask God", "Like & Subscribe")
         self.promo_enabled = getattr(self.cfg, "promo_overlay_enabled", True)
+        self.promo_mode = getattr(self.cfg, "promo_mode", "event").strip().lower()
         self.promo_interval = getattr(self.cfg, "promo_overlay_interval_sec", 40.0)
         self.promo_duration = getattr(self.cfg, "promo_overlay_duration_sec", 10.0)
         self.promo_state = "off"  # "off", "entrance", "display", "exit"
@@ -531,20 +528,34 @@ class Visualizer:
         self.surf_flare = pygame.Surface((self.box_size, self.box_size), pygame.SRCALPHA)
 
         # Adaptive card dimensions with left and right margin padding
-        host_w, host_h = (940, 140) if self.is_vertical else (460, 150)
         chat_w, chat_h = (940, 580) if self.is_vertical else (380, 490)
         sub_w, sub_h = (940, 380) if self.is_vertical else (880, 360)
         promo_w, promo_h = (920, 130) if self.is_vertical else (820, 114)
 
-        self.surf_host_card = pygame.Surface((host_w, host_h), pygame.SRCALPHA)
         self.surf_chat_card = pygame.Surface((chat_w, chat_h), pygame.SRCALPHA)
         self.surf_subtitle_card = pygame.Surface((sub_w, sub_h), pygame.SRCALPHA)
         self.surf_ai_text = pygame.Surface((sub_w, sub_h), pygame.SRCALPHA)
         self.surf_promo_card = pygame.Surface((promo_w, promo_h), pygame.SRCALPHA)
+        self._surf_god_circles = pygame.Surface((600, 600), pygame.SRCALPHA)
+        self._last_preview_flip_time = 0.0
+        self._text_cache: Dict[Tuple, pygame.Surface] = {}
+        self.current_palette = ColorPalette.get(self.current_mood)
 
         # Fallback chat history cache for instant restoration on visualizer startup
         self._cached_chat_messages: List[Dict] = []
         self._load_cached_chat()
+
+    def _render_text(self, font: pygame.font.Font, text: str, color: Any) -> pygame.Surface:
+        """Cached font rendering helper to eliminate redundant surface allocations per frame."""
+        c_tuple = tuple(int(x) for x in color[:3]) if isinstance(color, (list, tuple, np.ndarray)) else color
+        key = (id(font), text, c_tuple)
+        surf = self._text_cache.get(key)
+        if surf is None:
+            surf = font.render(text, True, color)
+            if len(self._text_cache) > 2000:
+                self._text_cache.clear()
+            self._text_cache[key] = surf
+        return surf
 
     def _load_cached_chat(self):
         """Restores recent chat history from disk so visualizer resumes seamlessly on restart."""
@@ -697,14 +708,17 @@ class Visualizer:
 
             if self.mood_lerp_factor >= 1.0:
                 self.current_mood = self.target_mood
+                self.current_palette = ColorPalette.get(self.current_mood)
+
+    @property
+    def cohost_name(self) -> str:
+        return self.host_name
 
     def render_frame(
         self,
         audio_metrics: Dict,
         chat_messages: List[Dict],
-        host_transcript: str,
         ai_subtitle: str,
-        host_connected: bool = True,
         obs_connected: bool = True,
         engagement_mode: str = "active",
         concurrent_viewers: int = 0,
@@ -735,7 +749,7 @@ class Visualizer:
         self._draw_dynamic_background(rms)
 
         # 2. Particle Field
-        p_info = ColorPalette.get(self.current_mood)
+        p_info = self.current_palette
         speed_mult = p_info["speed"]
         self._draw_particles(speed_mult, rms)
 
@@ -748,13 +762,11 @@ class Visualizer:
         # 5. Glassmorphism HUD Overlays
         if getattr(self.cfg, "show_top_status_bar", False):
             self._draw_top_header(
-                host_connected=host_connected,
                 obs_connected=obs_connected,
                 engagement_mode=engagement_mode,
                 concurrent_viewers=concurrent_viewers,
                 is_stream_live=is_stream_live,
             )
-        self._draw_host_transcript_card(host_transcript)
 
         # Maintain active pinned message in chat panel until Oracle response completely dissolves
         motto = getattr(self.cfg, "motto_phrase", "Everything is perfect.")
@@ -782,7 +794,7 @@ class Visualizer:
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
         self._draw_promo_callout_overlay(dt, is_speaking=is_speaking, is_turn_busy=is_turn_busy)
 
-        # Update Pygame display if not headless
+        # Update Pygame display if not headless (operator preview window)
         if not self.cfg.visualizer_headless and self.window_surf is not None:
             # Handle window events (resize, quit, etc.)
             for event in pygame.event.get():
@@ -797,12 +809,15 @@ class Visualizer:
                 elif event.type == pygame.QUIT:
                     self.should_quit = True
 
-            # Scale the high-res render canvas to the desktop window container
-            if self.window_size == (self.width, self.height):
-                self.window_surf.blit(self.screen, (0, 0))
-            else:
-                pygame.transform.smoothscale(self.screen, self.window_size, self.window_surf)
-            pygame.display.flip()
+            # Scale and flip preview window at <= 30 FPS to reduce CPU/memory load while NDI stays 60 FPS
+            now_perf = time.perf_counter()
+            if (now_perf - self._last_preview_flip_time) >= 0.033:
+                self._last_preview_flip_time = now_perf
+                if self.window_size == (self.width, self.height):
+                    self.window_surf.blit(self.screen, (0, 0))
+                else:
+                    pygame.transform.smoothscale(self.screen, self.window_size, self.window_surf)
+                pygame.display.flip()
 
         # Return full pristine RGBA buffer for NDI (always 1080x1920 or 1920x1080)
         return pygame.image.tobytes(self.screen, "RGBA")
@@ -929,11 +944,9 @@ class Visualizer:
         r_outer = int(210 + speak_boost * 35 + idle_breathe)
         r_inner = r_outer // 2  # About half the size of the complete circle
 
-        circle_box = r_outer * 2
-        if not hasattr(self, "_surf_god_circles") or self._surf_god_circles.get_width() != circle_box:
-            self._surf_god_circles = pygame.Surface((circle_box, circle_box), pygame.SRCALPHA)
+        # Draw into persistent fixed-size scratch surface without per-frame reallocation
         self._surf_god_circles.fill((0, 0, 0, 0))
-        center_circle = (r_outer, r_outer)
+        center_circle = (300, 300)
 
         # A. The Complete Circle: Very transparent but still clearly visible
         alpha_outer = int(38 + rms * 20)
@@ -947,7 +960,7 @@ class Visualizer:
         pygame.draw.circle(self._surf_god_circles, (*c_high, min(255, alpha_inner + 50)), center_circle, r_inner, 1)
 
         # Both circles sit directly behind the gleaming point of light
-        self.screen.blit(self._surf_god_circles, (cx - r_outer, cy - r_outer))
+        self.screen.blit(self._surf_god_circles, (cx - 300, cy - 300))
 
         # ----------------------------------------------------------------------
         # 2. 16-Point Deep-Space Starburst Diffraction Spikes & Scintillation
@@ -1131,7 +1144,6 @@ class Visualizer:
 
     def _draw_top_header(
         self,
-        host_connected: bool,
         obs_connected: bool,
         engagement_mode: str = "active",
         concurrent_viewers: int = 0,
@@ -1164,74 +1176,47 @@ class Visualizer:
         live_txt = self.font_badge.render(badge_text, True, dot_color)
         self.screen.blit(live_txt, (48, txt_y))
 
-        # Local Host & OBS Status
-        host_color = (0, 240, 150) if host_connected else (255, 100, 100)
-        host_str = "HOST: LOCAL" if host_connected else "HOST: READY"
-        host_txt = self.font_badge.render(host_str, True, host_color)
-
         # Mood Badge
         c_prim = tuple(int(c) for c in self.c_primary)
         mood_txt = self.font_badge.render(f"MOOD: {self.current_mood.upper()}", True, c_prim)
 
         if self.is_vertical:
-            self.screen.blit(host_txt, (340, txt_y))
-            self.screen.blit(mood_txt, (560, txt_y))
+            self.screen.blit(mood_txt, (360, txt_y))
             ndi_txt = self.font_badge.render("NDI: 9:16", True, (160, 200, 255))
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
         else:
-            self.screen.blit(host_txt, (340, txt_y))
             obs_color = (0, 240, 150) if obs_connected else (220, 180, 50)
             obs_txt = self.font_badge.render(f"OBS WS: {'ACTIVE' if obs_connected else 'WAITING'}", True, obs_color)
-            self.screen.blit(obs_txt, (570, txt_y))
-            self.screen.blit(mood_txt, (820, txt_y))
+            self.screen.blit(obs_txt, (360, txt_y))
+            self.screen.blit(mood_txt, (640, txt_y))
             ndi_txt = self.font_badge.render(f"NDI: {self.cfg.ndi_stream_name} (1080p60)", True, (160, 200, 255))
             self.screen.blit(ndi_txt, (self.width - ndi_txt.get_width() - 30, txt_y))
 
-    def _draw_host_transcript_card(self, transcript: str):
-        """Draws live host transcript snippet card (disabled by default)."""
-        if not getattr(self.cfg, "show_host_transcript_card", False) or self.is_vertical:
-            return  # Hidden by default in broadcast visualizer
+    def _draw_cast_badge(self, surface: pygame.Surface, x: int, y: int, alpha: float = 1.0) -> int:
+        """
+        Renders a distinctive glassmorphic [CAST] transparency pill badge.
+        Returns total width consumed including padding.
+        """
+        badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
+        badge_tag = f"{badge_label}"
+        badge_txt = self.font_callout_tag.render(badge_tag, True, (240, 185, 255))
+        alpha_int = int(np.clip(alpha * 255, 0, 255))
+        badge_txt.set_alpha(alpha_int)
 
-        if self.is_vertical:
-            card_w, card_h = 940, 140
-            card_x, card_y = (self.width - card_w) // 2, 75
-        else:
-            card_w, card_h = 460, 150
-            card_x, card_y = 60, 75
+        pad_w = 6 if self.is_vertical else 5
+        pad_h = 2 if self.is_vertical else 1
+        badge_w = badge_txt.get_width() + (pad_w * 2)
+        badge_h = badge_txt.get_height() + (pad_h * 2)
 
-        self.surf_host_card.fill((0, 0, 0, 0))
-        # High-contrast glassmorphism container
-        pygame.draw.rect(self.surf_host_card, (12, 18, 34, 245), (0, 0, card_w, card_h), border_radius=12)
-        pygame.draw.rect(self.surf_host_card, (60, 100, 165, 200), (0, 0, card_w, card_h), width=1, border_radius=12)
+        pill_surf = pygame.Surface((badge_w, badge_h), pygame.SRCALPHA)
+        # Background: deep glassmorphic purple
+        pygame.draw.rect(pill_surf, (55, 20, 80, int(200 * alpha)), (0, 0, badge_w, badge_h), border_radius=4)
+        # Border: vibrant neon purple accent
+        pygame.draw.rect(pill_surf, (215, 140, 255, int(230 * alpha)), (0, 0, badge_w, badge_h), width=1, border_radius=4)
+        pill_surf.blit(badge_txt, (pad_w, pad_h))
 
-        # Header tag
-        tag_txt = self.font_badge.render("🎙️ HOST / GUEST SPEECH", True, (0, 210, 255))
-        self.surf_host_card.blit(tag_txt, (18, 14))
-
-        # Transcript text (wrapped)
-        text_to_show = transcript if transcript else "(Listening for host speech...)"
-        words = text_to_show.split(" ")
-        lines = []
-        cur_line = ""
-        for w in words:
-            test_line = f"{cur_line} {w}".strip()
-            if self.font_host_transcript.size(test_line)[0] < card_w - 40:
-                cur_line = test_line
-            else:
-                if cur_line:
-                    lines.append(cur_line)
-                cur_line = w
-        if cur_line:
-            lines.append(cur_line)
-
-        # Render top 2-3 lines with high-contrast drop shadow
-        for i, line in enumerate(lines[-3:]):
-            sh = self.font_host_transcript.render(line, True, (0, 0, 0))
-            self.surf_host_card.blit(sh, (19, 49 + i * 32))
-            txt_rend = self.font_host_transcript.render(line, True, (245, 250, 255))
-            self.surf_host_card.blit(txt_rend, (18, 48 + i * 32))
-
-        self.screen.blit(self.surf_host_card, (card_x, card_y))
+        surface.blit(pill_surf, (x, y))
+        return badge_w
 
     def _draw_live_chat_card(self, chat_messages: List[Dict], pinned_message: Optional[Dict] = None):
         """
@@ -1437,10 +1422,16 @@ class Visualizer:
 
             # Author line inside pinned container (100% opaque text)
             pin_sc_str = f" [{pin_amount}]" if pin_is_sc else ""
-            auth_sh = self.font_chat_author.render(f"{pin_clean_auth}{pin_sc_str}:", True, (0, 0, 0))
-            auth_rend = self.font_chat_author.render(f"{pin_clean_auth}{pin_sc_str}:", True, pin_auth_col)
+            pin_auth_str = f"{pin_clean_auth}{pin_sc_str}:"
+            auth_sh = self.font_chat_author.render(pin_auth_str, True, (0, 0, 0))
+            auth_rend = self.font_chat_author.render(pin_auth_str, True, pin_auth_col)
             pin_surf.blit(auth_sh, (10 + sh_off, 6 + sh_off))
             pin_surf.blit(auth_rend, (10, 6))
+
+            if pin_is_cast:
+                pin_auth_w = self.font_chat_author.size(pin_auth_str)[0]
+                badge_y = 6 + max(0, (auth_h - (self.font_callout_tag.get_height() + (4 if self.is_vertical else 2))) // 2)
+                self._draw_cast_badge(pin_surf, 10 + pin_auth_w + 8, badge_y, alpha=self.pinned_chat_alpha)
 
             # Message lines inside pinned container (100% opaque text)
             msg_y_start = 6 + auth_h - (2 if self.is_vertical else 0)
@@ -1583,10 +1574,16 @@ class Visualizer:
                     self.surf_chat_card.blit(bg_surf, (bg_x, bg_y))
 
                 # Standard & Active text rendering at exact same fixed coordinates
-                auth_sh = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, (0, 0, 0))
+                auth_str = f"{clean_author}{sc_badge_str}:"
+                auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
                 self.surf_chat_card.blit(auth_sh, (pad_x + sh_off, y_offset + sh_off))
-                auth_rend = self.font_chat_author.render(f"{clean_author}{sc_badge_str}:", True, author_color)
+                auth_rend = self.font_chat_author.render(auth_str, True, author_color)
                 self.surf_chat_card.blit(auth_rend, (pad_x, y_offset))
+
+                if is_cast:
+                    auth_w = self.font_chat_author.size(auth_str)[0]
+                    badge_y = y_offset + max(0, (auth_h - (self.font_callout_tag.get_height() + (4 if self.is_vertical else 2))) // 2)
+                    self._draw_cast_badge(self.surf_chat_card, pad_x + auth_w + 8, badge_y, alpha=1.0)
 
                 msg_start_y = y_offset + auth_h - (2 if self.is_vertical else 0)
                 for line_idx, line_text in enumerate(display_lines):
@@ -1790,8 +1787,21 @@ class Visualizer:
             # 1. Author Header line (Centered horizontally)
             auth_str = f"{clean_author}{sc_badge_str}:"
             auth_w = self.font_chat_author.size(auth_str)[0]
-            auth_x = (card_w - auth_w) // 2
             sh_off = 2 if self.is_vertical else 1
+
+            if is_cast:
+                badge_label = getattr(self.cfg, "cast_badge_label", "CAST")
+                badge_sample_txt = self.font_callout_tag.render(f"{badge_label}", True, (240, 185, 255))
+                pad_w = 6 if self.is_vertical else 5
+                badge_w = badge_sample_txt.get_width() + (pad_w * 2)
+                total_auth_w = auth_w + 8 + badge_w
+                auth_x = (card_w - total_auth_w) // 2
+                badge_x = auth_x + auth_w + 8
+                badge_y = y_start + max(0, (auth_h - (self.font_callout_tag.get_height() + (4 if self.is_vertical else 2))) // 2)
+            else:
+                auth_x = (card_w - auth_w) // 2
+                badge_x = 0
+                badge_y = 0
 
             auth_sh = self.font_chat_author.render(auth_str, True, (0, 0, 0))
             auth_sh.set_alpha(int(alpha_int * 0.9))
@@ -1800,6 +1810,9 @@ class Visualizer:
             auth_rend = self.font_chat_author.render(auth_str, True, author_color)
             auth_rend.set_alpha(alpha_int)
             self.surf_ai_text.blit(auth_rend, (auth_x, y_start))
+
+            if is_cast:
+                self._draw_cast_badge(self.surf_ai_text, badge_x, badge_y, alpha=self.question_fade_alpha)
 
             # 2. Message lines (Centered horizontally)
             msg_y_start = y_start + auth_h + 4
@@ -2010,7 +2023,7 @@ class Visualizer:
                 self.promo_timer = max(self.promo_timer, 8.0)
 
         if self.promo_state == "off":
-            if self.promo_enabled and not (is_speaking or is_turn_busy):
+            if self.promo_enabled and self.promo_mode == "timer" and not (is_speaking or is_turn_busy):
                 self.promo_timer -= dt
                 if self.promo_timer <= 0:
                     self.promo_state = "entrance"
@@ -2054,8 +2067,9 @@ class Visualizer:
                 self.promo_timer = self.promo_interval
                 self.promo_slide_factor = 0.0
                 self.promo_alpha = 0.0
-                # Alternate to the other promo for next appearance
-                self.promo_current_type = "like_sub" if self.promo_current_type == "ask_god" else "ask_god"
+                # Alternate to the other promo for next appearance in timer mode
+                if self.promo_mode == "timer":
+                    self.promo_current_type = "like_sub" if self.promo_current_type == "ask_god" else "ask_god"
 
     def _draw_promo_callout_overlay(self, dt: float, is_speaking: bool = False, is_turn_busy: bool = False):
         """Coordinates and renders the active promotional callout overlay card with smooth cinematic motion."""

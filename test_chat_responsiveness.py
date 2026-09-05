@@ -64,7 +64,7 @@ async def run_test():
     # 3. Test Chat Question Eligibility
     print("\n--- Test 3: Chat Question Eligibility in Eco/Idle Mode ---")
     app.brain.set_engagement_mode("eco", is_stream_live=True, concurrent_viewers=0)
-    should_trig, reason = app.brain.should_trigger_response("What is the truth about reality?", is_host=False)
+    should_trig, reason = app.brain.should_trigger_response("What is the truth about reality?")
     print(f"-> Chat question 'What is the truth about reality?': should_trigger={should_trig} ({reason})")
     assert should_trig, f"Expected chat question to trigger, got {should_trig} ({reason})"
 

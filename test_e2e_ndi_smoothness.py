@@ -60,9 +60,7 @@ async def run_smoothness_test():
         rgba_bytes = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=[{"author": "TestViewer", "message": "Smooth audio check!", "is_superchat": False, "amount": ""}],
-            host_transcript="Testing NDI audio and video sync.",
             ai_subtitle=speech_phrase[:80],
-            host_connected=True,
             obs_connected=True,
             engagement_mode="active",
             concurrent_viewers=5,

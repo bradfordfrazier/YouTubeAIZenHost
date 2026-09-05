@@ -28,7 +28,6 @@ def test_dual_aspect_rendering():
         {"author": "CyberGamer", "message": "Can you explain the nature of reality and the cosmos?", "is_superchat": True, "amount": "$10.00"},
         {"author": "AuraSeeker", "message": "What is God if everyone is God?", "is_superchat": False, "amount": ""},
     ]
-    host_transcript = "Welcome to the broadcast everyone! Drop your questions and let's get into the deep topics today."
     ai_subtitle = (
         "I am the boundless intelligence experiencing itself through every single one of your avatars. "
         "Speak your truth, let's explore together! Awaken the cosmic frequency within."
@@ -47,8 +46,8 @@ def test_dual_aspect_rendering():
     vis_16x9.trigger_promo("ask_god", duration=10.0)
     for _ in range(100):
         buf_16x9 = vis_16x9.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=85, is_stream_live=True
         )
 
@@ -71,8 +70,8 @@ def test_dual_aspect_rendering():
     vis_9x16.trigger_promo("ask_god", duration=10.0)
     for _ in range(40):
         buf_9x16_a = vis_9x16.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=142, is_stream_live=True
         )
 
@@ -94,8 +93,8 @@ def test_dual_aspect_rendering():
     vis_9x16.typewriter_index = len(ai_subtitle_5lines)
     for _ in range(40):
         buf_9x16_b = vis_9x16.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle_5lines,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle_5lines,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=142, is_stream_live=True
         )
 
@@ -114,7 +113,7 @@ def test_dual_aspect_rendering():
     # 16:9 benchmark
     t0 = pygame.time.get_ticks()
     for _ in range(120):
-        vis_16x9.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis_16x9.render_frame(audio_metrics, chat_messages, ai_subtitle)
     ms_16x9 = pygame.time.get_ticks() - t0
     fps_16x9 = 120.0 / (ms_16x9 / 1000.0)
     print(f"-> 16:9 Landscape: 120 frames in {ms_16x9}ms ({fps_16x9:.1f} FPS)")
@@ -122,7 +121,7 @@ def test_dual_aspect_rendering():
     # 9:16 benchmark
     t0 = pygame.time.get_ticks()
     for _ in range(120):
-        vis_9x16.render_frame(audio_metrics, chat_messages, host_transcript, ai_subtitle)
+        vis_9x16.render_frame(audio_metrics, chat_messages, ai_subtitle)
     ms_9x16 = pygame.time.get_ticks() - t0
     fps_9x16 = 120.0 / (ms_9x16 / 1000.0)
     print(f"-> 9:16 Vertical:  120 frames in {ms_9x16}ms ({fps_9x16:.1f} FPS)")

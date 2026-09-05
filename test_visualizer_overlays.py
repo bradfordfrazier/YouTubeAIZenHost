@@ -26,7 +26,6 @@ def test_visualizer_promo_overlays():
         {"author": "CyberGamer", "message": "Can you explain the nature of reality?", "is_superchat": True, "amount": "$5.00"},
         {"author": "NeonFan", "message": "Loving the stream today!", "is_superchat": False, "amount": ""},
     ]
-    host_transcript = "Welcome everyone to the broadcast! Ask any questions you have in chat."
     ai_subtitle = "I am ready to illuminate your consciousness and answer your inquiries."
 
     os.makedirs("test_output", exist_ok=True)
@@ -38,8 +37,8 @@ def test_visualizer_promo_overlays():
     # Step forward 0.6s to reach full display
     for _ in range(36):
         vis.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=42, is_stream_live=True
         )
 
@@ -53,8 +52,8 @@ def test_visualizer_promo_overlays():
 
     for _ in range(36):
         vis.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=42, is_stream_live=True
         )
 
@@ -68,8 +67,8 @@ def test_visualizer_promo_overlays():
     total_frames = 120
     for f in range(total_frames):
         buf = vis.render_frame(
-            audio_metrics, chat_messages, host_transcript, ai_subtitle,
-            host_connected=True, obs_connected=True, engagement_mode="active",
+            audio_metrics, chat_messages, ai_subtitle,
+            obs_connected=True, engagement_mode="active",
             concurrent_viewers=42, is_stream_live=True
         )
         assert len(buf) == 1920 * 1080 * 4, f"Invalid buffer length: {len(buf)}"

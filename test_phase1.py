@@ -78,9 +78,7 @@ def test_visualizer_palettes_and_bloom():
         buf = vis.render_frame(
             audio_metrics=sample_metrics,
             chat_messages=[],
-            host_transcript="",
             ai_subtitle="Test reflection",
-            host_connected=True,
             obs_connected=True,
         )
         assert len(buf) == vis.width * vis.height * 4

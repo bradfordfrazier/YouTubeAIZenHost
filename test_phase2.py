@@ -180,9 +180,7 @@ def test_visualizer_cast_badge_rendering():
     buf = vis.render_frame(
         audio_metrics=sample_metrics,
         chat_messages=chat_messages,
-        host_transcript="",
         ai_subtitle="",
-        host_connected=True,
         obs_connected=True,
     )
     assert len(buf) == vis.width * vis.height * 4, "Render frame buffer size mismatch"

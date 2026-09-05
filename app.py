@@ -1,5 +1,5 @@
 """
-All-Local Live Stream AI Co-Host Pipeline ("Nova" / "I Am").
+All-Local Live Stream AI Host Pipeline ("I Am").
 Consolidated application running solely on the OBS Host machine.
 Integrates OBS Studio WebSocket, YouTube Live Chat, Google Gemini LLM,
 neural 48kHz TTS synthesis, 1080p60 Pygame visualizer, and local NDI broadcasting.
@@ -8,6 +8,7 @@ neural 48kHz TTS synthesis, 1080p60 Pygame visualizer, and local NDI broadcastin
 import asyncio
 import collections
 from dataclasses import dataclass, field
+import heapq
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from cast_engine import CastEngine
 from config import config
 from greeting_cache import GreetingCache
 from ndi_streamer import NDIStreamer
+from render_worker import VisualizerProxy
 from session_log import SessionLogger
 from tts_engine import TTSEngine
 from visualizer import Visualizer
@@ -120,13 +122,9 @@ def print_audio_devices():
             print(f"  [{idx:2d}] {dev['name']:<42} | API: {api_name:<18}{tag}")
     print("=" * 65)
     print("Tip: Set LOCAL_AUDIO_DEVICE=<index or name> in .env to target a specific device.")
-    print("=" * 65)
+from logging_setup import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [AI-COHOST] %(message)s",
-    datefmt="%H:%M:%S",
-)
+setup_logging()
 logger = logging.getLogger("app")
 
 # Enable 1ms high-resolution timer and elevated process priority on Windows for glitch-free streaming
@@ -385,14 +383,34 @@ _EVENT_COUNTER = 0
 class CommentEvent:
     """Encapsulates an incoming comment trigger with priority and lifespan."""
     prompt_trigger: str
-    event_type: str = "chat"  # "host", "superchat", "direct_mention", "greeting", "chat", "cast", "spontaneous"
-    priority: int = 5         # Lower number = higher priority (1: Host, 2: Superchat, 5: Chat/Cast, 10: Spontaneous)
+    event_type: str = "chat"  # "superchat", "direct_mention", "greeting", "chat", "cast", "spontaneous"
+    priority: int = 4         # Lower number = higher priority (1: Superchat, 2: Mention, 3: Greeting, 4: Chat, 5: Cast, 6: Spontaneous)
     created_at: float = field(default_factory=time.time)
     seq_id: int = 0
     max_age_sec: float = 90.0
     force: bool = False
     chat_item: Optional[Dict[str, Any]] = None
     cached_greeting: Optional[Any] = None
+
+    def __lt__(self, other: "CommentEvent") -> bool:
+        if not isinstance(other, CommentEvent):
+            return NotImplemented
+        return (self.priority, self.created_at, self.seq_id) < (other.priority, other.created_at, other.seq_id)
+
+    def __le__(self, other: "CommentEvent") -> bool:
+        if not isinstance(other, CommentEvent):
+            return NotImplemented
+        return (self.priority, self.created_at, self.seq_id) <= (other.priority, other.created_at, other.seq_id)
+
+    def __gt__(self, other: "CommentEvent") -> bool:
+        if not isinstance(other, CommentEvent):
+            return NotImplemented
+        return (self.priority, self.created_at, self.seq_id) > (other.priority, other.created_at, other.seq_id)
+
+    def __ge__(self, other: "CommentEvent") -> bool:
+        if not isinstance(other, CommentEvent):
+            return NotImplemented
+        return (self.priority, self.created_at, self.seq_id) >= (other.priority, other.created_at, other.seq_id)
 
 
 class LocalCoHostApp:
@@ -408,7 +426,7 @@ class LocalCoHostApp:
         # Core Subsystems
         self.brain = AIBrain()
         self.tts = TTSEngine()
-        self.visualizer = Visualizer()
+        self.visualizer = VisualizerProxy()
         self.ndi = NDIStreamer()
         self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
         self.cast = CastEngine()
@@ -420,8 +438,6 @@ class LocalCoHostApp:
         self.is_streaming = False
         self.is_recording = False
         self.current_scene = "Main"
-        self.last_transcript_text = ""
-        self.last_file_position = 0
 
         # Stream & Audience Telemetry
         self.concurrent_viewers = 0
@@ -434,6 +450,8 @@ class LocalCoHostApp:
 
         # Activity & Commentary Timers
         self.last_activity_time = time.time()
+        self.last_turn_completed_time = 0.0
+        self.last_turn_event_type = ""
         self.last_chat_time = 0.0
         self.last_real_chat_time = 0.0
         self.last_spontaneous_time = time.time()
@@ -443,7 +461,6 @@ class LocalCoHostApp:
         self.encouragement_idle_count = 0
 
         # Chat & Subtitle State
-        self.current_host_transcript = ""
         self.current_ai_subtitle = ""
         self.current_pinned_chat: Optional[Dict[str, Any]] = None
         self.chat_history: Deque[Dict] = collections.deque(maxlen=50)
@@ -678,21 +695,20 @@ class LocalCoHostApp:
             return
 
         # Default priorities & TTLs based on event type:
-        # Tier 1: Host direct mic voice commands (Priority 1) -> Real-time human interrupt
-        # Tier 2: Superchats / Memberships (Priority 2) -> Paid audience acknowledgment
-        # Tier 3: Real Viewer Direct Mentions (Priority 3) -> High-priority viewer engagement
-        # Tier 4: Real Live Chat / Greetings (Priority 4) -> Strict FIFO human chat feed
-        # Tier 5: Synthetic Cast Ensembles (Priority 6) -> Idle ensemble filler (yields to humans)
-        # Tier 6: Spontaneous Reflections (Priority 10) -> Idle background reflections
+        # Tier 1: Superchats / Memberships (Priority 1) -> Paid audience acknowledgment
+        # Tier 2: Real Viewer Direct Mentions (Priority 2) -> High-priority viewer engagement
+        # Tier 3: Greetings (Priority 3) -> Pre-synthesized or live greetings
+        # Tier 4: Real Live Chat (Priority 4) -> Strict FIFO human chat feed
+        # Tier 5: Synthetic Cast Ensembles (Priority 5) -> Idle ensemble filler (yields to humans)
+        # Tier 6: Spontaneous Reflections / System (Priority 6) -> Idle background reflections
         priority_map = {
-            "host": (1, 120.0),
-            "superchat": (2, 180.0),
-            "direct_mention": (3, 90.0),
-            "greeting": (4, 90.0),
+            "superchat": (1, 180.0),
+            "direct_mention": (2, 90.0),
+            "greeting": (3, 90.0),
             "chat": (4, 90.0),
-            "cast": (6, 90.0),
-            "spontaneous": (10, 30.0),
-            "system": (10, 30.0),
+            "cast": (5, 90.0),
+            "spontaneous": (6, 30.0),
+            "system": (6, 30.0),
         }
         def_pri, def_ttl = priority_map.get(event_type.lower(), (4, 90.0))
         prio = priority if priority is not None else def_pri
@@ -730,7 +746,8 @@ class LocalCoHostApp:
             if self.active_turn_task and not self.active_turn_task.done():
                 self.active_turn_task.cancel()
             self.tts.clear_audio_buffer()
-            self.comment_queue.insert(0, event)
+            event.priority = 0
+            heapq.heappush(self.comment_queue, event)
             if self.new_comment_signal:
                 self.new_comment_signal.set()
             logger.info(f"⚡ [Forced AI Turn] Dispatched immediate interrupt for: '{prompt_trigger[:60]}...'")
@@ -739,35 +756,32 @@ class LocalCoHostApp:
         # Backpressure & Queue Overflow Management (Max queue size)
         max_queue = int(getattr(self.cfg, "max_comment_queue_size", 5))
         if len(self.comment_queue) >= max_queue:
-            # Find lowest-priority (highest numerical value) item in queue
-            lowest_prio_idx = max(range(len(self.comment_queue)), key=lambda i: self.comment_queue[i].priority)
-            lowest_item = self.comment_queue[lowest_prio_idx]
+            # Find lowest-priority item (largest priority tuple)
+            lowest_item = max(self.comment_queue)
 
-            # Real human events (prio <= 4) always evict synthetic cast (prio >= 6) or idle reflections
-            if prio < lowest_item.priority or (prio <= 4 and lowest_item.priority >= 6):
-                evicted = self.comment_queue.pop(lowest_prio_idx)
-                logger.info(f"⚠️ [Queue Eviction] Evicted lower-priority '{evicted.event_type}' request to prioritize incoming '{event_type}'.")
-                self.comment_queue.append(event)
+            # Real human events (prio <= 4) always evict synthetic cast (prio >= 5) or idle reflections
+            if event < lowest_item or (prio <= 4 and lowest_item.priority >= 5):
+                self.comment_queue.remove(lowest_item)
+                heapq.heapify(self.comment_queue)
+                heapq.heappush(self.comment_queue, event)
+                logger.info(f"⚠️ [Queue Eviction] Evicted lower-priority '{lowest_item.event_type}' request to prioritize incoming '{event_type}'.")
             else:
                 logger.info(f"🛑 [Queue Full] Dropped '{event_type}' request ('{prompt_trigger[:45]}...') to prevent response latency backlog.")
                 return
         else:
-            self.comment_queue.append(event)
+            heapq.heappush(self.comment_queue, event)
 
-        # Sort queue by priority first (1=Host, 2=Superchat, 3=Mention, 4=Chat, 6=Cast, 10=Spontaneous),
-        # then strictly by sequence arrival order (seq_id) to guarantee 100% FIFO order matching the chat feed.
-        self.comment_queue.sort(key=lambda x: (x.priority, x.seq_id))
         if self.new_comment_signal:
             self.new_comment_signal.set()
         logger.info(f"📥 [Queued Comment] Added '{event_type}' (Pri: {prio}, Seq: {_EVENT_COUNTER}, Queue: {len(self.comment_queue)}): '{prompt_trigger[:60]}...'")
 
     async def comment_queue_scheduler_task(self):
         """
-        Dedicated sequential comment scheduler task.
-        Executes one AI speech turn at a time, strictly waiting for complete audio
-        playback before proceeding to the next event or clearing the screen.
+        Dedicated sequential comment scheduler task (Phase 3.3).
+        Executes one AI speech turn at a time using a min-heap priority queue,
+        strictly waiting for complete audio playback before proceeding to next event.
         """
-        logger.info("🧠 [Comment Scheduler] Serialized AI turn scheduler active.")
+        logger.info("🧠 [Comment Scheduler] Serialized AI turn scheduler active (Heap Priority Queue).")
         if self.new_comment_signal is None:
             self.new_comment_signal = asyncio.Event()
 
@@ -775,13 +789,12 @@ class LocalCoHostApp:
             try:
                 # Prune stale events from queue before taking the next one
                 now = time.time()
-                valid_queue = []
-                for ev in self.comment_queue:
-                    if now - ev.created_at <= ev.max_age_sec:
-                        valid_queue.append(ev)
-                    else:
-                        logger.info(f"⏱️ [Stale Request Pruned] Dropped '{ev.event_type}' request ({now - ev.created_at:.1f}s old) to keep co-host real-time.")
-                self.comment_queue = valid_queue
+                valid_queue = [ev for ev in self.comment_queue if now - ev.created_at <= ev.max_age_sec]
+                if len(valid_queue) != len(self.comment_queue):
+                    pruned_count = len(self.comment_queue) - len(valid_queue)
+                    heapq.heapify(valid_queue)
+                    self.comment_queue = valid_queue
+                    logger.info(f"⏱️ [Stale Request Pruned] Pruned {pruned_count} stale queue event(s) to keep AI real-time.")
 
                 if not self.comment_queue:
                     self.new_comment_signal.clear()
@@ -791,8 +804,8 @@ class LocalCoHostApp:
                         continue
                     continue
 
-                # Pop highest priority event
-                event = self.comment_queue.pop(0)
+                # Pop highest priority event (lowest priority tuple)
+                event = heapq.heappop(self.comment_queue)
                 self.active_turn_event = event
                 self.active_turn_task = asyncio.current_task()
 
@@ -890,8 +903,11 @@ class LocalCoHostApp:
         is_completed = False
         active_mood = "energetic"
         cached_g = getattr(event, "cached_greeting", None)
-        audio = None
         clean_speech = ""
+        pushed_chunks = 0
+        first_token_ts: Optional[float] = None
+        first_sentence_ts: Optional[float] = None
+        first_audio_ts: Optional[float] = None
 
         try:
             if cached_g and cached_g.audio is not None and len(cached_g.audio) > 0:
@@ -900,51 +916,10 @@ class LocalCoHostApp:
                 clean_speech = cached_g.full_text
                 active_mood = cached_g.mood
                 self.visualizer.set_mood(active_mood)
-                audio = cached_g.audio
                 is_completed = True
-                dur_sec = len(audio) / 48000.0
-                logger.info(
-                    f"⚡ [Instant AI Speech] Broadcasting pre-synthesized greeting audio "
-                    f"([{active_mood.upper()}], {dur_sec:.2f}s audio, 0.0s TTFT & TTS): '{clean_speech}'..."
-                )
-            else:
-                # 3. Stream from Gemini AI Brain
-                async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
-                    ev_type = chunk_ev.get("type", "")
-                    if ev_type == "mood":
-                        active_mood = chunk_ev.get("mood", "chill")
-                        self.visualizer.set_mood(active_mood)
-                    elif ev_type == "complete":
-                        full_text = chunk_ev.get("full_text", "").strip()
-                        mood = chunk_ev.get("mood", active_mood)
-                        full_statement = full_text
-                        is_completed = True
-                        self.visualizer.set_mood(mood)
+                dur_sec = len(cached_g.audio) / 48000.0
 
-                # 4. Synthesize speech and begin typewriter display
-                clean_speech = re.sub(r"@+", "@", full_statement).strip()
-                words = clean_speech.split()
-                if (
-                    is_completed
-                    and len(clean_speech) >= 12
-                    and len(words) >= 3
-                    and clean_speech[-1] in ".!?\"'”’)"
-                ):
-                    # 1. Pre-synthesize TTS audio in background while question is STILL steadily displayed on screen
-                    logger.info(f"🔊 [AI Speech] Pre-synthesizing audio for: '{clean_speech}'...")
-                    audio = await self.tts.synthesize(clean_speech)
-                else:
-                    clean_speech = ""
-                    audio = None
-
-            if (
-                is_completed
-                and clean_speech
-                and audio is not None
-                and len(audio) > 0
-            ):
-
-                # 2. Question displayed while answer was generating and synthesizing; hold if needed to satisfy minimum reading duration
+                # Question displayed while cached greeting is queued; hold if needed to satisfy minimum reading duration
                 if question_text and min_time_before_fade_out > 0:
                     elapsed = time.perf_counter() - t_question_shown
                     remaining_hold = min_time_before_fade_out - elapsed
@@ -953,9 +928,6 @@ class LocalCoHostApp:
                         await asyncio.sleep(remaining_hold)
 
                 is_vox_only = getattr(self.cfg, "vox_only_mode", False)
-                is_spontaneous = (event.event_type == "spontaneous")
-
-                # 3. Fade out question preview before speech emerges (if active question was displayed)
                 if question_text:
                     if is_vox_only:
                         logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
@@ -965,21 +937,127 @@ class LocalCoHostApp:
                             logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
                             await asyncio.sleep(q_fade_out_sec)
 
-                # 4. ZERO LATENCY: Instantly start pre-synthesized audio and emerge answer subtitle if enabled
-                self.tts.push_audio(audio)
-                if is_vox_only or is_spontaneous:
-                    # During spontaneous reflections or vox-only mode, keep comment panel completely empty
-                    self.current_ai_subtitle = ""
-                else:
-                    self.current_ai_subtitle = clean_speech
-                    self.visualizer.set_subtitle(clean_speech)
+                self.tts.begin_utterance()
+                first_audio_ts = time.perf_counter()
+                self.tts.push_audio(cached_g.audio)
+                self.tts.end_utterance()
+                pushed_chunks = 1
 
-                # 5. CRITICAL: Wait until audio has completely finished broadcasting out
+                logger.info(
+                    f"⚡ [Instant AI Speech] Broadcasting pre-synthesized greeting audio "
+                    f"([{active_mood.upper()}], {dur_sec:.2f}s audio, 0.0s TTFT & TTS): '{clean_speech}'..."
+                )
                 await self.tts.wait_until_speech_completed()
+            else:
+                # Sentence-Pipelined Generation & Speech Synthesis (Producer/Consumer Pattern)
+                sentence_queue: asyncio.Queue = asyncio.Queue()
+                collected_sentences: List[str] = []
+
+                async def _stream_producer():
+                    nonlocal first_token_ts, first_sentence_ts, active_mood, full_statement, is_completed
+                    sent_count = 0
+                    try:
+                        async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
+                            ev_type = chunk_ev.get("type", "")
+                            if ev_type == "mood":
+                                active_mood = chunk_ev.get("mood", "chill")
+                                self.visualizer.set_mood(active_mood)
+                            elif ev_type == "token":
+                                if first_token_ts is None:
+                                    first_token_ts = time.perf_counter()
+                            elif ev_type == "sentence":
+                                if first_sentence_ts is None:
+                                    first_sentence_ts = time.perf_counter()
+                                s_text = chunk_ev.get("text", "").strip()
+                                s_mood = chunk_ev.get("mood", active_mood)
+                                if s_text:
+                                    sent_count += 1
+                                    await sentence_queue.put((s_text, s_mood))
+                            elif ev_type == "complete":
+                                full_statement = chunk_ev.get("full_text", "").strip()
+                                active_mood = chunk_ev.get("mood", active_mood)
+                                is_completed = True
+
+                        # Safety fallback: If stream completed but 0 sentence events were emitted
+                        if sent_count == 0 and full_statement:
+                            if first_sentence_ts is None:
+                                first_sentence_ts = time.perf_counter()
+                            s_list, _ = self.brain._extract_completed_sentences(full_statement + " ")
+                            if not s_list:
+                                s_list = [full_statement]
+                            for s in s_list:
+                                await sentence_queue.put((s, active_mood))
+                    except Exception as pe:
+                        logger.error(f"Error in turn streaming producer: {pe}", exc_info=True)
+                    finally:
+                        await sentence_queue.put(None)  # Sentinel
+
+                prod_task = asyncio.create_task(_stream_producer())
+
+                # Consumer: Synthesizes and pushes chunks as they stream in
+                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+
+                while True:
+                    item = await sentence_queue.get()
+                    if item is None:
+                        break
+                    s_text, s_mood = item
+                    s_clean = re.sub(r"@+", "@", s_text).strip()
+                    if not s_clean:
+                        continue
+                    collected_sentences.append(s_clean)
+
+                    # Synthesize chunk (bounded by concurrency semaphore)
+                    try:
+                        s_audio = await self.tts.synthesize(s_clean, mood=s_mood)
+                    except TypeError:
+                        s_audio = await self.tts.synthesize(s_clean)
+
+                    if s_audio is not None and len(s_audio) > 0:
+                        if pushed_chunks == 0:
+                            # Question display hold before pushing first chunk
+                            if question_text and min_time_before_fade_out > 0:
+                                elapsed = time.perf_counter() - t_question_shown
+                                remaining_hold = min_time_before_fade_out - elapsed
+                                if remaining_hold > 0.05:
+                                    logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
+                                    await asyncio.sleep(remaining_hold)
+
+                            if question_text:
+                                if is_vox_only:
+                                    logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
+                                elif hasattr(self.visualizer, "fade_out_question"):
+                                    self.visualizer.fade_out_question()
+                                    if q_fade_out_sec > 0:
+                                        logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
+                                        await asyncio.sleep(q_fade_out_sec)
+
+                            self.tts.begin_utterance()
+                            first_audio_ts = time.perf_counter()
+
+                        self.tts.push_audio(s_audio)
+                        pushed_chunks += 1
+
+                await prod_task
+
+                if pushed_chunks > 0:
+                    self.tts.end_utterance()
+                    await self.tts.wait_until_speech_completed()
+
+                clean_speech = full_statement or " ".join(collected_sentences)
+
+            if pushed_chunks > 0 and clean_speech:
                 t_total = time.perf_counter() - t_start
+                ttft_ms = ((first_token_ts - t_start) * 1000) if first_token_ts else 0.0
+                ttfs_ms = ((first_sentence_ts - t_start) * 1000) if first_sentence_ts else 0.0
+                ttfa_ms = ((first_audio_ts - t_start) * 1000) if first_audio_ts else 0.0
+                logger.info(
+                    f"⏱️ [Turn Timing] TTFT: {ttft_ms:.0f}ms | TTFS: {ttfs_ms:.0f}ms | TTFA: {ttfa_ms:.0f}ms | "
+                    f"Total Turn Time: {t_total:.2f}s (Mood: [{active_mood.upper()}], Chunks: {pushed_chunks})"
+                )
                 logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
 
-                # 6. Record turn to in-session conversational thread memory (C2)
+                # Record turn to in-session conversational thread memory (C2)
                 m_auth = re.search(r"@([a-zA-Z0-9_-]+)", event.prompt_trigger)
                 author_name = m_auth.group(1) if m_auth else ""
                 self.brain.record_completed_turn(
@@ -989,7 +1067,7 @@ class LocalCoHostApp:
                     author=author_name,
                 )
 
-                # 7. Structured Session Log
+                # Structured Session Log
                 if self.session_log:
                     exag_map = getattr(self.cfg, "tts_mood_exaggeration_map", {})
                     exaggeration = exag_map.get(active_mood.lower(), getattr(self.cfg, "tts_exaggeration_default", 0.5))
@@ -1007,7 +1085,7 @@ class LocalCoHostApp:
                         concurrent_viewers=self.concurrent_viewers,
                     )
 
-                # 8. Dynamic Queue-Aware Post-Speech Hold:
+                # Dynamic Queue-Aware Post-Speech Hold:
                 is_spontaneous = (event.event_type == "spontaneous")
 
                 if is_spontaneous:
@@ -1086,6 +1164,8 @@ class LocalCoHostApp:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
             self.last_activity_time = time.time()
+            self.last_turn_completed_time = time.time()
+            self.last_turn_event_type = event.event_type
             if event.event_type == "spontaneous":
                 self.last_spontaneous_time = time.time()
             if not self.comment_queue:
@@ -1189,7 +1269,7 @@ class LocalCoHostApp:
             logger.warning(f"Error triggering OBS FX for '{src}': {e}")
 
     async def obs_monitor_task(self):
-        """Monitors local OBS Studio for broadcast status, scenes, and microphone speech transcripts."""
+        """Monitors local OBS Studio for broadcast status and scenes."""
         if not obsws:
             logger.warning("obs-websocket-py not installed. OBS polling disabled.")
             return
@@ -1265,17 +1345,14 @@ class LocalCoHostApp:
                     if check_stream:
                         last_stream_check = now
 
-                    source_name = self.cfg.obs_transcript_source_name
-
                     # 3. Offload all synchronous OBS request-responses to thread pool
                     def _poll_obs_sync():
                         res_st = ws_client.call(obs_requests.GetStreamStatus()) if check_stream else None
                         res_sc = ws_client.call(obs_requests.GetCurrentProgramScene()) if check_stream else None
-                        res_tr = ws_client.call(obs_requests.GetInputSettings(inputName=source_name))
-                        return res_st, res_sc, res_tr
+                        return res_st, res_sc
 
                     try:
-                        res_stream, res_scene, res_transcript = await loop.run_in_executor(None, _poll_obs_sync)
+                        res_stream, res_scene = await loop.run_in_executor(None, _poll_obs_sync)
                     except Exception as e:
                         logger.warning(f"OBS WebSocket connection lost: {e}. Reconnecting...")
                         break
@@ -1311,23 +1388,6 @@ class LocalCoHostApp:
                             )
                             self._update_engagement_state()
 
-                    # Process transcript
-                    if res_transcript and getattr(res_transcript, "status", False):
-                        settings = res_transcript.getSettings()
-                        text = settings.get("text", "").strip()
-                        if text and text != self.last_transcript_text:
-                            self.last_transcript_text = text
-                            logger.info(f"🎙️ [OBS Transcript] {text}")
-                            self.current_host_transcript = text
-                            self.brain.add_transcript("Host", text)
-                            self.last_activity_time = time.time()
-
-                            if not self.cfg.chat_reader_mode:
-                                should_trigger, reason = self.brain.should_trigger_response(text, is_host=True)
-                                if should_trigger:
-                                    logger.info(f"Triggering AI response for host transcript: {reason}")
-                                    self._trigger_ai_turn(prompt_trigger=f"Host said: '{text}'", event_type="host", priority=1)
-
                     await asyncio.sleep(0.4)
 
             except Exception as e:
@@ -1342,40 +1402,6 @@ class LocalCoHostApp:
                     except Exception:
                         pass
                 await asyncio.sleep(getattr(self.cfg, "obs_retry_interval_sec", 5.0))
-
-    # --------------------------------------------------------------------------
-    # 4. Local Transcript File Watcher (LocalVocal / Whisper fallback)
-    # --------------------------------------------------------------------------
-    async def transcript_file_task(self):
-        """Asynchronously tails a local speech-to-text / SRT transcript file."""
-        file_path = self.cfg.transcript_file_path
-        if not file_path:
-            return
-
-        logger.info(f"Watching transcript file: {file_path}")
-        while self.running:
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                        f.seek(self.last_file_position)
-                        lines = f.readlines()
-                        self.last_file_position = f.tell()
-
-                        for line in lines:
-                            line_clean = line.strip()
-                            if line_clean and not line_clean.isdigit() and "-->" not in line_clean:
-                                logger.info(f"🎙️ [File Transcript] {line_clean}")
-                                self.current_host_transcript = line_clean
-                                self.brain.add_transcript("Host", line_clean)
-                                self.last_activity_time = time.time()
-
-                                if not self.cfg.chat_reader_mode:
-                                    should_trigger, reason = self.brain.should_trigger_response(line_clean, is_host=True)
-                                    if should_trigger:
-                                        self._trigger_ai_turn(prompt_trigger=f"Host said: '{line_clean}'", event_type="host", priority=1)
-                except Exception as e:
-                    logger.debug(f"Error reading transcript file: {e}")
-            await asyncio.sleep(0.3)
     # --------------------------------------------------------------------------
     # 5. YouTube Live Chat Poller
     # --------------------------------------------------------------------------
@@ -1384,7 +1410,6 @@ class LocalCoHostApp:
         raw_input = (
             self.cfg.youtube_video_id.strip()
             or getattr(self.cfg, "youtube_channel_handle", "").strip()
-            or getattr(self.cfg, "host_streamer_handle", "").strip()
         )
 
         if not raw_input:
@@ -1499,17 +1524,15 @@ class LocalCoHostApp:
                         author_clean = author_name.lower().strip().lstrip("@")
                         author_compact = author_clean.replace(" ", "").replace("_", "").replace("-", "")
 
-                        # Comprehensive set of channel, host, and AI cohost handles to prevent self-triggering
+                        # Comprehensive set of channel and AI host handles to prevent self-triggering
                         own_identifiers = {
                             "host",
                             "owner",
                             "broadcaster",
                         }
                         for val in [
-                            self.cfg.host_streamer_handle,
                             self.cfg.youtube_channel_handle,
-                            self.cfg.host_streamer_name,
-                            getattr(self.cfg, "ai_cohost_name", ""),
+                            getattr(self.cfg, "ai_host_name", ""),
                             self.discovered_channel_handle,
                         ]:
                             if val:
@@ -1538,7 +1561,7 @@ class LocalCoHostApp:
                             if author_name and self.discovered_channel_handle != author_name:
                                 self.discovered_channel_handle = author_name
                                 clean_handle = f"@{author_name.lstrip('@')}"
-                                self.brain.update_channel_identity(clean_handle, author_name, self.cfg.host_streamer_name)
+                                self.brain.update_channel_identity(clean_handle, author_name)
 
                         # Record chat entry immediately
                         now_ts = time.time()
@@ -1654,18 +1677,18 @@ class LocalCoHostApp:
                             self.visualizer.set_subtitle(self.current_ai_subtitle)
                             asyncio.create_task(self.tts.queue_speech(spoken_text))
                         elif is_new_chatter and self.cfg.greet_new_chatters:
-                            should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False, is_new_chatter=True)
+                            should_trigger, reason = self.brain.should_trigger_response(msg, is_new_chatter=True)
                             if is_superchat or should_trigger:
                                 prompt = (
                                     f"[NEW_CHATTER_GREETING] @{author_name.lstrip('@')} just sent their very first message: '{msg}'. "
                                     f"Greet @{author_name.lstrip('@')} warmly and wittily by name while responding to their comment!"
                                 )
-                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=4, chat_item=chat_entry)
+                                self._trigger_ai_turn(prompt_trigger=prompt, event_type="greeting", priority=3, chat_item=chat_entry)
                         else:
-                            should_trigger, reason = self.brain.should_trigger_response(msg, is_host=False)
+                            should_trigger, reason = self.brain.should_trigger_response(msg)
                             if is_superchat or should_trigger:
                                 prefix = f"Chat message from @{author_name.lstrip('@')}"
-                                prio = 2 if is_superchat else (3 if "direct_mention" in reason else 4)
+                                prio = 1 if is_superchat else (2 if "direct_mention" in reason else 4)
                                 ev_type = "superchat" if is_superchat else ("direct_mention" if "direct_mention" in reason else "chat")
                                 self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{msg}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
                             else:
@@ -1767,7 +1790,7 @@ class LocalCoHostApp:
     async def console_chat_task(self):
         """Allows direct typing of test comments or commands into the host terminal."""
         logger.info(
-            f"Console Chat Input active: Type comments in terminal (e.g. '{self.cfg.host_streamer_name}: Celebrate!' "
+            f"Console Chat Input active: Type comments in terminal (e.g. 'Alice: Hello!' "
             "or 'viewers: 5' / 'sub: Alice')"
         )
 
@@ -1789,7 +1812,7 @@ class LocalCoHostApp:
                     author = author.strip().lstrip("@")
                     message = message.strip()
                 else:
-                    author = "Host"
+                    author = "Viewer"
                     message = line
 
                 msg_lower = message.lower().strip()
@@ -1814,7 +1837,7 @@ class LocalCoHostApp:
                             f"[NEW_SUBSCRIBER] @{message.lstrip('@')} just subscribed! "
                             f"Enthusiastically thank @{message.lstrip('@')} for subscribing to {self.cfg.youtube_channel_handle}!"
                         )
-                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
+                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=1)
                     continue
                 elif author.lower() in ("member", "membership", "join"):
                     logger.info(f"🌟 [Console Event] Test Membership: @{message}")
@@ -1825,7 +1848,7 @@ class LocalCoHostApp:
                             f"[NEW_MEMBER] @{message.lstrip('@')} just joined as a channel member! "
                             f"Enthusiastically welcome @{message.lstrip('@')} into the cosmic family!"
                         )
-                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=2)
+                        self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=1)
                     continue
 
                 # Celebration command
@@ -1834,14 +1857,13 @@ class LocalCoHostApp:
                     self.visualizer.trigger_celebration(duration=5.0)
                     await self.trigger_obs_fx(duration_sec=5.0)
                     self._trigger_ai_turn(
-                        prompt_trigger=f"[CELEBRATION] Host @{author} called for a celebration: '{message}'. Hyped celebration response!",
+                        prompt_trigger=f"[CELEBRATION] @{author} called for a celebration: '{message}'. Hyped celebration response!",
                         event_type="superchat",
-                        priority=2,
+                        priority=1,
                     )
                     continue
 
-                is_host_author = author.lower() in ("host", "owner", self.cfg.host_streamer_name.lower(), self.cfg.host_streamer_handle.lower().lstrip("@"))
-                author_type = "owner" if is_host_author else "viewer"
+                author_type = "viewer"
 
                 logger.info(f"💬 [Console Chat] @{author}: {message}")
                 chat_entry = {
@@ -1879,11 +1901,11 @@ class LocalCoHostApp:
                 self.spontaneous_idle_count = 0
                 self.encouragement_idle_count = 0
 
-                should_trigger, reason = self.brain.should_trigger_response(message, is_host=is_host_author)
+                should_trigger, reason = self.brain.should_trigger_response(message)
                 if should_trigger:
-                    prefix = f"Host @{author} in chat" if is_host_author else f"Chat message from @{author}"
-                    prio = 1 if is_host_author else 5
-                    ev_type = "host" if is_host_author else ("direct_mention" if "direct_mention" in reason else "chat")
+                    prefix = f"Chat message from @{author}"
+                    prio = 2 if "direct_mention" in reason else 4
+                    ev_type = "direct_mention" if "direct_mention" in reason else "chat"
                     self._trigger_ai_turn(prompt_trigger=f"{prefix}: '{message}'", event_type=ev_type, priority=prio, chat_item=chat_entry)
 
             except (KeyboardInterrupt, asyncio.CancelledError):
@@ -1971,7 +1993,14 @@ class LocalCoHostApp:
                     }
                     self.chat_history.append(chat_entry)
                     self._save_cached_chat()
-                    self.brain.add_chat_message(persona.handle, question, False, "")
+                    self.brain.add_chat_message(
+                        author=persona.handle,
+                        message=question,
+                        is_superchat=False,
+                        amount="",
+                        is_cast=True,
+                        cast_persona=persona.persona_type,
+                    )
                     sess_id = self.session_log.session_id if self.session_log else ""
                     self.brain.chatter_db.record_activity(
                         handle=persona.handle,
@@ -2059,21 +2088,20 @@ class LocalCoHostApp:
 
                     logger.info(
                         f"📣 [Chat Encouragement] {self.concurrent_viewers} viewers watching, chat silent for {time_since_last_chat:.0f}s. "
-                        "Triggering AI co-host call-to-action..."
+                        "Triggering AI host call-to-action..."
                     )
                     self.last_chat_encouragement_time = now
                     self.last_activity_time = now
                     self.last_spontaneous_time = now
                     self.encouragement_idle_count += 1
                     self.visualizer.set_mood("hyped")
-                    host_name = self.cfg.host_streamer_name
                     chan_handle = self.cfg.youtube_channel_handle
                     prompt = (
-                        f"[CHAT_ENCOURAGEMENT] There are currently {self.concurrent_viewers} viewers watching on {chan_handle} with {host_name}, "
+                        f"[CHAT_ENCOURAGEMENT] There are currently {self.concurrent_viewers} viewers watching on {chan_handle}, "
                         f"but chat has been quiet. "
-                        f"Deliver a witty, engaging call-to-action to wake up the chat: tell them to drop comments or roast {host_name}!"
+                        f"Deliver a witty, engaging, transcendent call-to-action to wake up the chat and invite questions!"
                     )
-                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="spontaneous", priority=10)
+                    self._trigger_ai_turn(prompt_trigger=prompt, event_type="spontaneous", priority=6)
 
                 # 2. General Spontaneous Reflection with Adaptive Backoff
                 spontaneous_base = getattr(self.cfg, "spontaneous_min_interval_sec", 60.0)
@@ -2101,6 +2129,91 @@ class LocalCoHostApp:
             except Exception as e:
                 logger.error(f"Error in idle reflection monitor: {e}")
 
+    async def promo_monitor_task(self):
+        """
+        Context-aware promotional callout scheduler (Phase 6).
+        Event-driven rules:
+        - 'Ask Anything' (ask_god):
+          Shows when chat has been silent for >= promo_ask_quiet_sec (default 45s),
+          concurrent_viewers >= 1, no turn active, and no pinned question active.
+        - 'Like & Subscribe' (like_sub):
+          Shows within promo_sub_after_turn_sec (default 3s) after a completed non-spontaneous
+          turn or celebration, at most once per promo_sub_min_interval_sec (default 300s).
+        - Existing rule: Promos NEVER overlap speech or a pinned question.
+        """
+        if getattr(self.cfg, "promo_mode", "event") != "event" or not getattr(self.cfg, "promo_overlay_enabled", True):
+            return
+
+        logger.info(
+            f"📣 [Promo Monitor] Event-driven promo engine active "
+            f"(Ask Quiet: {getattr(self.cfg, 'promo_ask_quiet_sec', 45.0)}s, "
+            f"Like/Sub Cooldown: {getattr(self.cfg, 'promo_sub_min_interval_sec', 300.0)}s)"
+        )
+
+        last_ask_promo_time = 0.0
+        last_like_sub_time = 0.0
+
+        while self.running:
+            try:
+                await asyncio.sleep(1.0)
+                if not self.running:
+                    break
+
+                now = time.time()
+                is_turn_busy = (
+                    self.brain.is_generating
+                    or self.tts.is_speaking
+                    or self.tts.remaining_speech_duration > 0.05
+                    or self.active_turn_event is not None
+                    or len(self.comment_queue) > 0
+                    or self.current_pinned_chat is not None
+                )
+                is_promo_active = getattr(self.visualizer, "is_promo_active", False)
+
+                if is_turn_busy or is_promo_active:
+                    continue
+
+                # 1. Check "Like & Subscribe" promo:
+                # Trigger within promo_sub_after_turn_sec after completed non-spontaneous turn or celebration
+                time_since_turn_done = now - getattr(self, "last_turn_completed_time", 0.0)
+                time_since_last_like_sub = now - last_like_sub_time
+                sub_after_turn_sec = getattr(self.cfg, "promo_sub_after_turn_sec", 3.0)
+                sub_min_interval = getattr(self.cfg, "promo_sub_min_interval_sec", 300.0)
+                last_event_type = getattr(self, "last_turn_event_type", "")
+
+                if (
+                    time_since_turn_done <= sub_after_turn_sec
+                    and time_since_last_like_sub >= sub_min_interval
+                    and last_event_type in ("chat", "superchat", "direct_mention", "cast", "greeting", "celebration")
+                ):
+                    logger.info("📣 [Promo Trigger] Showing 'Like & Subscribe' callout after completed viewer interaction.")
+                    self.visualizer.trigger_promo("like_sub")
+                    last_like_sub_time = now
+                    # Reset turn completed time to avoid double triggering
+                    self.last_turn_completed_time = 0.0
+                    continue
+
+                # 2. Check "Ask Anything" promo:
+                # Shows when chat has been silent for >= promo_ask_quiet_sec, viewers >= 1, no active turn
+                ask_quiet_sec = getattr(self.cfg, "promo_ask_quiet_sec", 45.0)
+                time_since_last_chat = now - self.last_chat_time
+                time_since_last_ask = now - last_ask_promo_time
+                viewers = self.concurrent_viewers
+
+                if (
+                    viewers >= 1
+                    and time_since_last_chat >= ask_quiet_sec
+                    and time_since_last_ask >= max(ask_quiet_sec, 60.0)
+                ):
+                    logger.info(f"📣 [Promo Trigger] Showing 'Ask Anything' callout (Chat quiet for {time_since_last_chat:.1f}s >= {ask_quiet_sec:.1f}s).")
+                    self.visualizer.trigger_promo("ask_god")
+                    last_ask_promo_time = now
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Promo monitor note: {e}")
+
     # --------------------------------------------------------------------------
     # 7. High-Precision Audio & 60 FPS Visualizer Video Loop (Synchronized NDI)
     # --------------------------------------------------------------------------
@@ -2109,6 +2222,13 @@ class LocalCoHostApp:
         if status:
             logger.debug(f"Audio Callback status: {status}")
         outdata[:] = self.tts.pop_local_audio(frames, volume=getattr(self.cfg, "local_audio_volume", 1.0))
+        metrics = self.tts.get_audio_metrics()
+        if hasattr(self.visualizer, "write_audio_metrics"):
+            self.visualizer.write_audio_metrics(
+                rms=metrics["rms"],
+                is_speaking=metrics["is_speaking"],
+                spectrum=metrics["spectrum"],
+            )
 
     async def stream_observability_task(self):
         """
@@ -2162,6 +2282,13 @@ class LocalCoHostApp:
                 audio_for_ndi, _ = self.tts.pop_audio_packet(packet_samples)
                 if self.ndi and self.ndi.is_open:
                     self.ndi.send_audio(audio_for_ndi)
+                metrics = self.tts.get_audio_metrics()
+                if hasattr(self.visualizer, "write_audio_metrics"):
+                    self.visualizer.write_audio_metrics(
+                        rms=metrics["rms"],
+                        is_speaking=metrics["is_speaking"],
+                        spectrum=metrics["spectrum"],
+                    )
             except Exception as e:
                 logger.debug(f"NDI audio pump note: {e}")
 
@@ -2174,65 +2301,61 @@ class LocalCoHostApp:
 
     async def video_broadcast_task(self):
         """
-        60 FPS visualizer rendering and asynchronous NDI video transmission.
-        Audio is pumped concurrently by the dedicated _ndi_audio_pump_worker and/or PortAudio callback.
-        Guarantees zero audio jitter, zero sample drift, and perfect lip-sync in OBS.
+        Visualizer state synchronization & event loop lag heartbeat task (20 Hz).
+        The 60 FPS Pygame GPU rendering and NDI video broadcasting run decoupled
+        inside the dedicated render worker process (Phase 5).
         """
-        logger.info(f"Starting 60 FPS Visualizer Video Loop ({self.visualizer.width}x{self.visualizer.height} @ 60fps + 48kHz Audio)...")
-        target_frame_time = 1.0 / self.cfg.visualizer_fps  # 16.666 ms
-
-        frame_count = 0
+        logger.info(f"🎨 [Visualizer Sync] State synchronizer active ({self.visualizer.width}x{self.visualizer.height} @ 60 FPS in dedicated process).")
+        sync_interval = 0.050  # 20 Hz sync rate (50 ms)
         t_last_log = time.time()
-        next_frame_time = time.perf_counter() + target_frame_time
+        max_loop_lag = 0.0
+        sync_count = 0
+
         try:
             while self.running:
-                audio_metrics = self.tts.get_audio_metrics()
-                chat_list = list(self.chat_history)
+                t_loop_start = time.perf_counter()
 
-                # 1. Render visualizer frame
-                rgba_bytes = self.visualizer.render_frame(
-                    audio_metrics=audio_metrics,
-                    chat_messages=chat_list,
-                    host_transcript=self.current_host_transcript,
-                    ai_subtitle=self.current_ai_subtitle,
-                    host_connected=True,
+                # 1. Synchronize orchestrator state with dedicated render worker
+                self.visualizer.sync_state(
+                    chat_messages=list(self.chat_history)[-50:],
+                    pinned_chat_message=self.current_pinned_chat,
                     obs_connected=self.obs_connected,
                     engagement_mode=self.engagement_mode,
                     concurrent_viewers=self.concurrent_viewers,
                     is_stream_live=self.is_streaming,
-                    pinned_chat_message=self.current_pinned_chat,
+                    ai_subtitle=self.current_ai_subtitle,
                 )
 
-                # 2. Transmit video frame asynchronously over NDI (zero copy, zero drift)
-                self.ndi.send_video(rgba_bytes)
-
+                # 2. Check if Pygame preview window was closed
                 if getattr(self.visualizer, "should_quit", False):
                     logger.info("Visualizer window closed by user (QUIT event). Shutting down...")
                     self.stop()
                     break
 
-                frame_count += 1
-                if frame_count % 120 == 0:
+                sync_count += 1
+                if sync_count % 40 == 0:  # Every 2 seconds
                     self._update_engagement_state()
 
+                # 3. Heartbeat drift logging every 10 seconds
                 if time.time() - t_last_log >= 10.0:
                     elapsed = time.time() - t_last_log
-                    measured_fps = frame_count / elapsed
-                    num_connections = self.ndi.get_num_connections()
                     logger.info(
-                        f"Broadcasting: {measured_fps:.1f} FPS | NDI Receivers: {num_connections} | "
+                        f"📡 [Event Loop Health] Max Drift: {max_loop_lag * 1000.0:.1f}ms | "
                         f"Mode: {self.engagement_mode.upper()} ({self.concurrent_viewers} viewers) | "
                         f"Mood: {self.visualizer.current_mood.upper()}"
                     )
-                    frame_count = 0
+                    max_loop_lag = 0.0
                     t_last_log = time.time()
 
-                now = time.perf_counter()
-                sleep_time = max(0.0005, next_frame_time - now)
+                # 4. Measure loop lag and sleep
+                t_work = time.perf_counter() - t_loop_start
+                sleep_time = max(0.001, sync_interval - t_work)
+                t_before_sleep = time.perf_counter()
                 await asyncio.sleep(sleep_time)
-                next_frame_time += target_frame_time
-                if now - next_frame_time > target_frame_time * 2:
-                    next_frame_time = now + target_frame_time
+                actual_sleep = time.perf_counter() - t_before_sleep
+                lag = max(0.0, actual_sleep - sleep_time)
+                if lag > max_loop_lag:
+                    max_loop_lag = lag
 
         except asyncio.CancelledError:
             logger.debug("video_broadcast_task cancelled.")
@@ -2316,7 +2439,6 @@ class LocalCoHostApp:
             asyncio.create_task(self.obs_monitor_task(), name="obs_monitor"),
             asyncio.create_task(self.youtube_chat_task(), name="youtube_chat"),
             asyncio.create_task(self.youtube_viewer_poller_task(), name="viewer_poller"),
-            asyncio.create_task(self.transcript_file_task(), name="transcript_watcher"),
             asyncio.create_task(self.console_chat_task(), name="console_input"),
             asyncio.create_task(self.idle_reflection_monitor_task(), name="idle_reflection"),
             asyncio.create_task(self.stream_observability_task(), name="observability_hud"),
@@ -2324,6 +2446,9 @@ class LocalCoHostApp:
 
         if getattr(self.cfg, "cast_enabled", True):
             self.tasks.append(asyncio.create_task(self.cast_scheduler_task(), name="cast_scheduler"))
+
+        if getattr(self.cfg, "promo_mode", "event") == "event" and getattr(self.cfg, "promo_overlay_enabled", True):
+            self.tasks.append(asyncio.create_task(self.promo_monitor_task(), name="promo_monitor"))
 
         if getattr(self.cfg, "reflection_cache_enabled", True) and hasattr(self.brain, "reflection_cache"):
             self.tasks.append(asyncio.create_task(self.brain.reflection_cache.replenish_worker(self.brain), name="reflection_cache_worker"))

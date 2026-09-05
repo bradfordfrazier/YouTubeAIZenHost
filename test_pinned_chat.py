@@ -48,7 +48,6 @@ def test_visualizer_pinned_chat_rendering():
         buf_preview = vis.render_frame(
             audio_metrics=audio_metrics_thinking,
             chat_messages=chat_messages,
-            host_transcript="",
             ai_subtitle="",
             pinned_chat_message=pinned_msg,
         )
@@ -59,7 +58,6 @@ def test_visualizer_pinned_chat_rendering():
         buf_speaking = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,
-            host_transcript="",
             ai_subtitle="Consciousness is the mirror observing itself.",
             pinned_chat_message=pinned_msg,
         )
@@ -76,7 +74,6 @@ def test_visualizer_pinned_chat_rendering():
         buf_cast_preview = vis.render_frame(
             audio_metrics=audio_metrics_thinking,
             chat_messages=chat_messages,
-            host_transcript="",
             ai_subtitle="",
             pinned_chat_message=pinned_cast,
         )
@@ -86,7 +83,6 @@ def test_visualizer_pinned_chat_rendering():
         buf_cast_speaking = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,
-            host_transcript="",
             ai_subtitle="Edges are merely where the painting gets nervous.",
             pinned_chat_message=pinned_cast,
         )
@@ -97,7 +93,6 @@ def test_visualizer_pinned_chat_rendering():
         buf_unpinned = vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=chat_messages,
-            host_transcript="",
             ai_subtitle="",
             pinned_chat_message=None,
         )
@@ -200,7 +195,6 @@ def test_pinned_comment_persists_during_oracle_statement():
     vis.render_frame(
         audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
         chat_messages=[{"author": "Bob", "message": "hello"}],
-        host_transcript="",
         ai_subtitle="She is in the silence you listen with.",
         pinned_chat_message=pinned_msg,
     )
@@ -210,7 +204,6 @@ def test_pinned_comment_persists_during_oracle_statement():
     vis.render_frame(
         audio_metrics={"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False},
         chat_messages=[{"author": "Bob", "message": "hello"}],
-        host_transcript="",
         ai_subtitle="She is in the silence you listen with.",
         pinned_chat_message=None,
     )
@@ -232,7 +225,6 @@ def test_question_fade_in_out_animation():
     vis.render_frame(
         audio_metrics=audio_metrics,
         chat_messages=[],
-        host_transcript="",
         ai_subtitle="",
         pinned_chat_message=pinned_msg,
     )
@@ -243,7 +235,6 @@ def test_question_fade_in_out_animation():
         vis.render_frame(
             audio_metrics=audio_metrics,
             chat_messages=[],
-            host_transcript="",
             ai_subtitle="",
             pinned_chat_message=pinned_msg,
         )
@@ -255,7 +246,6 @@ def test_question_fade_in_out_animation():
     vis.render_frame(
         audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
         chat_messages=[],
-        host_transcript="",
         ai_subtitle="Stars are the dreaming eye of the universe.",
         pinned_chat_message=pinned_msg,
     )
@@ -266,7 +256,6 @@ def test_question_fade_in_out_animation():
         vis.render_frame(
             audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
             chat_messages=[],
-            host_transcript="",
             ai_subtitle="Stars are the dreaming eye of the universe.",
             pinned_chat_message=None,
         )
@@ -278,7 +267,7 @@ def test_spontaneous_reflection_transition_lifecycle():
     """Verifies unprompted spontaneous reflections transition cleanly from motto to reflection to pause to motto."""
     vis = Visualizer(width=1920, height=1080)
     # Start at idle motto
-    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
     assert vis.ai_text_current == "Everything is perfect."
 
     # Spontaneous reflection arrives (no pinned message)
@@ -286,7 +275,6 @@ def test_spontaneous_reflection_transition_lifecycle():
     vis.render_frame(
         audio_metrics={"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True},
         chat_messages=[],
-        host_transcript="",
         ai_subtitle=refl_text,
         pinned_chat_message=None,
     )
@@ -295,7 +283,7 @@ def test_spontaneous_reflection_transition_lifecycle():
 
     # Render frames to reach steady state
     for _ in range(40):
-        vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, [], "", refl_text, pinned_chat_message=None)
+        vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, [], refl_text, pinned_chat_message=None)
     assert vis.ai_text_current == refl_text
     assert vis.ai_text_state == "steady"
     assert vis.ai_text_alpha == 1.0
@@ -306,7 +294,7 @@ def test_spontaneous_reflection_transition_lifecycle():
 
     # Step through fade_out
     for _ in range(80):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
     # Reaches motto_pause
     assert vis.ai_text_state in ("motto_pause", "fade_in", "steady")
 
@@ -317,23 +305,23 @@ def test_live_chat_pinned_card_alpha_sync():
     pinned_msg = {"author": "Sarah", "message": "How do we let go?", "is_superchat": False}
 
     # Frame 1: Pinned message arrives -> starts fade_in
-    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=pinned_msg)
     assert vis.pinned_chat_state in ("fade_in", "steady")
     assert vis.pinned_chat_alpha > 0.0
 
     # Fast forward to steady
     for _ in range(40):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=pinned_msg)
     assert vis.pinned_chat_state == "steady"
     assert vis.pinned_chat_alpha == 1.0
 
     # Unpin: pinned_chat_message becomes None (hold finished)
-    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
     assert vis.pinned_chat_state == "fade_out"
 
     # Step through fade_out
     for _ in range(80):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
     assert vis.pinned_chat_state == "idle"
     assert vis.pinned_chat_alpha == 0.0
     assert vis.pinned_chat_stored is None
@@ -355,7 +343,7 @@ def test_configurable_transitions_override():
         vis = Visualizer(width=1920, height=1080)
         vis.set_subtitle("Fast fade test comment.")
         for _ in range(20):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "Fast fade test comment.", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "Fast fade test comment.", pinned_chat_message=None)
         assert vis.ai_text_state == "steady"
 
         vis.clear_subtitle()
@@ -363,7 +351,7 @@ def test_configurable_transitions_override():
 
         # After 0.3s (18 frames at 60fps), fade_out should complete and reach motto_pause
         for _ in range(25):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
         assert vis.ai_text_state in ("motto_pause", "fade_in")
     finally:
         config.comment_fade_in_sec = orig_fade_in
@@ -388,20 +376,20 @@ def test_in_feed_highlight_and_scrolling_pin_docking():
         {"author": "User2", "message": "Zen vibes", "is_superchat": False},
         pinned_msg,
     ]
-    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", "", pinned_chat_message=pinned_msg)
+    vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", pinned_chat_message=pinned_msg)
     # Active question is at the bottom of the feed (index -1)
     assert vis.pinned_chat_stored == pinned_msg
     assert vis.pinned_chat_state in ("fade_in", "steady")
 
     # Fast forward to steady alpha
     for _ in range(40):
-        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", "", pinned_chat_message=pinned_msg)
+        vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, feed_step1, "", pinned_chat_message=pinned_msg)
     assert vis.pinned_chat_alpha == 1.0
 
     # Step 2: 1 new message arrives -> [msg1, msg2, pinned_msg, new_msg1]
     # Active question rises by 1 row in the feed
     feed_step2 = list(feed_step1) + [{"author": "User3", "message": "Nice answer", "is_superchat": False}]
-    buf2 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step2, "", "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
+    buf2 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step2, "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
     assert isinstance(buf2, (bytes, bytearray))
 
     # Step 3: 3 more messages arrive pushing pinned_msg to the top / off the top
@@ -411,7 +399,7 @@ def test_in_feed_highlight_and_scrolling_pin_docking():
         {"author": "User5", "message": "More chatter", "is_superchat": False},
         {"author": "User6", "message": "Continuing stream", "is_superchat": False},
     ]
-    buf3 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step3, "", "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
+    buf3 = vis.render_frame({"rms": 0.2, "spectrum": np.ones(32), "is_speaking": True}, feed_step3, "Beyond thought is the silence that knows it.", pinned_chat_message=pinned_msg)
     assert isinstance(buf3, (bytes, bytearray))
     assert len(buf3) == 1920 * 1080 * 4
 
@@ -646,15 +634,16 @@ def test_strict_fifo_chat_ordering():
     # 4. Cast member question arrives
     app._trigger_ai_turn("Cast member @ExistentialDave asks: 'Message 4'", event_type="cast", chat_item={"author": "ExistentialDave", "message": "Message 4"})
     # 5. Superchat arrives
-    app._trigger_ai_turn("Superchat from @VIP: '$10 Message 5'", event_type="superchat", priority=2, chat_item={"author": "VIP", "message": "$10 Message 5"})
+    app._trigger_ai_turn("Superchat from @VIP: '$10 Message 5'", event_type="superchat", priority=1, chat_item={"author": "VIP", "message": "$10 Message 5"})
 
     # Verify queue order:
-    # Tier 2: Superchat (VIP)
-    # Tier 3: Direct Mention (ViewerB)
-    # Tier 4: Real Live Chat / Greetings in FIFO arrival order (ViewerA, ViewerC)
+    # Tier 1: Superchat (VIP)
+    # Tier 2: Direct Mention (ViewerB)
+    # Tier 3: Greeting (ViewerC)
+    # Tier 4: Real Live Chat (ViewerA)
     # Tier 5: Synthetic Cast (ExistentialDave)
-    authors_in_order = [e.chat_item["author"] for e in app.comment_queue]
-    assert authors_in_order == ["VIP", "ViewerB", "ViewerA", "ViewerC", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
+    authors_in_order = [e.chat_item["author"] for e in sorted(app.comment_queue)]
+    assert authors_in_order == ["VIP", "ViewerB", "ViewerC", "ViewerA", "ExistentialDave"], f"Unexpected queue order: {authors_in_order}"
 
 
 def test_system_prompt_never_pinned_or_added_to_chat_history():
@@ -708,9 +697,7 @@ def test_bottom_anchored_chat_rendering_with_many_messages():
     vis.render_frame(
         audio_metrics={"rms": 0.0, "spectrum": np.zeros(64)},
         chat_messages=chat_history,
-        host_transcript="",
         ai_subtitle="",
-        host_connected=True,
         obs_connected=True,
         engagement_mode="active",
         concurrent_viewers=5,
@@ -731,19 +718,20 @@ def test_rapid_consecutive_real_chat_messages_never_missed():
     app.brain.last_response_time = time.time()  # AI just spoke 0.0s ago
 
     # Real chatter 1 sends a message immediately after AI speech
-    trigger_1, reason_1 = app.brain.should_trigger_response("What is reality?", is_host=False)
+    trigger_1, reason_1 = app.brain.should_trigger_response("What is reality?")
     assert trigger_1 is True, f"First real chat message was unexpectedly dropped! Reason: {reason_1}"
     app._trigger_ai_turn(f"Chat message from @Viewer1: 'What is reality?'", event_type="chat", chat_item={"author": "Viewer1", "message": "What is reality?"})
 
     # Real chatter 2 sends a message 0.2s later
-    trigger_2, reason_2 = app.brain.should_trigger_response("I want to know too", is_host=False)
+    trigger_2, reason_2 = app.brain.should_trigger_response("Tell me about it too")
     assert trigger_2 is True, f"Second real chat message was unexpectedly dropped! Reason: {reason_2}"
-    app._trigger_ai_turn(f"Chat message from @Viewer2: 'I want to know too'", event_type="chat", chat_item={"author": "Viewer2", "message": "I want to know too"})
+    app._trigger_ai_turn(f"Chat message from @Viewer2: 'Tell me about it too'", event_type="chat", chat_item={"author": "Viewer2", "message": "Tell me about it too"})
 
     # Verify both comments are queued in strict FIFO order
     assert len(app.comment_queue) == 2
-    assert app.comment_queue[0].chat_item["author"] == "Viewer1"
-    assert app.comment_queue[1].chat_item["author"] == "Viewer2"
+    sorted_q = sorted(app.comment_queue)
+    assert sorted_q[0].chat_item["author"] == "Viewer1"
+    assert sorted_q[1].chat_item["author"] == "Viewer2"
 
 
 def test_real_chat_evicts_pending_synthetic_cast():
@@ -775,7 +763,7 @@ def test_vox_only_mode():
 
         # 1. Step through initial motto dissolve and question fade-in
         for _ in range(120):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=pinned_msg)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=pinned_msg)
 
         assert vis.question_fade_state == "steady"
         assert vis.question_fade_alpha == 1.0
@@ -786,7 +774,7 @@ def test_vox_only_mode():
         assert vis.subtitle_target_text == ""
 
         for _ in range(60):
-            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", "", pinned_chat_message=pinned_msg)
+            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", pinned_chat_message=pinned_msg)
 
         # Question remains steadily displayed in comment card during speech
         assert vis.question_fade_state == "steady"
@@ -795,7 +783,7 @@ def test_vox_only_mode():
 
         # 3. Speech ends and question is unpinned
         for _ in range(100):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
 
         assert vis.question_fade_state == "idle"
         assert vis.active_question_text == ""
@@ -804,7 +792,7 @@ def test_vox_only_mode():
         vis.fade_out_for_turn()
         vis.set_subtitle("The cosmos listens to its own echo.")
         for _ in range(50):
-            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.5, "spectrum": np.zeros(32), "is_speaking": True}, [], "", pinned_chat_message=None)
 
         assert vis.active_question_text == ""
         assert vis.ai_text_current == "" or vis.ai_text_alpha <= 0.01
@@ -812,7 +800,7 @@ def test_vox_only_mode():
         # 5. Reflection ends -> motto returns
         vis.clear_subtitle()
         for _ in range(120):
-            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", "", pinned_chat_message=None)
+            vis.render_frame({"rms": 0.0, "spectrum": np.zeros(32), "is_speaking": False}, [], "", pinned_chat_message=None)
 
         assert vis.ai_text_current == config.motto_phrase
     finally:

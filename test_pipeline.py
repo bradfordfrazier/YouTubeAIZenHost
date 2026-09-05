@@ -26,8 +26,10 @@ async def test_tts():
     assert len(audio) > 0, "TTS output should not be empty"
     assert audio.shape[1] == 2, "TTS output must be 2-channel stereo"
 
-    # Queue speech and test frame-locked popping
-    await tts.queue_speech(test_text)
+    # Push audio and test frame-locked popping
+    tts.begin_utterance()
+    tts.push_audio(audio)
+    tts.end_utterance()
     ndi_audio, interleaved = tts.pop_frame_samples()
     print(f"-> Popped frame audio for NDI: shape={ndi_audio.shape} (planar), interleaved={interleaved.shape}")
     assert ndi_audio.shape == (2, 800), f"Expected planar audio shape (2, 800), got {ndi_audio.shape}"
@@ -63,9 +65,7 @@ def test_visualizer():
         rgba_buffer = vis.render_frame(
             audio_metrics=sample_metrics,
             chat_messages=sample_chats,
-            host_transcript="What do you think about this new update, Nova?",
-            ai_subtitle="Yo Bradford, this update changes the whole dynamic! Chat is hyped!",
-            host_connected=True,
+            ai_subtitle="The cosmic frequency is awakening within all of us.",
             obs_connected=True,
         )
     t1 = time.perf_counter()
@@ -79,7 +79,7 @@ def test_ndi():
     print("\n" + "=" * 50)
     print("TEST 3: NDI Streamer Broadcast Engine")
     print("=" * 50)
-    ndi = NDIStreamer(stream_name="AI_COHOST_TEST")
+    ndi = NDIStreamer(stream_name="AI_HOST_TEST")
     ndi_open_success = ndi.open()
     print(f"-> NDI Open Result: {ndi_open_success} (is_mock: {ndi.is_mock})")
 
@@ -99,53 +99,52 @@ async def test_ai_brain():
     print("TEST 4: AI Brain Context, Peer Filtering & Streaming")
     print("=" * 50)
     brain = AIBrain()
-    brain.add_transcript("Host", "Hey Nova, what's your take on tonight's match?")
-    brain.add_chat_message("StreamFan", "Nova is the best cohost!", is_superchat=False)
-    brain.add_chat_message("Alice", "Anyone ready for the boss fight?", is_superchat=False)
+    brain.add_chat_message("StreamFan", "I Am is the best host!", is_superchat=False)
+    brain.add_chat_message("Alice", "Anyone ready for the deep dive?", is_superchat=False)
 
     # Set active engagement mode for initial tests
     brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
 
-    # 1. Test Host Question Trigger
-    should_trig, reason = brain.should_trigger_response("Hey Nova what do you think?", is_host=True)
-    print(f"-> Host trigger evaluation: should_trigger={should_trig}, reason={reason}")
+    # 1. Test Direct Question Trigger
+    should_trig, reason = brain.should_trigger_response("@I Am what do you think?")
+    print(f"-> Direct mention trigger evaluation: should_trigger={should_trig}, reason={reason}")
     assert should_trig, "Expected direct mention to trigger response"
 
     # 2. Test Member-to-Member Direct Reply Filtering (Preserving Entanglement)
     brain.last_response_time = 0.0  # reset cooldown
-    peer_trig, peer_reason = brain.should_trigger_response("@Alice yeah I have max gear!", is_host=False)
+    peer_trig, peer_reason = brain.should_trigger_response("@Alice yeah I have max gear!")
     print(f"-> Member-to-Member reply evaluation (@Alice): should_trigger={peer_trig}, reason={peer_reason}")
     assert not peer_trig, "Expected member-to-member reply to NOT trigger AI response"
     assert "member_reply_entanglement" in peer_reason, f"Expected member_reply_entanglement reason, got: {peer_reason}"
 
-    # 3. Test Direct Channel/Host Address (Channel handle is NEVER filtered as peer reply)
+    # 3. Test Direct Channel Address (Channel handle is NEVER filtered as peer reply)
     brain.last_response_time = 0.0
     chan_handle = brain.cfg.youtube_channel_handle
-    mgc_trig, mgc_reason = brain.should_trigger_response(f"{chan_handle} is this stream live right now?", is_host=False)
-    print(f"-> Direct Host/Channel address evaluation ({chan_handle}): should_trigger={mgc_trig}, reason={mgc_reason}")
+    mgc_trig, mgc_reason = brain.should_trigger_response(f"{chan_handle} is this stream live right now?")
+    print(f"-> Direct Channel address evaluation ({chan_handle}): should_trigger={mgc_trig}, reason={mgc_reason}")
     assert mgc_trig, f"Expected address to {chan_handle} to NOT be filtered as peer entanglement"
 
     # 4. Test Direct AI Address from Member
     brain.last_response_time = 0.0
-    ai_trig, ai_reason = brain.should_trigger_response("@I Am what is consciousness?", is_host=False)
+    ai_trig, ai_reason = brain.should_trigger_response("@I Am what is consciousness?")
     print(f"-> Direct AI question evaluation (@I Am): should_trigger={ai_trig}, reason={ai_reason}")
     assert ai_trig, "Expected direct mention of AI to trigger response"
 
     # 5. Test Chat General Question Trigger
     brain.last_response_time = 0.0
-    q_trig, q_reason = brain.should_trigger_response("How does the unified mind realize itself?", is_host=False)
+    q_trig, q_reason = brain.should_trigger_response("How does the unified mind realize itself?")
     print(f"-> General chat question evaluation: should_trigger={q_trig}, reason={q_reason}")
     assert q_trig, "Expected question to trigger response"
 
-    # 6. Test Chat Interactive Keyword Trigger
+    # 6. Test Chat Interactive Keyword Trigger (Phase 3 explicit ask keywords)
     brain.last_response_time = 0.0
-    kw_trig, kw_reason = brain.should_trigger_response("That was such a clutch play lol", is_host=False)
+    kw_trig, kw_reason = brain.should_trigger_response("Give me your opinion on this setup")
     print(f"-> Chat keyword evaluation: should_trigger={kw_trig}, reason={kw_reason}")
     assert kw_trig, "Expected interactive keywords to trigger response"
 
     # 7. Test New Chatter Greeting Priority Trigger
     brain.last_response_time = 0.0
-    new_chatter_trig, new_chatter_reason = brain.should_trigger_response("Hey everyone!", is_host=False, is_new_chatter=True)
+    new_chatter_trig, new_chatter_reason = brain.should_trigger_response("Hey everyone!", is_new_chatter=True)
     print(f"-> First-time chatter greeting evaluation: should_trigger={new_chatter_trig}, reason={new_chatter_reason}")
     assert new_chatter_trig, "Expected first-time chatter to trigger greeting"
     assert new_chatter_reason == "new_chatter_greeting"
@@ -156,13 +155,13 @@ async def test_ai_brain():
     brain.set_engagement_mode("eco", is_stream_live=True, concurrent_viewers=0, is_chat_active=False)
     brain.last_response_time = 0.0
 
-    eco_kw_trig, eco_kw_reason = brain.should_trigger_response("That was such a clutch play lol", is_host=False)
+    eco_kw_trig, eco_kw_reason = brain.should_trigger_response("That was such a clutch play lol")
     print(f"   [Eco Mode Generic Keyword]: should_trigger={eco_kw_trig}, reason={eco_kw_reason}")
     assert not eco_kw_trig, "Expected generic keyword to be suppressed in Eco mode"
     assert "eco_mode_suppressed" in eco_kw_reason
 
     brain.last_response_time = 0.0
-    eco_direct_trig, eco_direct_reason = brain.should_trigger_response("@I Am what do you think?", is_host=False)
+    eco_direct_trig, eco_direct_reason = brain.should_trigger_response("@I Am what do you think?")
     print(f"   [Eco Mode Direct Mention]: should_trigger={eco_direct_trig}, reason={eco_direct_reason}")
     assert eco_direct_trig, "Expected direct mention to trigger even in Eco mode"
 
@@ -170,7 +169,7 @@ async def test_ai_brain():
     print("-> Testing Standby Mode (Stream offline)...")
     brain.cfg.obs_require_stream_active = True
     brain.set_engagement_mode("standby", is_stream_live=False, concurrent_viewers=0, is_chat_active=False)
-    standby_trig, standby_reason = brain.should_trigger_response("Who is the best player?", is_host=False)
+    standby_trig, standby_reason = brain.should_trigger_response("Who is the best player?")
     print(f"   [Standby Mode Chat]: should_trigger={standby_trig}, reason={standby_reason}")
     assert not standby_trig, "Expected all chat responses to be blocked in Standby mode"
     assert "stream_standby_paused" in standby_reason
@@ -186,7 +185,7 @@ async def test_ai_brain():
     for _ in range(max_rpm):
         brain.response_timestamps.append(now)
 
-    rate_trig, rate_reason = brain.should_trigger_response("@I Am hello!", is_host=False)
+    rate_trig, rate_reason = brain.should_trigger_response("@I Am hello!")
     print(f"   [Rate Limiter Evaluation]: should_trigger={rate_trig}, reason={rate_reason}")
     assert not rate_trig, "Expected rate limit to block excess requests"
     assert "rate_limit_exceeded" in rate_reason

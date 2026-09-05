@@ -27,11 +27,6 @@ try:
 except ImportError:
     EDGE_TTS_AVAILABLE = False
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [TTS-ENGINE] %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("tts_engine")
 
 
@@ -46,13 +41,15 @@ class TTSEngine:
         self.samples_per_frame = self.sample_rate // self.fps  # 800 samples/frame
 
         # Dual-Backend Configuration (ChatterBox Turbo on LAN / Edge-TTS Local Fallback)
-        self.tts_backend = getattr(self.cfg, "tts_backend", "chatterbox").lower()
-        self.server_url = getattr(self.cfg, "tts_server_url", "http://192.168.0.115:8123").rstrip("/")
-        self.reference_voice = getattr(self.cfg, "tts_reference_voice", "cohost.wav")
-        self.timeout_floor = getattr(self.cfg, "tts_request_timeout_floor", 5.0)
-        self.timeout_ceiling = getattr(self.cfg, "tts_request_timeout_ceiling", 30.0)
-        self.exaggeration_default = getattr(self.cfg, "tts_exaggeration_default", 0.5)
-        self.mood_exaggeration_map = getattr(self.cfg, "tts_mood_exaggeration_map", {})
+        self.tts_backend = self.cfg.tts_backend.lower()
+        self.server_url = self.cfg.tts_server_url.rstrip("/")
+        self.reference_voice = self.cfg.tts_reference_voice
+        self.timeout_floor = self.cfg.tts_request_timeout_floor
+        self.timeout_ceiling = self.cfg.tts_request_timeout_ceiling
+        self.exaggeration_default = self.cfg.tts_exaggeration_default
+        self.mood_exaggeration_map = self.cfg.tts_mood_exaggeration_map
+        self.max_concurrent_synth = self.cfg.max_concurrent_synth
+        self._synth_semaphore = asyncio.Semaphore(self.max_concurrent_synth)
 
         # Active backend state (tracks failover from chatterbox -> edge)
         self.active_backend = self.tts_backend
@@ -63,6 +60,13 @@ class TTSEngine:
         self.voice = self.cfg.tts_voice
         self.pitch = self.cfg.tts_pitch
         self.rate = self.cfg.tts_rate
+
+        # Utterance bookkeeping for sentence-pipelined speech playback
+        self._utterance_total_samples: int = 0
+        self._utterance_open: bool = False
+        self._utterance_chunk_count: int = 0
+        self._first_push_time: float = 0.0
+        self.last_synthesized_duration: float = 0.0
 
         # Dual independent sample buffers for NDI and Local Windows Audio
         self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
@@ -183,23 +187,24 @@ class TTSEngine:
         }
 
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status == 200:
-                        raw_wav = await resp.read()
-                        if not raw_wav:
+            async with self._synth_semaphore:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(url, json=payload) as resp:
+                        if resp.status == 200:
+                            raw_wav = await resp.read()
+                            if not raw_wav:
+                                return None
+                            # Zero-latency polyphase FIR decoding & resampling in worker thread
+                            data = await asyncio.to_thread(self._decode_and_resample, raw_wav)
+                            logger.info(
+                                f"[Chatterbox] Synthesized {len(data)/self.sample_rate:.2f}s audio "
+                                f"(exaggeration={exaggeration:.2f}) from {self.server_url}"
+                            )
+                            return data
+                        else:
+                            err_text = await resp.text()
+                            logger.warning(f"Chatterbox server returned error HTTP {resp.status}: {err_text}")
                             return None
-                        # Zero-latency polyphase FIR decoding & resampling in worker thread
-                        data = await asyncio.to_thread(self._decode_and_resample, raw_wav)
-                        logger.info(
-                            f"[Chatterbox] Synthesized {len(data)/self.sample_rate:.2f}s audio "
-                            f"(exaggeration={exaggeration:.2f}) from {self.server_url}"
-                        )
-                        return data
-                    else:
-                        err_text = await resp.text()
-                        logger.warning(f"Chatterbox server returned error HTTP {resp.status}: {err_text}")
-                        return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning(f"Chatterbox connection/timeout to {self.server_url} ({e}); falling back to local edge-tts.")
             return None
@@ -237,14 +242,18 @@ class TTSEngine:
             logger.error(f"Error during edge-tts synthesis: {e}")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
-    async def synthesize(self, text: str) -> np.ndarray:
+    async def synthesize(self, text: str, mood: str = "neutral") -> np.ndarray:
         """
         Synthesize text into 48kHz stereo float32 PCM numpy array.
         Routes to ChatterBox Turbo GPU server or local Edge-TTS failback with mood mapping.
         """
-        # Parse mood tag before cleaning
-        mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
-        active_mood = mood_match.group(1).lower() if mood_match else "neutral"
+        # Parse mood tag from argument with regex fallback
+        active_mood = (mood or "neutral").lower().strip()
+        if active_mood == "neutral":
+            mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
+            if mood_match:
+                active_mood = mood_match.group(1).lower()
+
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
 
         # Clean text of mood tags, markdown, and '@' symbols before speech synthesis
@@ -255,7 +264,10 @@ class TTSEngine:
         if not clean_text:
             return np.zeros((0, 2), dtype=np.float32)
 
-        logger.info(f"Synthesizing speech ({len(clean_text)} chars, mood={active_mood}): '{clean_text[:60]}...'")
+        logger.info(
+            f"Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, exaggeration={exaggeration:.2f}): "
+            f"'{clean_text[:60]}...'"
+        )
 
         # 1. Primary: Remote Chatterbox Turbo GPU inference server
         if self.active_backend == "chatterbox":
@@ -290,40 +302,59 @@ class TTSEngine:
         with self._buffer_lock:
             return len(self._audio_buffer_ndi) / self.sample_rate
 
+    def begin_utterance(self):
+        """Begins a new utterance turn, resetting sample counters and marking utterance as open."""
+        with self._buffer_lock:
+            self._utterance_total_samples = 0
+            self._utterance_open = True
+            self._utterance_chunk_count = 0
+            self._first_push_time = 0.0
+
+    def end_utterance(self):
+        """Marks current utterance as closed so wait_until_speech_completed resolves after buffers drain."""
+        with self._buffer_lock:
+            self._utterance_open = False
+
     def clear_audio_buffer(self):
-        """Immediately flushes all queued speech samples and resets speaking state."""
+        """Immediately flushes all queued speech samples, resets speaking state, and closes utterance."""
         with self._buffer_lock:
             self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
             self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
+            self._utterance_open = False
+            self._utterance_total_samples = 0
+            self._utterance_chunk_count = 0
+            self._first_push_time = 0.0
             self.is_speaking = False
 
     async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: Optional[float] = None):
-        """Asynchronously waits until all buffered speech audio has finished broadcasting out through NDI/audio."""
+        """
+        Asynchronously waits until all buffered speech audio has finished broadcasting out
+        through NDI/audio and the current utterance is closed.
+        """
         t0 = time.time()
         # Brief initial sleep so the pop_audio_packet / pop_local_audio threads register playback start
-        await asyncio.sleep(0.10)
+        await asyncio.sleep(0.05)
 
-        expected_dur = getattr(self, "last_synthesized_duration", 0.0)
-        # Cap wait timeout to avoid hanging indefinitely if a playback backend is inactive
-        max_wait = (expected_dur + 1.5) if expected_dur > 0 else (timeout or 10.0)
-        if timeout:
-            max_wait = min(max_wait, timeout)
-
-        while time.time() - t0 < max_wait:
+        while True:
             now = time.time()
             with self._buffer_lock:
+                utterance_open = self._utterance_open
                 ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0
                 local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0
 
                 buf_len_ndi = len(self._audio_buffer_ndi) if ndi_active else 0
                 buf_len_local = len(self._audio_buffer_local) if local_active else 0
 
-                # If neither backend is actively popping (e.g. standalone test or idle capture),
+                # If neither backend is actively popping (e.g. standalone test harness or headless run),
                 # elapsed time matching expected duration means playback is complete
                 if not ndi_active and not local_active:
-                    is_done = (time.time() - t0) >= expected_dur
+                    expected_dur = self._utterance_total_samples / self.sample_rate if self._utterance_total_samples > 0 else getattr(self, "last_synthesized_duration", 0.0)
+                    elapsed = now - (self._first_push_time or t0)
+                    is_drained = (elapsed >= expected_dur)
                 else:
-                    is_done = (buf_len_ndi == 0 and buf_len_local == 0)
+                    is_drained = (buf_len_ndi == 0 and buf_len_local == 0)
+
+                is_done = (not utterance_open) and is_drained
 
             if is_done:
                 with self._buffer_lock:
@@ -331,33 +362,75 @@ class TTSEngine:
                     self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
                     self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
                 # Safety padding for soundcard hardware driver ringbuffer drain before resolving
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.10)
                 break
+
+            if timeout and (time.time() - t0) >= timeout:
+                logger.warning(f"wait_until_speech_completed timed out after {timeout}s")
+                with self._buffer_lock:
+                    self.is_speaking = False
+                    self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
+                    self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
+                break
+
             await asyncio.sleep(poll_interval)
-        else:
-            with self._buffer_lock:
-                self.is_speaking = False
-                self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
-                self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
 
     def push_audio(self, audio: np.ndarray):
-        """Pushes pre-synthesized audio into playback buffers with zero latency."""
-        if audio is not None and len(audio) > 0:
-            dur = len(audio) / self.sample_rate
-            self.last_synthesized_duration = dur
-            with self._buffer_lock:
-                # Seamless crossfade stitching if buffer already contains pending audio
-                self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
-                self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
-                self.is_speaking = True
-            logger.info(f"Queued {dur:.2f}s pre-synthesized audio (buffer now at {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)")
-        else:
-            self.last_synthesized_duration = 0.0
+        """
+        Pushes pre-synthesized audio into playback buffers with zero latency,
+        applying 5ms crossfades and inter-sentence gap silence between chunks.
+        """
+        if audio is None or len(audio) == 0:
+            return
 
-    async def queue_speech(self, text: str):
-        """Synthesizes text and pushes audio to dual synchronized NDI and Local playback buffers."""
-        audio = await self.synthesize(text)
-        self.push_audio(audio)
+        if audio.ndim == 1:
+            audio = np.column_stack((audio, audio))
+        elif audio.shape[1] == 1:
+            audio = np.column_stack((audio[:, 0], audio[:, 0]))
+
+        audio = audio.astype(np.float32).copy()
+        dur = len(audio) / self.sample_rate
+        self.last_synthesized_duration = dur
+
+        # 5ms fade = 240 samples at 48kHz
+        fade_samples = min(240, len(audio) // 4)
+        if fade_samples > 0:
+            # Always apply 5ms linear fade-out to tail to prevent zero-crossing clicks
+            fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)[:, None]
+            audio[-fade_samples:] *= fade_out
+
+        with self._buffer_lock:
+            is_first_chunk = (self._utterance_chunk_count == 0)
+            buffer_empty = (len(self._audio_buffer_ndi) == 0)
+
+            # Apply 5ms linear fade-in to chunk head (skip for first chunk into empty buffer for crisp onset)
+            if fade_samples > 0 and not (is_first_chunk and buffer_empty):
+                fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
+                audio[:fade_samples] *= fade_in
+
+            # Inter-sentence gap silence prepended to chunk N when N > 1
+            if not is_first_chunk:
+                inter_gap_sec = float(self.cfg.inter_sentence_gap_sec)
+                if inter_gap_sec > 0:
+                    gap_samples = int(self.sample_rate * inter_gap_sec)
+                    gap_silence = np.zeros((gap_samples, 2), dtype=np.float32)
+                    audio = np.vstack((gap_silence, audio))
+
+            if is_first_chunk:
+                self._first_push_time = time.time()
+                self._utterance_open = True
+
+            self._utterance_chunk_count += 1
+            self._utterance_total_samples += len(audio)
+
+            self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
+            self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
+            self.is_speaking = True
+
+            logger.info(
+                f"Queued {dur:.2f}s pre-synthesized audio "
+                f"(chunk #{self._utterance_chunk_count}, total buffered: {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)"
+            )
 
     def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:
         """

@@ -94,7 +94,7 @@ GAUNTLET_QUESTIONS = [
 async def run_gauntlet(rounds: int = 1) -> str:
     print("\n" + "=" * 65)
     print("RUNNING THE I AM PERSONA GAUNTLET")
-    print(f"   Model: {config.gemini_model} | Host: {config.host_streamer_name} | Channel: {config.youtube_channel_handle}")
+    print(f"   Model: {config.gemini_model} | Host: {config.ai_host_name} | Channel: {config.youtube_channel_handle}")
     print("=" * 65 + "\n")
 
     brain = AIBrain()

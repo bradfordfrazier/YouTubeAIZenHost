@@ -2250,7 +2250,7 @@ class LocalCoHostApp:
                     self.last_turn_completed_time = 0.0
                     continue
 
-                # 2. Check "Ask Anything" promo:
+                # 2. Check Idle Callouts ("Ask Anything" & "Like & Subscribe"):
                 # Shows when chat has been silent for >= promo_ask_quiet_sec, viewers >= 1, no active turn
                 ask_quiet_sec = self.cfg.promo_ask_quiet_sec
                 time_since_last_chat = now - self.last_chat_time
@@ -2260,11 +2260,20 @@ class LocalCoHostApp:
                 if (
                     viewers >= 1
                     and time_since_last_chat >= ask_quiet_sec
-                    and time_since_last_ask >= max(ask_quiet_sec, 60.0)
                 ):
-                    logger.info(f"📣 [Promo Trigger] Showing 'Ask Anything' callout (Chat quiet for {time_since_last_chat:.1f}s >= {ask_quiet_sec:.1f}s).")
-                    self.visualizer.trigger_promo("ask_god")
-                    last_ask_promo_time = now
+                    # If Like & Subscribe hasn't been shown for promo_sub_min_interval_sec and is older than last Ask Anything, alternate to Like & Subscribe
+                    if (
+                        time_since_last_like_sub >= sub_min_interval
+                        and (last_like_sub_time <= last_ask_promo_time or time_since_last_ask < max(ask_quiet_sec, 60.0))
+                        and time_since_last_like_sub >= max(ask_quiet_sec, 60.0)
+                    ):
+                        logger.info(f"📣 [Promo Trigger] Showing 'Like & Subscribe' callout during stream lull (Cooldown: {time_since_last_like_sub:.1f}s >= {sub_min_interval:.1f}s).")
+                        self.visualizer.trigger_promo("like_sub")
+                        last_like_sub_time = now
+                    elif time_since_last_ask >= max(ask_quiet_sec, 60.0):
+                        logger.info(f"📣 [Promo Trigger] Showing 'Ask Anything' callout (Chat quiet for {time_since_last_chat:.1f}s >= {ask_quiet_sec:.1f}s).")
+                        self.visualizer.trigger_promo("ask_god")
+                        last_ask_promo_time = now
 
             except asyncio.CancelledError:
                 break

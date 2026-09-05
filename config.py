@@ -334,8 +334,8 @@ class AppConfig:
     promo_overlay_enabled: bool = os.getenv("PROMO_OVERLAY_ENABLED", "true").lower() in ("true", "1", "yes")
     promo_mode: str = os.getenv("PROMO_MODE", "event").strip().lower()  # "event" | "timer"
     promo_ask_quiet_sec: float = float(os.getenv("PROMO_ASK_QUIET_SEC", "45.0"))
-    promo_sub_after_turn_sec: float = float(os.getenv("PROMO_SUB_AFTER_TURN_SEC", "3.0"))
-    promo_sub_min_interval_sec: float = float(os.getenv("PROMO_SUB_MIN_INTERVAL_SEC", "300.0"))
+    promo_sub_after_turn_sec: float = float(os.getenv("PROMO_SUB_AFTER_TURN_SEC", "8.0"))
+    promo_sub_min_interval_sec: float = float(os.getenv("PROMO_SUB_MIN_INTERVAL_SEC", "120.0"))
     promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "75.0"))
     promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))
     promo_overlay_entrance_sec: float = float(os.getenv("PROMO_OVERLAY_ENTRANCE_SEC", "0.9"))

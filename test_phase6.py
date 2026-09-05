@@ -33,9 +33,9 @@ def test_config_promo_attributes():
     assert hasattr(config, "promo_ask_quiet_sec"), "config missing promo_ask_quiet_sec"
     assert config.promo_ask_quiet_sec == 45.0
     assert hasattr(config, "promo_sub_after_turn_sec"), "config missing promo_sub_after_turn_sec"
-    assert config.promo_sub_after_turn_sec == 3.0
+    assert config.promo_sub_after_turn_sec == 8.0
     assert hasattr(config, "promo_sub_min_interval_sec"), "config missing promo_sub_min_interval_sec"
-    assert config.promo_sub_min_interval_sec == 300.0
+    assert config.promo_sub_min_interval_sec == 120.0
     print("  ✓ Config promo attributes validated with correct defaults.")
 
 
@@ -82,8 +82,8 @@ def test_promo_trigger_logic_simulation():
 
     # Scenario A: Like & Subscribe after viewer turn
     now = 1000.0
-    last_turn_completed_time = 998.0  # 2.0s ago (<= 3.0s)
-    last_like_sub_time = 600.0        # 400s ago (>= 300s cooldown)
+    last_turn_completed_time = 998.0  # 2.0s ago (<= 8.0s)
+    last_like_sub_time = 600.0        # 400s ago (>= 120s cooldown)
     last_event_type = "chat"
     is_turn_busy = False
     is_promo_active = False
@@ -91,19 +91,19 @@ def test_promo_trigger_logic_simulation():
     can_trigger_like_sub = (
         not is_turn_busy
         and not is_promo_active
-        and (now - last_turn_completed_time <= 3.0)
-        and (now - last_like_sub_time >= 300.0)
+        and (now - last_turn_completed_time <= config.promo_sub_after_turn_sec)
+        and (now - last_like_sub_time >= config.promo_sub_min_interval_sec)
         and last_event_type in ("chat", "superchat", "direct_mention", "cast", "greeting", "celebration")
     )
     assert can_trigger_like_sub is True, "Failed to trigger Like & Subscribe after completed turn"
 
     # Scenario B: Like & Subscribe blocked by cooldown
-    last_like_sub_time = 900.0  # only 100s ago (< 300s)
+    last_like_sub_time = 950.0  # only 50s ago (< 120s)
     can_trigger_like_sub_cooldown = (
-        (now - last_turn_completed_time <= 3.0)
-        and (now - last_like_sub_time >= 300.0)
+        (now - last_turn_completed_time <= config.promo_sub_after_turn_sec)
+        and (now - last_like_sub_time >= config.promo_sub_min_interval_sec)
     )
-    assert can_trigger_like_sub_cooldown is False, "Like & Subscribe did not respect 300s cooldown"
+    assert can_trigger_like_sub_cooldown is False, "Like & Subscribe did not respect 120s cooldown"
 
     # Scenario C: Ask Anything on chat lull (>= 45s quiet)
     now = 2000.0

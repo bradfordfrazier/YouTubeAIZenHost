@@ -803,11 +803,17 @@ class Visualizer:
             pinned_chat_message=effective_pinned_chat,
         )
 
-        has_active_question = bool(effective_pinned_chat) or bool(self.active_question_text) or (self.question_fade_state != "idle")
-        is_turn_busy = is_speaking or has_active_statement or has_active_question
+        # For promo callout suppression, only actively speaking or newly targeted incoming turns are considered busy.
+        # Fading out a completed turn into empty/motto does NOT suppress or abort promo overlays.
+        has_active_incoming_turn = bool(
+            is_speaking
+            or (self.subtitle_target_text and self.subtitle_target_text != motto)
+            or (pinned_chat_message and self.question_fade_state in ("fade_in", "steady"))
+        )
+        is_promo_suppressed = is_speaking or has_active_incoming_turn
 
         # 6. Periodic Fun Promotional Graphic Overlays ("Ask God" & "Like & Subscribe")
-        self._draw_promo_callout_overlay(dt, is_speaking=is_speaking, is_turn_busy=is_turn_busy)
+        self._draw_promo_callout_overlay(dt, is_speaking=is_speaking, is_turn_busy=is_promo_suppressed)
 
         # Update Pygame display if not headless (operator preview window)
         if not self.cfg.visualizer_headless and self.window_surf is not None:

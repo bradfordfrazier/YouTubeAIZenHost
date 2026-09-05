@@ -41,7 +41,8 @@ def test_audio_sink_matches_local_buffer():
 
     sink_total = np.vstack(collected_sink)
     # Compare with engine's internal _audio_buffer_local
-    assert np.array_equal(sink_total, engine._audio_buffer_local)
+    local_total = np.vstack([c[offset:] for c, offset in engine._audio_buffer_local])
+    assert np.array_equal(sink_total, local_total)
 
 
 def test_audio_clear_sink_called():

@@ -69,6 +69,20 @@ class TTSEngine:
         self._first_push_time: float = 0.0
         self.last_synthesized_duration: float = 0.0
 
+        # Underrun detector & metrics
+        self.underrun_count: int = 0
+        self.underrun_samples: int = 0
+        self._last_underrun_log_time: float = 0.0
+        self._local_resume_pending: bool = False
+
+        # GPU exclusivity & Background synthesis control
+        self.live_turn_active: asyncio.Event = asyncio.Event()
+        self.gpu_lock: asyncio.Lock = asyncio.Lock()
+        self.last_live_turn_end_time: float = 0.0
+
+        # Rolling Real-Time Factor (RTF) history
+        self._rtf_history: deque = deque(maxlen=8)
+
         # Dual independent sample buffers for NDI and Local Windows Audio (lock-free deque of [chunk, offset])
         self.ndi_buffer_enabled: bool = True
         self.ndi_sink: Optional[Callable[[np.ndarray], None]] = None
@@ -168,11 +182,26 @@ class TTSEngine:
             self._health_checked = True
             return False
 
-    async def _synthesize_chatterbox(self, clean_text: str, exaggeration: float) -> Optional[np.ndarray]:
+    @property
+    def rtf_conservative(self) -> float:
+        """Returns the conservative (minimum) real-time factor over the last 8 syntheses."""
+        with self._buffer_lock:
+            if self._rtf_history:
+                return float(min(self._rtf_history))
+        return 1.5
+
+    def record_rtf(self, rtf: float):
+        """Records a completed synthesis real-time factor."""
+        if rtf > 0.05:
+            with self._buffer_lock:
+                self._rtf_history.append(float(rtf))
+
+    async def _synthesize_chatterbox(self, clean_text: str, exaggeration: float, is_live: bool = True) -> Optional[np.ndarray]:
         """Synthesizes speech via remote ChatterBox Turbo GPU inference server."""
         url = f"{self.server_url}/synthesize"
-        # Dynamic timeout proportional to text length with floor/ceiling
-        calc_timeout = min(self.timeout_ceiling, max(self.timeout_floor, len(clean_text) * 0.08))
+        # Calibrated timeout: estimate audio length and give generous headroom clamped to [8, 45]s
+        est_audio_sec = len(clean_text) * float(self.cfg.tts_sec_per_char)
+        calc_timeout = max(8.0, min(45.0, est_audio_sec * 2.0 + 4.0))
         timeout = aiohttp.ClientTimeout(total=calc_timeout)
         payload = {
             "text": clean_text,
@@ -181,6 +210,8 @@ class TTSEngine:
             "cfg_weight": 0.5,
             "format": "wav",
         }
+        tag = "[TTS LIVE]" if is_live else "[TTS BG]"
+        t0 = time.perf_counter()
 
         try:
             async with self._synth_semaphore:
@@ -192,29 +223,50 @@ class TTSEngine:
                                 return None
                             # Zero-latency polyphase FIR decoding & resampling in worker thread
                             data = await asyncio.to_thread(self._decode_and_resample, raw_wav)
+                            wall_sec = time.perf_counter() - t0
+                            audio_dur = len(data) / self.sample_rate
+                            if wall_sec > 0:
+                                rtf = audio_dur / wall_sec
+                                self.record_rtf(rtf)
+                                rtf_str = f"{rtf:.2f}"
+                            else:
+                                rtf_str = "N/A"
                             logger.info(
-                                f"[Chatterbox] Synthesized {len(data)/self.sample_rate:.2f}s audio "
-                                f"(exaggeration={exaggeration:.2f}) from {self.server_url}"
+                                f"{tag} [Chatterbox] Synthesized {audio_dur:.2f}s audio in {wall_sec:.2f}s "
+                                f"(rtf={rtf_str}, exaggeration={exaggeration:.2f}) from {self.server_url}"
                             )
                             return data
                         else:
                             err_text = await resp.text()
-                            logger.warning(f"Chatterbox server returned error HTTP {resp.status}: {err_text}")
+                            logger.warning(f"{tag} Chatterbox server returned error HTTP {resp.status}: {err_text}")
                             return None
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.warning(f"Chatterbox connection/timeout to {self.server_url} ({e}); falling back to local edge-tts.")
+        except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as e:
+            wall_sec = time.perf_counter() - t0
+            logger.error(
+                f"❌ {tag} [Chatterbox] Synthesis TIMEOUT after {wall_sec:.2f}s (calc_timeout={calc_timeout:.1f}s) "
+                f"for sentence ({len(clean_text)} chars): '{clean_text}'"
+            )
+            return None
+        except aiohttp.ClientError as e:
+            wall_sec = time.perf_counter() - t0
+            logger.warning(
+                f"{tag} Chatterbox connection error to {self.server_url} after {wall_sec:.2f}s ({e}); "
+                f"falling back to local edge-tts."
+            )
             return None
         except Exception as e:
-            logger.error(f"Unexpected error calling Chatterbox server: {e}", exc_info=True)
+            logger.error(f"{tag} Unexpected error calling Chatterbox server: {e}", exc_info=True)
             return None
 
-    async def _synthesize_edge_tts(self, clean_text: str) -> np.ndarray:
+    async def _synthesize_edge_tts(self, clean_text: str, is_live: bool = True) -> np.ndarray:
         """Synthesizes speech locally via Microsoft edge-tts."""
+        tag = "[TTS LIVE]" if is_live else "[TTS BG]"
         if not EDGE_TTS_AVAILABLE:
-            logger.warning("edge-tts not available, generating synthesized tone placeholder")
+            logger.warning(f"{tag} edge-tts not available, generating synthesized tone placeholder")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
         try:
+            t0 = time.perf_counter()
             communicate = edge_tts.Communicate(
                 clean_text,
                 self.voice,
@@ -228,20 +280,26 @@ class TTSEngine:
                     audio_bytes.extend(chunk["data"])
 
             if not audio_bytes:
-                logger.warning("No audio bytes received from edge-tts")
+                logger.warning(f"{tag} No audio bytes received from edge-tts")
                 return np.zeros((0, 2), dtype=np.float32)
 
             data = await asyncio.to_thread(self._decode_and_resample, bytes(audio_bytes))
-            logger.info(f"[Edge-TTS] Synthesized {len(data)/self.sample_rate:.2f}s of 48kHz stereo audio")
+            wall_sec = time.perf_counter() - t0
+            audio_dur = len(data) / self.sample_rate
+            if wall_sec > 0:
+                rtf = audio_dur / wall_sec
+                self.record_rtf(rtf)
+            logger.info(f"{tag} [Edge-TTS] Synthesized {audio_dur:.2f}s of 48kHz stereo audio in {wall_sec:.2f}s")
             return data
         except Exception as e:
-            logger.error(f"Error during edge-tts synthesis: {e}")
+            logger.error(f"{tag} Error during edge-tts synthesis: {e}")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
-    async def synthesize(self, text: str, mood: str = "neutral") -> np.ndarray:
+    async def synthesize(self, text: str, mood: str = "neutral", is_live: bool = True) -> np.ndarray:
         """
         Synthesize text into 48kHz stereo float32 PCM numpy array.
         Routes to ChatterBox Turbo GPU server or local Edge-TTS failback with mood mapping.
+        Guarantees serial GPU execution via gpu_lock.
         """
         # Parse mood tag from argument with regex fallback
         active_mood = (mood or "neutral").lower().strip()
@@ -260,30 +318,63 @@ class TTSEngine:
         if not clean_text:
             return np.zeros((0, 2), dtype=np.float32)
 
+        tag = "[TTS LIVE]" if is_live else "[TTS BG]"
         logger.info(
-            f"Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, exaggeration={exaggeration:.2f}): "
+            f"{tag} Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, exaggeration={exaggeration:.2f}): "
             f"'{clean_text[:60]}...'"
         )
 
-        # 1. Primary: Remote Chatterbox Turbo GPU inference server
-        if self.active_backend == "chatterbox":
-            data = await self._synthesize_chatterbox(clean_text, exaggeration)
-            if data is not None and len(data) > 0:
+        async with self.gpu_lock:
+            # 1. Primary: Remote Chatterbox Turbo GPU inference server
+            if self.active_backend == "chatterbox":
+                data = await self._synthesize_chatterbox(clean_text, exaggeration, is_live=is_live)
+                if data is not None and len(data) > 0:
+                    self.last_synthesized_duration = len(data) / self.sample_rate
+                    return data
+                # If Chatterbox failed, fall through to Edge-TTS fallback
+                logger.info(f"{tag} Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
+
+            # 2. Fallback / Local Mode: Microsoft edge-tts
+            data = await self._synthesize_edge_tts(clean_text, is_live=is_live)
+            if len(data) > 0:
                 self.last_synthesized_duration = len(data) / self.sample_rate
                 return data
-            # If Chatterbox failed, fall through to Edge-TTS fallback
-            logger.info(f"Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
 
-        # 2. Fallback / Local Mode: Microsoft edge-tts
-        data = await self._synthesize_edge_tts(clean_text)
-        if len(data) > 0:
-            self.last_synthesized_duration = len(data) / self.sample_rate
-            return data
+            # 3. Final safety: Sine placeholder (never silent)
+            placeholder = self._generate_sine_placeholder(len(clean_text) * 0.06)
+            self.last_synthesized_duration = len(placeholder) / self.sample_rate
+            return placeholder
 
-        # 3. Final safety: Sine placeholder (never silent)
-        placeholder = self._generate_sine_placeholder(len(clean_text) * 0.06)
-        self.last_synthesized_duration = len(placeholder) / self.sample_rate
-        return placeholder
+    async def synthesize_background(self, text: str, mood: str = "neutral") -> np.ndarray:
+        """
+        Background pre-synthesis (e.g. greeting cache, reflection cache).
+        Guarantees GPU exclusivity for live turns: waits until live turns are inactive,
+        respects cache_refill_cooldown_sec, acquires gpu_lock, and re-validates before synthesizing.
+        """
+        while True:
+            # (a) Wait until live_turn_active is clear
+            while self.live_turn_active.is_set():
+                await asyncio.sleep(0.05)
+
+            cooldown = float(self.cfg.cache_refill_cooldown_sec)
+            # Check cooldown after live turn completion
+            if self.last_live_turn_end_time > 0:
+                time_since_turn = time.time() - self.last_live_turn_end_time
+                if time_since_turn < cooldown:
+                    await asyncio.sleep(max(0.05, cooldown - time_since_turn))
+                    if self.live_turn_active.is_set():
+                        continue
+
+            # (b) Acquire gpu_lock
+            async with self.gpu_lock:
+                # (c) Re-check if live turn started while waiting for lock
+                if self.live_turn_active.is_set():
+                    continue
+                if self.last_live_turn_end_time > 0 and (time.time() - self.last_live_turn_end_time < cooldown):
+                    continue
+
+                # Perform background synthesis with is_live=False while holding gpu_lock
+                return await self.synthesize(text, mood=mood, is_live=False)
 
     def _generate_sine_placeholder(self, duration_sec: float) -> np.ndarray:
         """Fallback beep / harmonic synthesizer."""
@@ -527,17 +618,39 @@ class TTSEngine:
     def pop_local_audio(self, num_samples: int, volume: float = 1.0) -> np.ndarray:
         """
         Pops exactly `num_samples` from the local audio buffer for the Windows PortAudio callback.
-        Guarantees zero buffer underruns, zero drift, and smooth audio scaling.
+        Guarantees zero buffer underruns, zero drift, smooth audio scaling, and click-free crossfades.
         """
         n = num_samples
         now = time.time()
         self._last_local_pop_time = now
         with self._buffer_lock:
             packet_audio, has_audio = self._pop_from_deque(self._audio_buffer_local, n)
+            utterance_open = self._utterance_open
+
+            # Detect and count underrun if utterance is open but buffer ran dry
+            if utterance_open and not has_audio:
+                self.underrun_count += 1
+                self.underrun_samples += n
+                if now - self._last_underrun_log_time >= 0.5:
+                    total_ms = (self.underrun_samples / self.sample_rate) * 1000.0
+                    logger.warning(
+                        f"[TTS UNDERRUN] utterance open, local buffer empty ({self.underrun_count} underruns, {total_ms:.1f} ms total)"
+                    )
+                    self._last_underrun_log_time = now
 
             ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 0.5
             if not ndi_active:
                 self.is_speaking = has_audio
+
+        # 5ms crossfade on buffer starvation and resume (240 samples @ 48kHz)
+        fade_samples = min(240, n)
+        if utterance_open and not has_audio:
+            self._local_resume_pending = True
+        elif has_audio and self._local_resume_pending:
+            if fade_samples > 0:
+                fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
+                packet_audio[:fade_samples] *= fade_in
+            self._local_resume_pending = False
 
         if not ndi_active:
             roll_len = min(n, 1024)

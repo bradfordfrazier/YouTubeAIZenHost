@@ -2352,6 +2352,10 @@ class Visualizer:
             pygame.draw.line(surf, (255, 60, 120, sp_a), (sx - 6, sy), (sx + 6, sy), 1)
             pygame.draw.line(surf, (255, 60, 120, sp_a), (sx, sy - 6), (sx, sy + 6), 1)
 
+    def set_utterance_state(self, is_open: bool):
+        """No-op on direct visualizer (state is tracked in shared memory by VisualizerProxy)."""
+        pass
+
     def close(self):
         """Closes Pygame display window and releases SDL hardware surfaces."""
         try:

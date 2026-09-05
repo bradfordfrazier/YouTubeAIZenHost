@@ -32,7 +32,9 @@ import threading
 # offset 136:  float64 timestamp (8 bytes)
 # offset 144:  uint32 write_pos (4 bytes) - owned exclusively by writer (main process)
 # offset 148:  uint32 read_pos (4 bytes) - owned exclusively by reader (render worker)
-# offset 152:  uint8 padding [8 bytes]
+# offset 152:  uint8 padding [4 bytes]
+# offset 156:  uint8 utterance_open (1 byte) - 1 if speech utterance in progress, 0 if idle
+# offset 157:  uint8 padding [3 bytes]
 # offset 160:  float32 audio_ring_buffer [RING_BUFFER_FRAMES * 2 channels * 4 bytes]
 # Sized to 30 seconds (1,440,000 frames @ 48kHz stereo = ~11.5 MB)
 RING_BUFFER_FRAMES = 48000 * 30
@@ -52,6 +54,7 @@ class AudioMetricsSharedMemory:
         self.name = name
         self.create = create
         self.shm: Optional[shared_memory.SharedMemory] = None
+        self._resume_pending: bool = False
 
         if create:
             try:
@@ -114,6 +117,18 @@ class AudioMetricsSharedMemory:
         buf[8:136] = sp_padded.tobytes()
         struct.pack_into("=d", buf, 136, ts)
 
+    def set_utterance_state(self, is_open: bool):
+        """Sets the utterance_open flag in shared memory header at byte offset 156."""
+        if not self.shm:
+            return
+        struct.pack_into("=B", self.shm.buf, 156, 1 if is_open else 0)
+
+    def get_utterance_state(self) -> bool:
+        """Reads the utterance_open flag from shared memory header at byte offset 156."""
+        if not self.shm:
+            return False
+        return bool(struct.unpack_from("=B", self.shm.buf, 156)[0])
+
     def write_audio_samples(self, audio: np.ndarray):
         """
         Appends stereo float32 audio samples into the shared memory SPSC ring buffer.
@@ -162,6 +177,7 @@ class AudioMetricsSharedMemory:
     def read_audio_samples(self, num_samples: int = 800) -> np.ndarray:
         """
         Reads exactly num_samples stereo float32 samples from the SPSC ring buffer.
+        Applies 5ms crossfades on buffer starvation and resume to eliminate clicks.
         Only mutates read_pos (offset 148) after data is copied.
         """
         if not self.shm:
@@ -170,6 +186,7 @@ class AudioMetricsSharedMemory:
         buf = self.shm.buf
         read_pos = struct.unpack_from("=I", buf, 148)[0]
         write_pos = struct.unpack_from("=I", buf, 144)[0]
+        utterance_open = self.get_utterance_state()
 
         avail = (write_pos - read_pos) % RING_BUFFER_FRAMES
         out_audio = np.zeros((num_samples, 2), dtype=np.float32)
@@ -191,6 +208,24 @@ class AudioMetricsSharedMemory:
             new_read_pos = (read_pos + to_read) % RING_BUFFER_FRAMES
             # Publish read_pos atomically to writer
             struct.pack_into("=I", buf, 148, new_read_pos)
+
+        # 5ms crossfade on buffer starvation and resume (240 samples @ 48kHz)
+        fade_samples = min(240, num_samples)
+        if to_read < num_samples:
+            # Starvation: partial or empty packet
+            if to_read > 0:
+                # Apply 5ms fade-out to tail of available samples before zeroes
+                fade_len = min(240, to_read)
+                fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)[:, None]
+                out_audio[to_read - fade_len : to_read] *= fade_out
+            if utterance_open:
+                self._resume_pending = True
+        elif to_read == num_samples and self._resume_pending:
+            # Resume after starvation: apply 5ms fade-in to leading samples
+            if fade_samples > 0:
+                fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
+                out_audio[:fade_samples] *= fade_in
+            self._resume_pending = False
 
         return out_audio
 
@@ -338,6 +373,10 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
     max_interval_ms = 0.0
     t_last_call = time.perf_counter()
 
+    underrun_count = 0
+    underrun_samples = 0
+    last_underrun_log_time = 0.0
+
     while not stop_event.is_set():
         now_call = time.perf_counter()
         dt_call_ms = (now_call - t_last_call) * 1000.0
@@ -346,6 +385,22 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
             max_interval_ms = dt_call_ms
         elif max_interval_ms == 0:
             max_interval_ms = dt_call_ms
+
+        # Underrun detection: check if utterance is open but ring buffer is empty before read
+        if shm.shm:
+            read_pos = struct.unpack_from("=I", shm.shm.buf, 148)[0]
+            write_pos = struct.unpack_from("=I", shm.shm.buf, 144)[0]
+            avail = (write_pos - read_pos) % RING_BUFFER_FRAMES
+            utterance_open = shm.get_utterance_state()
+            if utterance_open and avail == 0:
+                underrun_count += 1
+                underrun_samples += samples_per_packet
+                if now_call - last_underrun_log_time >= 0.5:
+                    total_ms = (underrun_samples / sample_rate) * 1000.0
+                    logger.warning(
+                        f"[NDI UNDERRUN] utterance open, ring buffer empty ({underrun_count} underruns, {total_ms:.1f} ms total)"
+                    )
+                    last_underrun_log_time = now_call
 
         packet = shm.read_audio_samples(samples_per_packet)  # (800, 2) float32, zeros if empty
         metrics = analyzer.process(packet)
@@ -662,6 +717,10 @@ class VisualizerProxy:
     def clear_audio_buffer(self):
         """Flushes the shared memory audio buffer."""
         self.audio_shm.clear_audio()
+
+    def set_utterance_state(self, is_open: bool):
+        """Sets the utterance_open state in shared memory."""
+        self.audio_shm.set_utterance_state(is_open)
 
     def set_mood(self, mood: str):
         """Sets visualizer color and particle mood."""

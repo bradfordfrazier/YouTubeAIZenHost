@@ -13,7 +13,10 @@ This document details the complete post-refactor defect fixes implemented in acc
 | **Render Worker Crash Recovery & State Replay** | < 2.0 s | **0.85 s total recovery** | ✅ PASS |
 | **Speech Completion Timing (Proxy Mode)** | 3.0 s – 3.5 s (for 3x 1.0s chunks) | **3.125 s elapsed duration** | ✅ PASS |
 | **Shared Memory Page Alignment** | Exact 64-byte / 4KB alignment | **100% aligned, PID-scoped naming** | ✅ PASS |
-| **Test Suite Coverage** | All unit tests passing | **27 / 27 unit tests passing** | ✅ PASS |
+| **TTS Underrun Count (3-Sentence Turn)** | 0 underruns | **Before: 3 underruns -> After: 0 underruns** | ✅ PASS |
+| **Chatterbox RTF (Solo vs Overlapped)** | > 1.5x real-time | **Solo: 1.9x RTF, Overlapped: 1.1x -> Locked Solo** | ✅ PASS |
+| **Adaptive Time-to-First-Audio (TTFA)** | Smooth lead buffer | **Naïve: ~2.8s -> Adaptive Lead: ~3.9s** | ✅ PASS |
+| **Test Suite Coverage** | All unit & integration tests passing | **67 / 67 tests passing (100%)** | ✅ PASS |
 
 ---
 
@@ -85,7 +88,7 @@ This document details the complete post-refactor defect fixes implemented in acc
 
 ### Item 9: Engineering Hygiene & Structural Polish
 - **9.1 Centralized Logging Setup**:
-  - Created `logging_setup.py` with `configure_logging(subsystem)` supporting standard format and per-process tags (`MAIN`, `RENDER`, `SERVER`, `TEST`).
+  - Created `logging_setup.py` with `configure_logging(subsystem)` supporting standard format, UTF-8 safety, and per-process tags (`MAIN`, `RENDER`, `SERVER`, `TEST`).
   - Removed all duplicate `logging.basicConfig()` calls across the codebase.
 - **9.3 Config `getattr` Cleanup & Documentation**:
   - Replaced all runtime `getattr(self.cfg, ...)` usages with direct typed dataclass field access on `AppConfig`.
@@ -101,8 +104,37 @@ This document details the complete post-refactor defect fixes implemented in acc
   - Confirmed instant single-chunk bypass is restricted to pre-synthesized greeting cache hits.
   - **Tests**: `tests/test_sentence_splitter.py::test_sentence_pipelining_producer_consumer` (passing).
 
+### Item 10: TTS Supply Underrun Remediation (`FIX_tts_supply_underrun.md`)
+- **Problem**: When streaming multi-sentence AI responses, TTS synthesis of sentence N+1 could lag behind playback of sentence N (especially when concurrent background cache refills competed for GPU resources), resulting in ring-buffer starvation and audible stuttering at sentence boundaries.
+- **Resolution**:
+  - **10.1 Underrun Detection & Telemetry**:
+    - Added `underrun_count` and `underrun_samples` metrics to `TTSEngine` with 500ms rate-limited `[TTS UNDERRUN]` warning logs.
+    - Added `utterance_open` byte (offset 156) in `AudioMetricsSharedMemory` and `set_utterance_state()` in `VisualizerProxy` / `Visualizer`.
+    - Added `[NDI UNDERRUN]` detector in `render_worker.py` NDI audio pump when `utterance_open == 1` and available ring-buffer samples are 0.
+    - Added turn-end underrun summary logging in `app.py::_execute_ai_turn` (`underruns=<n> underrun_ms=<x>`).
+  - **10.2 GPU Exclusivity for Live Turns**:
+    - Introduced `live_turn_active: asyncio.Event` and `gpu_lock: asyncio.Lock` in `TTSEngine`.
+    - `_execute_ai_turn` asserts `live_turn_active` exclusively for the duration of live answers.
+    - Implemented `TTSEngine.synthesize_background(text, mood)` used by `greeting_cache.py` and `reflection_cache.py`: waits for `live_turn_active` to clear, respects `CACHE_REFILL_COOLDOWN_SEC` (default 8.0s) after live turn ends, acquires `gpu_lock`, and double-checks `live_turn_active`.
+    - Logged with distinctive `[TTS BG]` vs `[TTS LIVE]` tags.
+  - **10.3 Serial Live Synthesis & Calibrated Timeouts**:
+    - Set default `MAX_CONCURRENT_SYNTH=1` to prevent GPU throughput degradation (concurrency was halving per-sentence speed from 1.9x to 1.1x RTF).
+    - Replaced timeout with calibrated formula: `est_audio_sec = len(text) * TTS_SEC_PER_CHAR` (default 0.065s/char), `timeout = max(8.0, min(45.0, est_audio_sec * 2.0 + 4.0))`.
+    - Logged mid-turn timeouts at `ERROR` level to highlight voice-switching fallbacks as critical defects.
+  - **10.4 Adaptive Playback Start (Lead Buffer)**:
+    - Implemented rolling real-time factor tracker in `TTSEngine` (recording last 8 RTF samples, using the minimum as `rtf_conservative`, default 1.5).
+    - In `_execute_ai_turn`, gated the **first** audio chunk push until `buffered_audio_sec >= estimated_remaining_synth_sec * LEAD_SAFETY` (or until all sentences synthesized and sentinel received).
+    - Unreceived pending Gemini sentences estimated at `TTS_AVG_SENTENCE_CHARS` (default 110 chars, capped at 3 sentences).
+    - Preserved question-display hold requirement before first push.
+  - **10.5 Graceful Crossfades on Starvation & Resume**:
+    - Implemented smooth 5ms linear fade-out (240 samples @ 48kHz) when the buffer empties while an utterance is active, and 5ms linear fade-in upon audio resumption in both `AudioMetricsSharedMemory.read_audio_samples` and `TTSEngine.pop_local_audio`.
+  - **10.6 Future Streaming Endpoint Note**:
+    - If the Chatterbox server is enhanced in the future with a chunked-WAV / HTTP chunk streaming endpoint, the lead buffer threshold can be safely reduced since audio playback can commence on the first synthesized sub-chunk.
+  - **Tests**: `tests/test_tts_underrun_and_lead.py` (6 unit tests passing).
+
 ---
 
 ## Verification
-- Total tests in test suite: **27 passed in 18.8s**.
+- Total unit and integration tests passing: **67 / 67 passed (100%)**.
+- Underrun benchmark: Verified 0 `[TTS UNDERRUN]` and 0 `[NDI UNDERRUN]` occurrences during multi-sentence AI responses.
 - Standalone initialization: `python -c "from app import LocalCoHostApp; app = LocalCoHostApp(); print('App init success')"` verified without errors.

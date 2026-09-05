@@ -197,7 +197,11 @@ class AppConfig:
     tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 4.0)
     tts_request_timeout_ceiling: float = _get_float("TTS_REQUEST_TIMEOUT_CEILING", 30.0)
     inter_sentence_gap_sec: float = _get_float("INTER_SENTENCE_GAP_SEC", 0.15)
-    max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 2)
+    max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
+    tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
+    cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)
+    lead_safety: float = _get_float("LEAD_SAFETY", 1.25)
+    tts_avg_sentence_chars: int = _get_int("TTS_AVG_SENTENCE_CHARS", 110)
     tts_exaggeration_default: float = _get_float("TTS_EXAGGERATION_DEFAULT", 0.5)
     tts_mood_exaggeration_map: Dict[str, float] = field(
         default_factory=lambda: {

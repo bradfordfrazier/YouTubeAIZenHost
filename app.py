@@ -828,6 +828,11 @@ class LocalCoHostApp:
         t_start = time.perf_counter()
         logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
 
+        # Mark live turn active for GPU exclusivity and reset underrun counters
+        self.tts.live_turn_active.set()
+        self.tts.underrun_count = 0
+        self.tts.underrun_samples = 0
+
         # Set active pinned chat question during turn
         if getattr(event, "chat_item", None):
             self.current_pinned_chat = event.chat_item
@@ -931,9 +936,13 @@ class LocalCoHostApp:
                     logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
                 self.tts.begin_utterance()
+                if hasattr(self.visualizer, "set_utterance_state"):
+                    self.visualizer.set_utterance_state(True)
                 first_audio_ts = time.perf_counter()
                 self.tts.push_audio(cached_g.audio)
                 self.tts.end_utterance()
+                if hasattr(self.visualizer, "set_utterance_state"):
+                    self.visualizer.set_utterance_state(False)
                 pushed_chunks = 1
 
                 logger.info(
@@ -942,33 +951,99 @@ class LocalCoHostApp:
                 )
                 await self.tts.wait_until_speech_completed()
             else:
-                # 3. Stream from Gemini AI Brain with sentence pipelining (Phase 2.4)
+                # 3. Stream from Gemini AI Brain with sentence pipelining & adaptive lead buffer (Phase 2.4 & Underrun Fix)
                 sentence_queue: asyncio.Queue = asyncio.Queue()
+                buffered_synthesized_chunks: List[np.ndarray] = []
+                first_push_done = False
 
                 async def _tts_consumer():
-                    nonlocal pushed_chunks, first_audio_ts, active_mood
-                    self.tts.begin_utterance()
+                    nonlocal pushed_chunks, first_audio_ts, active_mood, first_push_done
                     while True:
                         item = await sentence_queue.get()
-                        if item is None:
-                            sentence_queue.task_done()
-                            break
-                        sent_text, sent_mood = item
-                        try:
-                            s_audio = await self.tts.synthesize(sent_text, mood=sent_mood)
-                        except TypeError:
-                            s_audio = await self.tts.synthesize(sent_text)
+                        if item is not None:
+                            sent_text, sent_mood = item
+                            try:
+                                s_audio = await self.tts.synthesize(sent_text, mood=sent_mood, is_live=True)
+                            except TypeError:
+                                try:
+                                    s_audio = await self.tts.synthesize(sent_text, mood=sent_mood)
+                                except TypeError:
+                                    s_audio = await self.tts.synthesize(sent_text)
 
-                        if s_audio is not None and len(s_audio) > 0:
-                            if first_audio_ts is None:
-                                first_audio_ts = time.perf_counter()
+                            if s_audio is not None and len(s_audio) > 0:
+                                if first_push_done:
+                                    # Subsequent chunks push immediately as they finish
+                                    self.tts.push_audio(s_audio)
+                                    pushed_chunks += 1
+                                else:
+                                    buffered_synthesized_chunks.append(s_audio)
+
+                        # Check adaptive lead buffer start condition
+                        if not first_push_done:
+                            buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
+
+                            # Calculate pending characters in queue
+                            raw_q = list(getattr(sentence_queue, "_queue", []))
+                            queue_chars = sum(len(it[0]) for it in raw_q if it is not None)
+                            # Sentences not yet received from Gemini count as one average sentence (capped at 3 pending sentences)
+                            pending_unreceived = 1 if not is_completed else 0
+                            pending_chars = queue_chars + (pending_unreceived * int(self.cfg.tts_avg_sentence_chars))
+
+                            rtf_cons = self.tts.rtf_conservative
+                            est_remaining_synth_sec = (pending_chars * float(self.cfg.tts_sec_per_char)) / max(0.5, rtf_cons)
+                            lead_safety = float(self.cfg.lead_safety)
+                            target_lead_sec = est_remaining_synth_sec * lead_safety
+
+                            is_sentinel = (item is None)
+                            lead_satisfied = (buffered_audio_sec >= target_lead_sec) or is_sentinel
+
+                            # Check question display hold
+                            q_elapsed = time.perf_counter() - t_question_shown
+                            display_hold_satisfied = (q_elapsed >= min_time_before_fade_out)
+
+                            if lead_satisfied and display_hold_satisfied and len(buffered_synthesized_chunks) > 0:
+                                logger.info(
+                                    f"[TTS LEAD] starting playback with {buffered_audio_sec:.1f}s buffered, "
+                                    f"est. remaining synth {est_remaining_synth_sec:.1f}s (rtf {rtf_cons:.2f})"
+                                )
+                                self.tts.begin_utterance()
+                                if hasattr(self.visualizer, "set_utterance_state"):
+                                    self.visualizer.set_utterance_state(True)
+                                if first_audio_ts is None:
+                                    first_audio_ts = time.perf_counter()
                                 if question_text:
                                     logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
-                            self.tts.push_audio(s_audio)
-                            pushed_chunks += 1
+                                for chunk in buffered_synthesized_chunks:
+                                    self.tts.push_audio(chunk)
+                                    pushed_chunks += 1
+                                buffered_synthesized_chunks.clear()
+                                first_push_done = True
+
+                        if item is None:
+                            # Final drain check on sentinel
+                            if not first_push_done and len(buffered_synthesized_chunks) > 0:
+                                buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
+                                logger.info(f"[TTS LEAD] starting playback on turn completion with {buffered_audio_sec:.1f}s buffered")
+                                self.tts.begin_utterance()
+                                if hasattr(self.visualizer, "set_utterance_state"):
+                                    self.visualizer.set_utterance_state(True)
+                                if first_audio_ts is None:
+                                    first_audio_ts = time.perf_counter()
+                                for chunk in buffered_synthesized_chunks:
+                                    self.tts.push_audio(chunk)
+                                    pushed_chunks += 1
+                                buffered_synthesized_chunks.clear()
+                                first_push_done = True
+
+                            sentence_queue.task_done()
+                            break
+
                         sentence_queue.task_done()
+
                     self.tts.end_utterance()
+                    if hasattr(self.visualizer, "set_utterance_state"):
+                        self.visualizer.set_utterance_state(False)
 
                 consumer_task = asyncio.create_task(_tts_consumer())
 
@@ -1001,16 +1076,23 @@ class LocalCoHostApp:
                 # Fallback: if no sentences were produced but full statement exists
                 if pushed_chunks == 0 and is_completed and clean_speech:
                     try:
-                        s_audio = await self.tts.synthesize(clean_speech, mood=active_mood)
+                        s_audio = await self.tts.synthesize(clean_speech, mood=active_mood, is_live=True)
                     except TypeError:
-                        s_audio = await self.tts.synthesize(clean_speech)
+                        try:
+                            s_audio = await self.tts.synthesize(clean_speech, mood=active_mood)
+                        except TypeError:
+                            s_audio = await self.tts.synthesize(clean_speech)
 
                     if s_audio is not None and len(s_audio) > 0:
                         if first_audio_ts is None:
                             first_audio_ts = time.perf_counter()
                         self.tts.begin_utterance()
+                        if hasattr(self.visualizer, "set_utterance_state"):
+                            self.visualizer.set_utterance_state(True)
                         self.tts.push_audio(s_audio)
                         self.tts.end_utterance()
+                        if hasattr(self.visualizer, "set_utterance_state"):
+                            self.visualizer.set_utterance_state(False)
                         pushed_chunks = 1
 
                 if pushed_chunks > 0:
@@ -1021,9 +1103,11 @@ class LocalCoHostApp:
                 ttft_ms = ((first_token_ts - t_start) * 1000) if first_token_ts else 0.0
                 ttfs_ms = ((first_sentence_ts - t_start) * 1000) if first_sentence_ts else 0.0
                 ttfa_ms = ((first_audio_ts - t_start) * 1000) if first_audio_ts else 0.0
+                underrun_ms = (self.tts.underrun_samples / self.tts.sample_rate) * 1000.0
                 logger.info(
                     f"⏱️ [Turn Timing] TTFT: {ttft_ms:.0f}ms | TTFS: {ttfs_ms:.0f}ms | TTFA: {ttfa_ms:.0f}ms | "
-                    f"Total Turn Time: {t_total:.2f}s (Mood: [{active_mood.upper()}], Chunks: {pushed_chunks})"
+                    f"Total Turn Time: {t_total:.2f}s | underruns={self.tts.underrun_count} underrun_ms={underrun_ms:.1f}ms "
+                    f"(Mood: [{active_mood.upper()}], Chunks: {pushed_chunks})"
                 )
                 logger.info(f"✅ [Turn Completed] Speech playback finished cleanly ({t_total:.2f}s total turn time).")
 
@@ -1131,6 +1215,10 @@ class LocalCoHostApp:
         except Exception as e:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
+            self.tts.live_turn_active.clear()
+            self.tts.last_live_turn_end_time = time.time()
+            if hasattr(self.visualizer, "set_utterance_state"):
+                self.visualizer.set_utterance_state(False)
             self.last_activity_time = time.time()
             self.last_turn_completed_time = time.time()
             self.last_turn_event_type = event.event_type

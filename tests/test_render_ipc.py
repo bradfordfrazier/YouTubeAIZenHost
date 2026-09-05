@@ -154,4 +154,16 @@ def test_spsc_ring_buffer_concurrency():
     shm_w.unlink()
 
 
+def test_shm_page_alignment_and_loud_failure():
+    """Verifies that AUDIO_SHM_SIZE is 4096-aligned and attach fails loudly with RuntimeError."""
+    from render_worker import AUDIO_SHM_SIZE
+
+    # 1. Verify page alignment
+    assert AUDIO_SHM_SIZE % 4096 == 0
+
+    # 2. Verify loud failure when trying to attach to non-existent segment
+    with pytest.raises(RuntimeError):
+        AudioMetricsSharedMemory(name="non_existent_shm_test_segment_xyz", create=False)
+
+
 

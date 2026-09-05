@@ -38,7 +38,7 @@ import threading
 RING_BUFFER_FRAMES = 48000 * 30
 AUDIO_METRICS_HEADER_SIZE = 160
 AUDIO_DATA_BYTE_SIZE = RING_BUFFER_FRAMES * 2 * 4
-AUDIO_SHM_SIZE = AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE
+AUDIO_SHM_SIZE = ((AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE + 4095) // 4096) * 4096
 AUDIO_SHM_NAME = "iam_audio_metrics_shm"
 
 
@@ -58,30 +58,45 @@ class AudioMetricsSharedMemory:
                 self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=AUDIO_SHM_SIZE)
             except FileExistsError:
                 try:
-                    # Stale segment on Windows may persist with old size; recreate if size differs
+                    # Stale segment on Windows: reuse if size is sufficient, otherwise recreate
                     existing = shared_memory.SharedMemory(name=self.name, create=False)
-                    if existing.size != AUDIO_SHM_SIZE:
-                        existing.close()
-                        existing.unlink()
-                        self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=AUDIO_SHM_SIZE)
-                    else:
+                    if existing.size >= AUDIO_SHM_SIZE:
                         self.shm = existing
+                    else:
+                        existing.close()
+                        try:
+                            existing.unlink()
+                        except Exception:
+                            pass
+                        self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=AUDIO_SHM_SIZE)
                 except Exception as e:
-                    logger.warning(f"Could not attach/recreate shared memory {self.name}: {e}")
+                    logger.error(f"❌ Failed to attach/recreate existing shared memory segment '{self.name}': {e}")
                     self.shm = None
             except Exception as e:
-                logger.warning(f"Could not create shared memory {self.name}: {e}")
+                logger.error(f"❌ Failed to create shared memory segment '{self.name}': {e}")
                 self.shm = None
 
-            if self.shm is not None:
-                # Initialize with zeroes
-                self.shm.buf[:AUDIO_SHM_SIZE] = b"\x00" * AUDIO_SHM_SIZE
+            if self.shm is None:
+                raise RuntimeError(
+                    f"Could not initialize shared memory segment '{self.name}'. "
+                    "Application cannot function without audio metrics IPC."
+                )
+
+            # Initialize with zeroes
+            self.shm.buf[:AUDIO_SHM_SIZE] = b"\x00" * AUDIO_SHM_SIZE
         else:
-            try:
-                self.shm = shared_memory.SharedMemory(name=self.name, create=False)
-            except Exception as e:
-                logger.debug(f"Shared memory attach note ({self.name}): {e}")
-                self.shm = None
+            # Worker process: retry attaching 10 times over 2s before raising
+            for attempt in range(10):
+                try:
+                    self.shm = shared_memory.SharedMemory(name=self.name, create=False)
+                    break
+                except Exception:
+                    time.sleep(0.2)
+
+            if self.shm is None:
+                raise RuntimeError(
+                    f"Render worker failed to attach to shared memory segment '{self.name}' after 10 attempts (2.0s)."
+                )
 
     def write(self, rms: float, is_speaking: bool, spectrum: np.ndarray, timestamp: Optional[float] = None):
         """Writes live audio metrics from TTS audio callback into shared memory."""
@@ -476,9 +491,9 @@ class VisualizerProxy:
     does not need to change.
     """
 
-    def __init__(self, shm_name: str = AUDIO_SHM_NAME):
+    def __init__(self, shm_name: Optional[str] = None):
         self.cfg = config
-        self.shm_name = shm_name
+        self.shm_name = shm_name or f"{AUDIO_SHM_NAME}_{os.getpid()}"
         self.width = self.cfg.visualizer_width
         self.height = self.cfg.visualizer_height
         self.fps = self.cfg.visualizer_fps

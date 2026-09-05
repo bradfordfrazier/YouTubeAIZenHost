@@ -414,7 +414,7 @@ def test_queue_aware_hold_and_direct_turn_transitions():
         async def mock_gen(prompt):
             yield {"type": "complete", "full_text": "Awareness is the silent space.", "mood": "thoughtful"}
 
-        async def mock_synth(text):
+        async def mock_synth(text, *args, **kwargs):
             return np.zeros((100, 2), dtype=np.float32)
 
         async def mock_queue_speech(txt):
@@ -473,7 +473,7 @@ def test_reflection_post_speech_hold_honors_config():
         async def mock_gen(prompt):
             yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
 
-        async def mock_synth(text):
+        async def mock_synth(text, *args, **kwargs):
             return np.zeros((100, 2), dtype=np.float32)
 
         async def mock_queue_speech(txt):
@@ -528,7 +528,7 @@ def test_reflection_chat_wakeup_during_hold():
         async def mock_gen(prompt):
             yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
 
-        async def mock_synth(text):
+        async def mock_synth(text, *args, **kwargs):
             return np.zeros((100, 2), dtype=np.float32)
 
         async def mock_queue_speech(txt):
@@ -585,7 +585,7 @@ def test_reflection_empty_queue_holds_delay_before_motto():
         async def mock_gen(prompt):
             yield {"type": "complete", "full_text": "This is a quiet test reflection for timing.", "mood": "chill"}
 
-        async def mock_synth(text):
+        async def mock_synth(text, *args, **kwargs):
             return np.zeros((100, 2), dtype=np.float32)
 
         async def mock_queue_speech(txt):

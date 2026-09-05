@@ -34,6 +34,7 @@ from ndi_streamer import NDIStreamer
 from render_worker import VisualizerProxy
 from session_log import SessionLogger
 from tts_engine import TTSEngine
+from turn_guard import run_guarded_turn
 from visualizer import Visualizer
 
 # Optional imports with graceful fallbacks
@@ -430,6 +431,9 @@ class LocalCoHostApp:
             self.tts.ndi_buffer_enabled = False
             self.tts.ndi_sink = self.visualizer.push_audio_samples
             self.tts.ndi_clear_sink = self.visualizer.clear_audio_buffer
+            # Utterance open/closed is announced by the engine itself, AFTER the first chunk is
+            # in the ring, so the render worker never sees "utterance open but ring empty".
+            self.tts.utterance_state_sink = self.visualizer.set_utterance_state
         self.ndi = NDIStreamer()
         self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if self.cfg.session_logging_enabled else None
         self.cast = CastEngine()
@@ -477,6 +481,9 @@ class LocalCoHostApp:
         self.comment_queue: List[CommentEvent] = []
         self.active_turn_event: Optional[CommentEvent] = None
         self.active_turn_task: Optional[asyncio.Task] = None
+        # Turn watchdog state: phase label + start time of the currently executing turn
+        self.turn_phase: str = "idle"
+        self.turn_started_at: float = 0.0
         self.new_comment_signal: Optional[asyncio.Event] = None
         self.ndi_audio_thread: Optional[threading.Thread] = None
         self.ndi_audio_running: bool = False
@@ -812,8 +819,16 @@ class LocalCoHostApp:
                 self.active_turn_event = event
                 self.active_turn_task = asyncio.current_task()
 
-                # Execute full sequential turn
-                await self._execute_ai_turn(event)
+                # Execute full sequential turn under a hard timeout so a stuck turn can never
+                # block the scheduler (cast, reflections, chat replies) indefinitely.
+                await run_guarded_turn(
+                    self._execute_ai_turn(event),
+                    timeout_sec=float(self.cfg.turn_max_sec),
+                    phase_getter=lambda: self.turn_phase,
+                    on_timeout=self._recover_from_stuck_turn,
+                    label=f"Turn '{event.event_type}'",
+                )
+                self.turn_phase = "idle"
 
             except asyncio.CancelledError:
                 break
@@ -827,6 +842,9 @@ class LocalCoHostApp:
         """Executes a single cohesive AI speech turn from start to full audio completion."""
         t_start = time.perf_counter()
         logger.info(f"🎙️ [Turn Started] Processing '{event.event_type}' comment: '{event.prompt_trigger[:60]}...'")
+        self.turn_phase = "start"
+        self.turn_started_at = time.time()
+        consumer_task: Optional[asyncio.Task] = None
 
         # Mark live turn active for GPU exclusivity and reset underrun counters
         self.tts.live_turn_active.set()
@@ -936,19 +954,16 @@ class LocalCoHostApp:
                     logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
                 self.tts.begin_utterance()
-                if hasattr(self.visualizer, "set_utterance_state"):
-                    self.visualizer.set_utterance_state(True)
                 first_audio_ts = time.perf_counter()
                 self.tts.push_audio(cached_g.audio)
                 self.tts.end_utterance()
-                if hasattr(self.visualizer, "set_utterance_state"):
-                    self.visualizer.set_utterance_state(False)
                 pushed_chunks = 1
 
                 logger.info(
                     f"⚡ [Instant AI Speech] Broadcasting pre-synthesized greeting audio "
                     f"([{active_mood.upper()}], {dur_sec:.2f}s audio, 0.0s TTFT & TTS): '{clean_speech}'..."
                 )
+                self.turn_phase = "wait_complete"
                 await self.tts.wait_until_speech_completed()
             else:
                 # 3. Stream from Gemini AI Brain with sentence pipelining & adaptive lead buffer (Phase 2.4 & Underrun Fix)
@@ -962,13 +977,10 @@ class LocalCoHostApp:
                         item = await sentence_queue.get()
                         if item is not None:
                             sent_text, sent_mood = item
-                            try:
-                                s_audio = await self.tts.synthesize(sent_text, mood=sent_mood, is_live=True)
-                            except TypeError:
-                                try:
-                                    s_audio = await self.tts.synthesize(sent_text, mood=sent_mood)
-                                except TypeError:
-                                    s_audio = await self.tts.synthesize(sent_text)
+                            self.turn_phase = "synth"
+                            s_audio = await self.tts.synthesize(
+                                sent_text, mood=sent_mood, is_live=True, _from_live_turn=True
+                            )
 
                             if s_audio is not None and len(s_audio) > 0:
                                 if first_push_done:
@@ -980,6 +992,7 @@ class LocalCoHostApp:
 
                         # Check adaptive lead buffer start condition
                         if not first_push_done:
+                            self.turn_phase = "lead_gate"
                             buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
 
                             # Calculate pending characters in queue
@@ -1007,13 +1020,12 @@ class LocalCoHostApp:
                                     f"est. remaining synth {est_remaining_synth_sec:.1f}s (rtf {rtf_cons:.2f})"
                                 )
                                 self.tts.begin_utterance()
-                                if hasattr(self.visualizer, "set_utterance_state"):
-                                    self.visualizer.set_utterance_state(True)
                                 if first_audio_ts is None:
                                     first_audio_ts = time.perf_counter()
                                 if question_text:
                                     logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
+                                self.turn_phase = "push"
                                 for chunk in buffered_synthesized_chunks:
                                     self.tts.push_audio(chunk)
                                     pushed_chunks += 1
@@ -1026,8 +1038,6 @@ class LocalCoHostApp:
                                 buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
                                 logger.info(f"[TTS LEAD] starting playback on turn completion with {buffered_audio_sec:.1f}s buffered")
                                 self.tts.begin_utterance()
-                                if hasattr(self.visualizer, "set_utterance_state"):
-                                    self.visualizer.set_utterance_state(True)
                                 if first_audio_ts is None:
                                     first_audio_ts = time.perf_counter()
                                 for chunk in buffered_synthesized_chunks:
@@ -1042,11 +1052,10 @@ class LocalCoHostApp:
                         sentence_queue.task_done()
 
                     self.tts.end_utterance()
-                    if hasattr(self.visualizer, "set_utterance_state"):
-                        self.visualizer.set_utterance_state(False)
 
                 consumer_task = asyncio.create_task(_tts_consumer())
 
+                self.turn_phase = "gemini"
                 async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
                     ev_type = chunk_ev.get("type", "")
                     if ev_type == "mood":
@@ -1069,33 +1078,29 @@ class LocalCoHostApp:
                         is_completed = True
 
                 await sentence_queue.put(None)
+                self.turn_phase = "await_consumer"
                 await consumer_task
+                consumer_task = None
 
                 clean_speech = re.sub(r"@+", "@", full_statement).strip()
 
                 # Fallback: if no sentences were produced but full statement exists
                 if pushed_chunks == 0 and is_completed and clean_speech:
-                    try:
-                        s_audio = await self.tts.synthesize(clean_speech, mood=active_mood, is_live=True)
-                    except TypeError:
-                        try:
-                            s_audio = await self.tts.synthesize(clean_speech, mood=active_mood)
-                        except TypeError:
-                            s_audio = await self.tts.synthesize(clean_speech)
+                    self.turn_phase = "synth"
+                    s_audio = await self.tts.synthesize(
+                        clean_speech, mood=active_mood, is_live=True, _from_live_turn=True
+                    )
 
                     if s_audio is not None and len(s_audio) > 0:
                         if first_audio_ts is None:
                             first_audio_ts = time.perf_counter()
                         self.tts.begin_utterance()
-                        if hasattr(self.visualizer, "set_utterance_state"):
-                            self.visualizer.set_utterance_state(True)
                         self.tts.push_audio(s_audio)
                         self.tts.end_utterance()
-                        if hasattr(self.visualizer, "set_utterance_state"):
-                            self.visualizer.set_utterance_state(False)
                         pushed_chunks = 1
 
                 if pushed_chunks > 0:
+                    self.turn_phase = "wait_complete"
                     await self.tts.wait_until_speech_completed()
 
             if pushed_chunks > 0 and clean_speech:
@@ -1215,8 +1220,17 @@ class LocalCoHostApp:
         except Exception as e:
             logger.error(f"Error executing AI turn: {e}", exc_info=True)
         finally:
+            if consumer_task is not None and not consumer_task.done():
+                consumer_task.cancel()
+                try:
+                    await consumer_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             self.tts.live_turn_active.clear()
             self.tts.last_live_turn_end_time = time.time()
+            # NOTE: turn_phase is deliberately NOT reset here so a timeout log can report the
+            # phase the turn was stuck in; the scheduler resets it after the guarded call.
+            self.turn_started_at = 0.0
             if hasattr(self.visualizer, "set_utterance_state"):
                 self.visualizer.set_utterance_state(False)
             self.last_activity_time = time.time()
@@ -1229,6 +1243,58 @@ class LocalCoHostApp:
                 self.current_ai_subtitle = ""
                 self.visualizer.clear_pinned()
                 self.visualizer.clear_subtitle()
+
+    async def _recover_from_stuck_turn(self):
+        """
+        Cleanup after a turn was cancelled by the scheduler timeout. asyncio.wait_for has already
+        cancelled _execute_ai_turn (its finally-block ran), so this only has to reset shared state
+        that could otherwise wedge the next turn.
+        """
+        try:
+            self.tts.clear_audio_buffer()
+        except Exception as e:
+            logger.debug(f"recover: clear_audio_buffer: {e}")
+        try:
+            self.tts.end_utterance()
+        except Exception as e:
+            logger.debug(f"recover: end_utterance: {e}")
+        self.tts.live_turn_active.clear()
+        self.tts.last_live_turn_end_time = time.time()
+        if self.tts.gpu_lock.locked():
+            # Lock is released by the `async with` in the cancelled coroutine; if it is still held
+            # here something else (a background synth) owns it, which is legitimate. Just report.
+            logger.warning("[TURN TIMEOUT] gpu_lock still held after recovery (background synthesis in progress).")
+        self.current_pinned_chat = None
+        self.current_ai_subtitle = ""
+        try:
+            self.visualizer.clear_pinned()
+            self.visualizer.clear_subtitle()
+            if hasattr(self.visualizer, "set_utterance_state"):
+                self.visualizer.set_utterance_state(False)
+        except Exception as e:
+            logger.debug(f"recover: visualizer reset: {e}")
+        self.turn_phase = "idle"
+        self.turn_started_at = 0.0
+
+    async def turn_watchdog_task(self):
+        """Logs a WARNING every 15 s while a turn has been running for more than 60 s."""
+        while self.running:
+            try:
+                await asyncio.sleep(15.0)
+                if self.turn_started_at > 0:
+                    active_sec = time.time() - self.turn_started_at
+                    if active_sec > 60.0:
+                        ev = self.active_turn_event
+                        ev_type = ev.event_type if ev else "?"
+                        logger.warning(
+                            f"[TURN WATCHDOG] Turn '{ev_type}' active for {active_sec:.0f}s, phase='{self.turn_phase}', "
+                            f"buffered={self.tts.get_buffered_duration():.1f}s, "
+                            f"live_turn_active={self.tts.live_turn_active.is_set()}, gpu_lock={self.tts.gpu_lock.locked()}"
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"turn watchdog note: {e}")
 
     # --------------------------------------------------------------------------
     # 3. Local OBS Studio Integration (Direct WebSocket on localhost)
@@ -2518,6 +2584,7 @@ class LocalCoHostApp:
             asyncio.create_task(self.console_chat_task(), name="console_input"),
             asyncio.create_task(self.idle_reflection_monitor_task(), name="idle_reflection"),
             asyncio.create_task(self.stream_observability_task(), name="observability_hud"),
+            asyncio.create_task(self.turn_watchdog_task(), name="turn_watchdog"),
         ]
 
         if self.cfg.cast_enabled:

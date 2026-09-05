@@ -203,6 +203,10 @@ class AppConfig:
     lead_safety: float = _get_float("LEAD_SAFETY", 1.25)
     tts_avg_sentence_chars: int = _get_int("TTS_AVG_SENTENCE_CHARS", 110)
     tts_exaggeration_default: float = _get_float("TTS_EXAGGERATION_DEFAULT", 0.5)
+    # Hard cap applied to every mood's exaggeration (high values overdrive Chatterbox output)
+    tts_exaggeration_max: float = _get_float("TTS_EXAGGERATION_MAX", 0.7)
+    # Output peak ceiling after decode/resample (linear, 0.95 = -0.45 dBFS)
+    tts_peak_ceiling: float = _get_float("TTS_PEAK_CEILING", 0.95)
     tts_mood_exaggeration_map: Dict[str, float] = field(
         default_factory=lambda: {
             "hyped": 0.8,
@@ -268,6 +272,7 @@ class AppConfig:
     motto_pause_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_PAUSE_SEC", _get_float("MOTTO_DELAY_SEC", 0.0)))
     motto_fade_in_sec: float = _get_float("MOTTO_FADE_IN_SEC", 1.4)
     motto_fade_out_sec: float = _get_float("MOTTO_FADE_OUT_SEC", 0.6)
+    turn_max_sec: float = _get_float("TURN_MAX_SEC", 75.0)
 
     def __post_init__(self):
         # Startup deprecation warnings

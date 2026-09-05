@@ -148,10 +148,7 @@ class GreetingCache:
 
                 # Pre-synthesize 48kHz audio in background (respecting live turn GPU exclusivity & cooldown)
                 logger.debug(f"Pre-synthesizing greeting audio ({len(clean_speech)} chars, mood={active_mood})...")
-                if hasattr(tts, "synthesize_background"):
-                    audio = await tts.synthesize_background(clean_speech, mood=active_mood)
-                else:
-                    audio = await tts.synthesize(clean_speech, mood=active_mood, is_live=False)
+                audio = await tts.synthesize_background(clean_speech, mood=active_mood)
 
                 if audio is not None and len(audio) > 0:
                     item = CachedGreeting(

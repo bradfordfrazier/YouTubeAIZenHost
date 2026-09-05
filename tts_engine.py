@@ -8,6 +8,7 @@ and computes real-time FFT / RMS amplitude metrics for the visualizer.
 import asyncio
 from collections import deque
 import io
+import os
 import logging
 import re
 import threading
@@ -79,13 +80,19 @@ class TTSEngine:
         self.live_turn_active: asyncio.Event = asyncio.Event()
         self.gpu_lock: asyncio.Lock = asyncio.Lock()
         self.last_live_turn_end_time: float = 0.0
+        self._bg_inside_gpu_lock: bool = False
 
         # Rolling Real-Time Factor (RTF) history
         self._rtf_history: deque = deque(maxlen=8)
+        self.last_peak: float = 0.0
+        self.last_clip_frac: float = 0.0
 
         # Dual independent sample buffers for NDI and Local Windows Audio (lock-free deque of [chunk, offset])
         self.ndi_buffer_enabled: bool = True
         self.ndi_sink: Optional[Callable[[np.ndarray], None]] = None
+        # Called with True after the FIRST chunk of an utterance is in the buffers (so the
+        # render worker never sees "open but empty"), and with False on end/clear.
+        self.utterance_state_sink: Optional[Callable[[bool], None]] = None
         self.ndi_clear_sink: Optional[Callable[[], None]] = None
         self._audio_buffer_ndi: deque = deque()
         self._audio_buffer_local: deque = deque()
@@ -139,10 +146,25 @@ class TTSEngine:
             down = int(src_sr // gcd)
             data = scipy.signal.resample_poly(data, up, down, axis=0).astype(np.float32)
 
-        # Prevent digital clipping: normalize peaks if exceeding 0.95
-        max_val = float(np.max(np.abs(data)))
-        if max_val > 0.95:
-            data = (data / max_val) * 0.90
+        # Peak analysis. Hard clipping at the SOURCE (e.g. int16 wraparound on the TTS server)
+        # cannot be repaired here, but it can be detected: a run of samples pinned at full scale.
+        max_val = float(np.max(np.abs(data))) if len(data) else 0.0
+        clip_frac = float(np.mean(np.abs(data) >= 0.985)) if len(data) else 0.0
+        ceiling = float(getattr(self.cfg, "tts_peak_ceiling", 0.95))
+        if clip_frac > 0.0005:  # >0.05% of samples at full scale = source was clipped/wrapped
+            logger.warning(
+                f"[TTS PEAK] Source audio arrived already clipped: peak={max_val:.3f}, "
+                f"{clip_frac*100:.2f}% of samples at full scale (src_sr={src_sr}). "
+                "Fix on the TTS server (clamp before int16 WAV write) or lower exaggeration."
+            )
+        elif max_val > ceiling:
+            logger.info(f"[TTS PEAK] normalised {max_val:.3f} -> {ceiling:.2f}")
+
+        # Prevent downstream digital clipping: normalise peaks above the ceiling
+        if max_val > ceiling:
+            data = (data / max_val) * ceiling
+        self.last_peak = max_val
+        self.last_clip_frac = clip_frac
 
         return data.astype(np.float32)
 
@@ -295,26 +317,72 @@ class TTSEngine:
             logger.error(f"{tag} Error during edge-tts synthesis: {e}")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
-    async def synthesize(self, text: str, mood: str = "neutral", is_live: bool = True) -> np.ndarray:
-        """
-        Synthesize text into 48kHz stereo float32 PCM numpy array.
-        Routes to ChatterBox Turbo GPU server or local Edge-TTS failback with mood mapping.
-        Guarantees serial GPU execution via gpu_lock.
-        """
-        # Parse mood tag from argument with regex fallback
+    def _prepare_text(self, text: str, mood: str) -> Tuple[str, str, float]:
+        """Resolves mood/exaggeration and cleans text for the synthesizer."""
         active_mood = (mood or "neutral").lower().strip()
         if active_mood == "neutral":
             mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
             if mood_match:
                 active_mood = mood_match.group(1).lower()
-
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
+        exag_max = float(getattr(self.cfg, "tts_exaggeration_max", 1.0))
+        if exaggeration > exag_max:
+            exaggeration = exag_max
 
-        # Clean text of mood tags, markdown, and '@' symbols before speech synthesis
         clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
         clean_text = re.sub(r"@+", "", clean_text)
         clean_text = clean_text.replace("*", "").replace("`", "").strip()
+        return clean_text, active_mood, exaggeration
 
+    async def _synthesize_locked(self, clean_text: str, active_mood: str, exaggeration: float, is_live: bool) -> np.ndarray:
+        """
+        Backend dispatch. MUST be called with self.gpu_lock already held by the caller.
+        Never acquires the lock itself (asyncio.Lock is not re-entrant).
+        """
+        assert self.gpu_lock.locked(), "_synthesize_locked called without gpu_lock held"
+        tag = "[TTS LIVE]" if is_live else "[TTS BG]"
+
+        # 1. Primary: Remote Chatterbox Turbo GPU inference server
+        if self.active_backend == "chatterbox":
+            data = await self._synthesize_chatterbox(clean_text, exaggeration, is_live=is_live)
+            if data is not None and len(data) > 0:
+                self.last_synthesized_duration = len(data) / self.sample_rate
+                return data
+            logger.info(f"{tag} Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
+
+        # 2. Fallback / Local Mode: Microsoft edge-tts
+        data = await self._synthesize_edge_tts(clean_text, is_live=is_live)
+        if len(data) > 0:
+            self.last_synthesized_duration = len(data) / self.sample_rate
+            return data
+
+        # 3. Final safety: Sine placeholder (never silent)
+        placeholder = self._generate_sine_placeholder(len(clean_text) * 0.06)
+        self.last_synthesized_duration = len(placeholder) / self.sample_rate
+        return placeholder
+
+    async def synthesize(
+        self,
+        text: str,
+        mood: str = "neutral",
+        is_live: bool = True,
+        *,
+        _from_live_turn: bool = False,
+    ) -> np.ndarray:
+        """
+        Live-turn synthesis: text -> 48kHz stereo float32 PCM.
+        Acquires gpu_lock for the duration of the backend call so live sentences run serially.
+        Background callers must use synthesize_background(); this method logs a stack trace if
+        called without _from_live_turn=True, but still performs the synthesis.
+        """
+        if not _from_live_turn:
+            logger.error(
+                "[TTS MISUSE] TTSEngine.synthesize called without _from_live_turn=True. "
+                "Background tasks must call synthesize_background().",
+                stack_info=True,
+            )
+
+        clean_text, active_mood, exaggeration = self._prepare_text(text, mood)
         if not clean_text:
             return np.zeros((0, 2), dtype=np.float32)
 
@@ -323,58 +391,59 @@ class TTSEngine:
             f"{tag} Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, exaggeration={exaggeration:.2f}): "
             f"'{clean_text[:60]}...'"
         )
-
         async with self.gpu_lock:
-            # 1. Primary: Remote Chatterbox Turbo GPU inference server
-            if self.active_backend == "chatterbox":
-                data = await self._synthesize_chatterbox(clean_text, exaggeration, is_live=is_live)
-                if data is not None and len(data) > 0:
-                    self.last_synthesized_duration = len(data) / self.sample_rate
-                    return data
-                # If Chatterbox failed, fall through to Edge-TTS fallback
-                logger.info(f"{tag} Failing over to local Edge-TTS for utterance '{clean_text[:35]}...'")
+            return await self._synthesize_locked(clean_text, active_mood, exaggeration, is_live)
 
-            # 2. Fallback / Local Mode: Microsoft edge-tts
-            data = await self._synthesize_edge_tts(clean_text, is_live=is_live)
-            if len(data) > 0:
-                self.last_synthesized_duration = len(data) / self.sample_rate
-                return data
-
-            # 3. Final safety: Sine placeholder (never silent)
-            placeholder = self._generate_sine_placeholder(len(clean_text) * 0.06)
-            self.last_synthesized_duration = len(placeholder) / self.sample_rate
-            return placeholder
+    def _bg_may_proceed(self) -> bool:
+        """True when no live turn is active and the post-turn cooldown has elapsed."""
+        if self.live_turn_active.is_set():
+            return False
+        cooldown = float(self.cfg.cache_refill_cooldown_sec)
+        if self.last_live_turn_end_time > 0 and (time.time() - self.last_live_turn_end_time) < cooldown:
+            return False
+        return True
 
     async def synthesize_background(self, text: str, mood: str = "neutral") -> np.ndarray:
         """
-        Background pre-synthesis (e.g. greeting cache, reflection cache).
-        Guarantees GPU exclusivity for live turns: waits until live turns are inactive,
-        respects cache_refill_cooldown_sec, acquires gpu_lock, and re-validates before synthesizing.
+        Background pre-synthesis (greeting cache, warm-ups). Guarantees GPU exclusivity for live turns:
+        (a) waits until no live turn is active and the cooldown has elapsed WITHOUT holding gpu_lock,
+        (b) acquires gpu_lock,
+        (c) re-checks; if a turn started meanwhile, releases and goes back to (a).
         """
+        clean_text, active_mood, exaggeration = self._prepare_text(text, mood)
+        if not clean_text:
+            return np.zeros((0, 2), dtype=np.float32)
+
         while True:
-            # (a) Wait until live_turn_active is clear
-            while self.live_turn_active.is_set():
-                await asyncio.sleep(0.05)
+            # (a) Wait outside the lock. Never sleep while holding gpu_lock.
+            while not self._bg_may_proceed():
+                await asyncio.sleep(0.1)
 
-            cooldown = float(self.cfg.cache_refill_cooldown_sec)
-            # Check cooldown after live turn completion
-            if self.last_live_turn_end_time > 0:
-                time_since_turn = time.time() - self.last_live_turn_end_time
-                if time_since_turn < cooldown:
-                    await asyncio.sleep(max(0.05, cooldown - time_since_turn))
-                    if self.live_turn_active.is_set():
-                        continue
-
-            # (b) Acquire gpu_lock
+            # (b)/(c) Acquire, re-validate, synthesize.
             async with self.gpu_lock:
-                # (c) Re-check if live turn started while waiting for lock
-                if self.live_turn_active.is_set():
-                    continue
-                if self.last_live_turn_end_time > 0 and (time.time() - self.last_live_turn_end_time < cooldown):
-                    continue
+                if not self._bg_may_proceed():
+                    continue  # releases lock via context manager, back to (a)
+                self._bg_inside_gpu_lock = True
+                try:
+                    logger.info(
+                        f"[TTS BG] Synthesizing ({len(clean_text)} chars, mood={active_mood}, "
+                        f"exaggeration={exaggeration:.2f}): '{clean_text[:60]}...'"
+                    )
+                    return await self._synthesize_locked(clean_text, active_mood, exaggeration, is_live=False)
+                finally:
+                    self._bg_inside_gpu_lock = False
 
-                # Perform background synthesis with is_live=False while holding gpu_lock
-                return await self.synthesize(text, mood=mood, is_live=False)
+    async def queue_speech(self, text: str, mood: str = "neutral"):
+        """
+        Synthesizes and plays a standalone utterance outside the turn scheduler
+        (used by chat_reader_mode). Runs as a live utterance for GPU priority.
+        """
+        audio = await self.synthesize(text, mood=mood, is_live=True, _from_live_turn=True)
+        if audio is None or len(audio) == 0:
+            return
+        self.begin_utterance()
+        self.push_audio(audio)
+        self.end_utterance()
 
     def _generate_sine_placeholder(self, duration_sec: float) -> np.ndarray:
         """Fallback beep / harmonic synthesizer."""
@@ -426,6 +495,20 @@ class TTSEngine:
         """Returns the duration in seconds of audio currently queued in the playback buffer."""
         return self.remaining_speech_duration
 
+    def _dump_chunk(self, audio: np.ndarray):
+        """Diagnostic tap: IAM_DUMP_TTS_AUDIO=1 appends every processed chunk (as pushed) to a WAV."""
+        if os.environ.get("IAM_DUMP_TTS_AUDIO", "0") != "1":
+            return
+        try:
+            if getattr(self, "_dump_file", None) is None:
+                path = os.path.abspath(os.environ.get("IAM_DUMP_TTS_PATH", "debug_tts_push.wav"))
+                self._dump_file = sf.SoundFile(path, mode="w", samplerate=self.sample_rate, channels=2, subtype="FLOAT")
+                logger.warning(f"[AUDIO DUMP] Writing TTS push stream to {path}")
+            self._dump_file.write(audio)
+            self._dump_file.flush()
+        except Exception as e:
+            logger.error(f"[AUDIO DUMP] TTS dump failed: {e}")
+
     def begin_utterance(self):
         """Marks the start of a new conversational turn or multi-sentence sequence."""
         with self._buffer_lock:
@@ -441,6 +524,8 @@ class TTSEngine:
             self._utterance_open = False
             if self._utterance_total_samples == 0:
                 self.is_speaking = False
+        if self.utterance_state_sink is not None:
+            self.utterance_state_sink(False)
 
     def clear_audio_buffer(self):
         """Immediately purges all pending audio queues on turn interruption or barge-in."""
@@ -457,6 +542,8 @@ class TTSEngine:
                 self.ndi_clear_sink()
             except Exception as e:
                 logger.error(f"Error invoking ndi_clear_sink: {e}")
+        if self.utterance_state_sink is not None:
+            self.utterance_state_sink(False)
 
     async def wait_until_speech_completed(self, poll_interval: float = 0.05, timeout: Optional[float] = None):
         """
@@ -586,6 +673,10 @@ class TTSEngine:
 
         if self.ndi_sink is not None:
             self.ndi_sink(audio)
+        self._dump_chunk(audio)
+        # Announce the open utterance only once data is actually available downstream.
+        if is_first_chunk and self.utterance_state_sink is not None:
+            self.utterance_state_sink(True)
 
         return audio
 
@@ -628,7 +719,7 @@ class TTSEngine:
             utterance_open = self._utterance_open
 
             # Detect and count underrun if utterance is open but buffer ran dry
-            if utterance_open and not has_audio:
+            if utterance_open and not has_audio and self._utterance_chunk_count > 0:
                 self.underrun_count += 1
                 self.underrun_samples += n
                 if now - self._last_underrun_log_time >= 0.5:

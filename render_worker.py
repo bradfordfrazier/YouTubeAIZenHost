@@ -55,6 +55,10 @@ class AudioMetricsSharedMemory:
         self.create = create
         self.shm: Optional[shared_memory.SharedMemory] = None
         self._resume_pending: bool = False
+        # Samples handed to the reader since utterance_open last went 0 -> 1. Starvation and
+        # underrun only count once real audio has flowed in this utterance.
+        self._consumed_since_open: int = 0
+        self._last_open_state: bool = False
 
         if create:
             try:
@@ -187,10 +191,15 @@ class AudioMetricsSharedMemory:
         read_pos = struct.unpack_from("=I", buf, 148)[0]
         write_pos = struct.unpack_from("=I", buf, 144)[0]
         utterance_open = self.get_utterance_state()
+        if utterance_open and not self._last_open_state:
+            self._consumed_since_open = 0
+            self._resume_pending = False
+        self._last_open_state = utterance_open
 
         avail = (write_pos - read_pos) % RING_BUFFER_FRAMES
         out_audio = np.zeros((num_samples, 2), dtype=np.float32)
         to_read = min(num_samples, avail)
+        self._consumed_since_open += to_read
 
         if to_read > 0:
             audio_mem = np.frombuffer(
@@ -218,7 +227,7 @@ class AudioMetricsSharedMemory:
                 fade_len = min(240, to_read)
                 fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)[:, None]
                 out_audio[to_read - fade_len : to_read] *= fade_out
-            if utterance_open:
+            if utterance_open and self._consumed_since_open > 0:
                 self._resume_pending = True
         elif to_read == num_samples and self._resume_pending:
             # Resume after starvation: apply 5ms fade-in to leading samples
@@ -377,6 +386,17 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
     underrun_samples = 0
     last_underrun_log_time = 0.0
 
+    # Diagnostic tap: IAM_DUMP_NDI_AUDIO=1 writes every packet exactly as handed to NDI.
+    dump_file = None
+    if os.environ.get("IAM_DUMP_NDI_AUDIO", "0") == "1":
+        try:
+            import soundfile as sf
+            dump_path = os.path.abspath(os.environ.get("IAM_DUMP_NDI_PATH", "debug_ndi_out.wav"))
+            dump_file = sf.SoundFile(dump_path, mode="w", samplerate=sample_rate, channels=2, subtype="FLOAT")
+            logger.warning(f"[AUDIO DUMP] Writing NDI pump output to {dump_path}")
+        except Exception as e:
+            logger.error(f"[AUDIO DUMP] could not open dump file: {e}")
+
     while not stop_event.is_set():
         now_call = time.perf_counter()
         dt_call_ms = (now_call - t_last_call) * 1000.0
@@ -392,7 +412,7 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
             write_pos = struct.unpack_from("=I", shm.shm.buf, 144)[0]
             avail = (write_pos - read_pos) % RING_BUFFER_FRAMES
             utterance_open = shm.get_utterance_state()
-            if utterance_open and avail == 0:
+            if utterance_open and avail == 0 and shm._consumed_since_open > 0:
                 underrun_count += 1
                 underrun_samples += samples_per_packet
                 if now_call - last_underrun_log_time >= 0.5:
@@ -413,6 +433,12 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
 
         if ndi.is_open:
             ndi.send_audio_packet(packet)
+        if dump_file is not None:
+            try:
+                dump_file.write(packet)
+            except Exception as e:
+                logger.error(f"[AUDIO DUMP] write failed, disabling: {e}")
+                dump_file = None
 
         t_next += interval
         now = time.perf_counter()
@@ -431,6 +457,13 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
             logger.info(f"🎙️ [NDI Audio Pump] Rolling max audio interval: {max_interval_ms:.2f} ms (Target: {interval*1000:.2f} ms)")
             max_interval_ms = 0.0
             t_last_log = now
+
+    if dump_file is not None:
+        try:
+            dump_file.close()
+            logger.warning("[AUDIO DUMP] NDI pump dump closed.")
+        except Exception:
+            pass
 
 
 def render_worker_main(

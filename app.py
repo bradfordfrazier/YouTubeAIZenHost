@@ -973,8 +973,23 @@ class LocalCoHostApp:
 
                 async def _tts_consumer():
                     nonlocal pushed_chunks, first_audio_ts, active_mood, first_push_done
+                    gate_deferred_by_hold = False  # lead satisfied but question hold not yet elapsed
                     while True:
-                        item = await sentence_queue.get()
+                        if gate_deferred_by_hold:
+                            # Wake up when the hold expires so playback is not delayed until the
+                            # next sentence (or the sentinel) happens to arrive.
+                            remaining_hold = max(0.0, min_time_before_fade_out - (time.perf_counter() - t_question_shown))
+                            try:
+                                item = await asyncio.wait_for(sentence_queue.get(), timeout=remaining_hold + 0.01)
+                            except asyncio.TimeoutError:
+                                item = "__HOLD_EXPIRED__"
+                        else:
+                            item = await sentence_queue.get()
+                        if item == "__HOLD_EXPIRED__":
+                            item = None  # evaluate the gate with no new audio; not a sentinel
+                            hold_tick = True
+                        else:
+                            hold_tick = False
                         if item is not None:
                             sent_text, sent_mood = item
                             self.turn_phase = "synth"
@@ -1007,12 +1022,13 @@ class LocalCoHostApp:
                             lead_safety = float(self.cfg.lead_safety)
                             target_lead_sec = est_remaining_synth_sec * lead_safety
 
-                            is_sentinel = (item is None)
+                            is_sentinel = (item is None) and not hold_tick
                             lead_satisfied = (buffered_audio_sec >= target_lead_sec) or is_sentinel
 
                             # Check question display hold
                             q_elapsed = time.perf_counter() - t_question_shown
                             display_hold_satisfied = (q_elapsed >= min_time_before_fade_out)
+                            gate_deferred_by_hold = lead_satisfied and not display_hold_satisfied
 
                             if lead_satisfied and display_hold_satisfied and len(buffered_synthesized_chunks) > 0:
                                 logger.info(
@@ -1032,6 +1048,8 @@ class LocalCoHostApp:
                                 buffered_synthesized_chunks.clear()
                                 first_push_done = True
 
+                        if hold_tick:
+                            continue
                         if item is None:
                             # Final drain check on sentinel
                             if not first_push_done and len(buffered_synthesized_chunks) > 0:
@@ -2354,6 +2372,11 @@ class LocalCoHostApp:
         if status:
             logger.debug(f"Audio Callback status: {status}")
         outdata[:] = self.tts.pop_local_audio(frames, volume=self.cfg.local_audio_volume)
+        # When the render worker owns the NDI sender, its audio pump is the single source of
+        # avatar metrics (same timeline as the broadcast audio). Writing here too would make two
+        # writers on two different timelines fight over the same shared-memory slot.
+        if isinstance(self.visualizer, VisualizerProxy):
+            return
         metrics = self.tts.get_audio_metrics()
         if hasattr(self.visualizer, "write_audio_metrics"):
             self.visualizer.write_audio_metrics(
@@ -2408,8 +2431,8 @@ class LocalCoHostApp:
         if isinstance(self.visualizer, VisualizerProxy):
             return
 
-        packet_samples = 800
-        target_interval = packet_samples / 48000.0  # ~0.01667 s
+        packet_samples = int(self.ndi.audio_packet_samples) if self.ndi else 2400
+        target_interval = packet_samples / 48000.0
         t_next = time.perf_counter()
 
         while self.running and self.ndi_audio_running:

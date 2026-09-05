@@ -647,8 +647,15 @@ class AIBrain:
             if mwt in text_lower:
                 return True, f"direct_mention: '{mwt}'"
 
-        # 'i am' / 'iam' as whole word or @mention
-        if re.search(r"(?:@|\b)i\s*am\b", text_lower) or re.search(r"(?:@|\b)iam\b", text_lower):
+        # 'I AM' is the host's name but also the most common two words in English. Treat it as a
+        # direct address only when it is @-mentioned, written in caps, or in address position
+        # (start of message followed by punctuation, or "hey i am"). "i am tired" must NOT match.
+        if (
+            re.search(r"@\s*i\s*am\b", text_lower)
+            or re.search(r"@\s*iam\b", text_lower)
+            or re.search(r"\bI\s?AM\b", text)            # original casing: "I AM" / "IAM"
+            or re.search(r"^\s*i\s*am\s*[,:!?\-]", text_lower)
+        ):
             return True, "direct_mention: 'i am'"
 
         # Whole-word bare address triggers ('ai', 'bot', 'god', 'cohost', 'host')

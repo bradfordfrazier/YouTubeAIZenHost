@@ -23,12 +23,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from voice_manager import ensure_voice_available, get_available_voices
+from logging_setup import configure_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [CHATTERBOX-SERVER] %(message)s",
-    datefmt="%H:%M:%S",
-)
+configure_logging("SERVER")
 logger = logging.getLogger("chatterbox_server")
 
 # Strict directory paths

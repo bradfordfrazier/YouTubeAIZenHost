@@ -318,11 +318,8 @@ def render_worker_main(
     """
     # Worker process runs at Normal priority (audio pump thread is elevated independently)
     # Ensure clean logging in worker process
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] [RENDER-WORKER] %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from logging_setup import configure_logging
+    configure_logging("RENDER")
     logger.info(f"🎨 [Render Worker] Dedicated 60 FPS Pygame & NDI process started (restart_count={restart_count}).")
 
     from visualizer import Visualizer

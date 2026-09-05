@@ -13,8 +13,9 @@ from app import LocalCoHostApp, CommentEvent
 from config import config
 from greeting_cache import GreetingCache, CachedGreeting
 from visualizer import Visualizer
+from logging_setup import configure_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+configure_logging("TEST")
 logger = logging.getLogger("test_greeting_cache")
 
 

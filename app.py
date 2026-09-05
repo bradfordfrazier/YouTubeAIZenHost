@@ -121,10 +121,8 @@ def print_audio_devices():
             tag = " [RECOMMENDED FOR OBS]" if is_wasapi else ""
             print(f"  [{idx:2d}] {dev['name']:<42} | API: {api_name:<18}{tag}")
     print("=" * 65)
-    print("Tip: Set LOCAL_AUDIO_DEVICE=<index or name> in .env to target a specific device.")
-from logging_setup import setup_logging
+from logging_setup import configure_logging
 
-setup_logging()
 logger = logging.getLogger("app")
 
 # Enable 1ms high-resolution timer and elevated process priority on Windows for glitch-free streaming
@@ -2560,6 +2558,9 @@ class LocalCoHostApp:
 
 
 def main():
+    from logging_setup import configure_logging
+    configure_logging("MAIN")
+
     import argparse
     parser = argparse.ArgumentParser(description="All-Local AI Live Stream Co-Host Pipeline (OBS Host)")
     parser.add_argument("--vertical", "-v", action="store_true", help="Launch in 9:16 vertical mode (1080x1920)")

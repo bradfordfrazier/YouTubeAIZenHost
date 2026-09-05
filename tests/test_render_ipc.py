@@ -71,3 +71,35 @@ def test_shared_memory_audio_ring_buffer_roundtrip():
     shm_r.close()
     shm_w.close()
     shm_w.unlink()
+
+
+def test_shared_memory_long_reflection_audio_no_cutoff():
+    """Verifies that full-length reflections (e.g. 10s = 480,000 samples) play completely without truncation."""
+    shm_w = AudioMetricsSharedMemory(name="pytest_long_refl_shm", create=True)
+    shm_r = AudioMetricsSharedMemory(name="pytest_long_refl_shm", create=False)
+
+    # 10.0 seconds of speech at 48kHz (480,000 samples)
+    total_samples = 480000
+    long_speech_audio = np.random.uniform(-0.8, 0.8, (total_samples, 2)).astype(np.float32)
+
+    # Push full 10-second reflection at once (just like app.py does)
+    shm_w.write_audio_samples(long_speech_audio)
+
+    # Drain frame by frame (800 samples @ 60fps = 600 frames)
+    frames = total_samples // 800
+    drained_chunks = []
+    for _ in range(frames):
+        chunk = shm_r.read_audio_samples(800)
+        drained_chunks.append(chunk)
+
+    reconstructed_audio = np.vstack(drained_chunks)
+    assert np.allclose(long_speech_audio, reconstructed_audio, atol=1e-6)
+
+    # Verify that once 10 seconds are drained, buffer outputs silence
+    silence_check = shm_r.read_audio_samples(800)
+    assert np.all(silence_check == 0.0)
+
+    shm_r.close()
+    shm_w.close()
+    shm_w.unlink()
+

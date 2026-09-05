@@ -22,6 +22,7 @@ from config import config
 logger = logging.getLogger("render_worker")
 
 # Shared memory format:
+# Shared memory format:
 # offset 0:    float32 rms (4 bytes)
 # offset 4:    uint8 is_speaking (1 byte)
 # offset 5:    uint8 padding [3 bytes]
@@ -31,11 +32,11 @@ logger = logging.getLogger("render_worker")
 # offset 148:  uint32 read_pos (4 bytes)
 # offset 152:  uint32 available_samples (4 bytes)
 # offset 156:  uint8 padding [4 bytes]
-# offset 160:  float32 audio_ring_buffer [48000 frames * 2 channels * 4 bytes = 384000 bytes]
-# Total size:  384160 bytes
-RING_BUFFER_FRAMES = 48000
+# offset 160:  float32 audio_ring_buffer [RING_BUFFER_FRAMES * 2 channels * 4 bytes]
+# Sized to 120 seconds (5,760,000 frames @ 48kHz stereo = ~46 MB) to effortlessly hold full-length AI reflections & answers
+RING_BUFFER_FRAMES = 48000 * 120
 AUDIO_METRICS_HEADER_SIZE = 160
-AUDIO_DATA_BYTE_SIZE = RING_BUFFER_FRAMES * 2 * 4  # 384000 bytes
+AUDIO_DATA_BYTE_SIZE = RING_BUFFER_FRAMES * 2 * 4
 AUDIO_SHM_SIZE = AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE
 AUDIO_SHM_NAME = "iam_audio_metrics_shm"
 
@@ -53,10 +54,16 @@ class AudioMetricsSharedMemory:
                 self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=AUDIO_SHM_SIZE)
             except FileExistsError:
                 try:
-                    # Segments on Windows may persist until all handles close; attach to existing
-                    self.shm = shared_memory.SharedMemory(name=self.name, create=False)
+                    # Stale segment on Windows may persist with old size; recreate if size differs
+                    existing = shared_memory.SharedMemory(name=self.name, create=False)
+                    if existing.size != AUDIO_SHM_SIZE:
+                        existing.close()
+                        existing.unlink()
+                        self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=AUDIO_SHM_SIZE)
+                    else:
+                        self.shm = existing
                 except Exception as e:
-                    logger.warning(f"Could not attach to existing shared memory {self.name}: {e}")
+                    logger.warning(f"Could not attach/recreate shared memory {self.name}: {e}")
                     self.shm = None
             except Exception as e:
                 logger.warning(f"Could not create shared memory {self.name}: {e}")
@@ -107,14 +114,24 @@ class AudioMetricsSharedMemory:
             dtype=np.float32,
         ).reshape((RING_BUFFER_FRAMES, 2))
 
+        if n_samples >= RING_BUFFER_FRAMES:
+            # Audio clip exceeds entire ring buffer capacity; preserve most recent 2 minutes
+            audio = audio[-RING_BUFFER_FRAMES:]
+            n_samples = RING_BUFFER_FRAMES
+            audio_mem[:] = audio
+            write_pos = 0
+            read_pos = 0
+            avail = RING_BUFFER_FRAMES
+            struct.pack_into("=III", buf, 144, write_pos, read_pos, avail)
+            return
+
         if write_pos + n_samples <= RING_BUFFER_FRAMES:
             audio_mem[write_pos : write_pos + n_samples] = audio
         else:
             part1 = RING_BUFFER_FRAMES - write_pos
             part2 = n_samples - part1
             audio_mem[write_pos : RING_BUFFER_FRAMES] = audio[:part1]
-            part2_capped = min(part2, RING_BUFFER_FRAMES)
-            audio_mem[:part2_capped] = audio[part1 : part1 + part2_capped]
+            audio_mem[:part2] = audio[part1:]
 
         new_write_pos = (write_pos + n_samples) % RING_BUFFER_FRAMES
         new_avail = min(RING_BUFFER_FRAMES, avail + n_samples)

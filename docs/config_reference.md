@@ -53,6 +53,7 @@ This reference documents every configuration parameter in `config.py`, its envir
 | `idle_silence_threshold_sec` | `IDLE_SILENCE_THRESHOLD_SEC` | `float` | `15.0` | Chat quiet threshold before reflection check | `app.py` |
 | `spontaneous_min_interval_sec` | `SPONTANEOUS_MIN_INTERVAL_SEC` | `float` | `35.0` | Base interval between spontaneous reflections | `app.py` |
 | `spontaneous_max_backoff_sec` | `SPONTANEOUS_MAX_BACKOFF_SEC` | `float` | `180.0` | Max exponential backoff during quiet streams | `app.py` |
+| `reflection_post_speech_chat_delay_sec` | `REFLECTION_POST_SPEECH_CHAT_DELAY_SEC` | `float` | `3.0` | Pause duration after reflection before answering pending chat | `app.py` |
 | `motto_phrase` | `MOTTO_PHRASE` | `str` | `"Everything is perfect."` | Default subtitle motto during silence | `visualizer.py` |
 | `reflection_cache_enabled` | `REFLECTION_CACHE_ENABLED` | `bool` | `True` | Pre-computes spontaneous reflections in bg | `reflection_cache.py`, `ai_brain.py`, `app.py` |
 | `reflection_cache_size` | `REFLECTION_CACHE_SIZE` | `int` | `4` | Maximum pre-computed reflections stored | `reflection_cache.py`, `ai_brain.py` |

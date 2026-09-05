@@ -36,7 +36,10 @@ class NDIStreamer:
         self.sample_rate = self.cfg.tts_sample_rate  # 48000
         self.channels = 2  # Stereo
         self.samples_per_frame = self.sample_rate // self.fps  # 800 samples per 60fps frame
-        self.audio_packet_samples = self.samples_per_frame  # Exactly 800 samples (16.667ms @ 48kHz)
+        # Audio block size per write_audio call. Larger blocks (2400 = 50 ms) give the pump thread
+        # slack against CPU stalls (e.g. OBS decoding on the same machine); the SDK paces them
+        # out in real time because clock_audio=True. Must match the render worker's pump.
+        self.audio_packet_samples = int(getattr(self.cfg, "ndi_audio_block_samples", 2400))
         self._clock_audio = True
 
         self.sender = None
@@ -46,7 +49,10 @@ class NDIStreamer:
         self.is_mock = not CYNDILIB_AVAILABLE
         self.frames_sent = 0
         self.start_time = 0.0
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()          # video path + lifecycle (open/close)
+        # Audio has its own lock: the NDI SDK is thread-safe for audio/video on separate threads,
+        # and the audio pump must never wait behind an 8 MB frame copy or a blocking video write.
+        self._audio_lock = threading.Lock()
 
         # Double-buffered video memory to guarantee buffer lifetime during asynchronous NDI read
         self._buffer_index = 0
@@ -105,7 +111,11 @@ class NDIStreamer:
                 # 2. Configure Audio Frame (48000Hz Stereo Float32 with exact frame buffer capacity)
                 # Exactly self.samples_per_frame (800 samples @ 60fps / 48kHz = exactly 3200 bytes/channel)
                 # Eliminates channel stride drift, uninitialized buffer memory injection, and pegging OBS audio meter
-                self.audio_frame = cyndilib.AudioSendFrame(self.samples_per_frame, self.channels, self.sample_rate)
+                self.audio_frame = cyndilib.AudioSendFrame(self.audio_packet_samples, self.channels, self.sample_rate)
+                logger.info(
+                    f"NDI AudioSendFrame capacity: {self.audio_packet_samples} samples "
+                    f"({self.audio_packet_samples / self.sample_rate * 1000:.1f} ms per block)"
+                )
 
                 # 3. Create and configure Sender (clock_video=False, clock_audio=True for real-time pacing)
                 self.sender = cyndilib.Sender(
@@ -133,16 +143,17 @@ class NDIStreamer:
 
     def send_audio_packet(self, packet: np.ndarray):
         """
-        Sends exactly self.samples_per_frame (800) samples of interleaved float32 audio.
-        packet shape: (800, 2) float32, never zero-padded.
+        Sends exactly self.audio_packet_samples samples of interleaved float32 audio.
+        packet shape: (audio_packet_samples, 2) float32, never zero-padded.
+        Uses the audio-only lock so it never waits behind the video path.
         """
         if not self.is_open or self.is_mock or not self.sender:
             return
-        if packet.shape != (self.samples_per_frame, 2):
-            logger.warning(f"send_audio_packet: got {packet.shape}, expected ({self.samples_per_frame}, 2); dropping")
+        if packet.shape != (self.audio_packet_samples, 2):
+            logger.warning(f"send_audio_packet: got {packet.shape}, expected ({self.audio_packet_samples}, 2); dropping")
             return
         planar = np.ascontiguousarray(packet.T, dtype=np.float32)
-        with self._lock:
+        with self._audio_lock:
             try:
                 self.sender.write_audio(planar)
             except Exception as e:
@@ -214,16 +225,17 @@ class NDIStreamer:
         if self.is_mock or not self.sender:
             return
         try:
+            # Only the render thread calls send_video, so the buffer rotation and the copy are
+            # single-writer; the lock is held only around the SDK call and lifecycle changes.
+            target_buf = self._video_buffers[self._buffer_index]
+            self._buffer_index = 1 - self._buffer_index
+
+            if isinstance(video_rgba_bytes, (bytes, bytearray)):
+                target_buf[:] = np.frombuffer(video_rgba_bytes, dtype=np.uint8)
+            else:
+                target_buf[:] = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
+
             with self._lock:
-                # Rotate double buffer so previous frame remains alive during NDI asynchronous read
-                target_buf = self._video_buffers[self._buffer_index]
-                self._buffer_index = 1 - self._buffer_index
-
-                if isinstance(video_rgba_bytes, (bytes, bytearray)):
-                    target_buf[:] = np.frombuffer(video_rgba_bytes, dtype=np.uint8)
-                else:
-                    target_buf[:] = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
-
                 # Maintain persistent references on self across async NDI read lifetime
                 self._prev_frame_buffer = self._curr_frame_buffer
                 self._curr_frame_buffer = target_buf
@@ -249,12 +261,12 @@ class NDIStreamer:
             else:
                 audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
 
-            target_samples = self.samples_per_frame
+            target_samples = self.audio_packet_samples
             curr_samples = audio_out.shape[1] if audio_out.ndim == 2 else 0
             if curr_samples == 0:
                 return
 
-            with self._lock:
+            with self._audio_lock:
                 for chunk_start in range(0, curr_samples, target_samples):
                     chunk = audio_out[:, chunk_start : chunk_start + target_samples]
                     if chunk.shape[1] < target_samples:
@@ -286,7 +298,7 @@ class NDIStreamer:
 
     def close(self):
         """Closes the NDI Sender and releases resources."""
-        with self._lock:
+        with self._lock, self._audio_lock:
             if self.sender and self.is_open:
                 try:
                     self.sender.close()

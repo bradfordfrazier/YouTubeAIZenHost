@@ -360,7 +360,7 @@ class AudioAnalysisProcessor:
         }
 
 
-def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=48000):
+def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=None, sample_rate=48000):
     """
     Dedicated time-critical audio pump thread inside the render worker process.
     Runs on an independent 16.6667ms real-time audio clock decoupled from Pygame rendering.
@@ -375,8 +375,15 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
     except Exception as e:
         logger.debug(f"Audio pump thread priority note: {e}")
 
+    if samples_per_packet is None:
+        samples_per_packet = int(getattr(config, "ndi_audio_block_samples", 2400))
     analyzer = AudioAnalysisProcessor(sample_rate=sample_rate)
-    interval = samples_per_packet / sample_rate  # 16.6667 ms
+    interval = samples_per_packet / sample_rate  # 50 ms at the 2400-sample default
+    max_write_ms = 0.0  # longest time spent inside ndi.send_audio_packet in the current log window
+    logger.info(
+        f"🎙️ [NDI Audio Pump] block={samples_per_packet} samples ({interval*1000:.1f} ms); "
+        "NDI SDK paces blocks (clock_audio) so pump jitter up to one block is inaudible."
+    )
     t_next = time.perf_counter()
     t_last_log = time.perf_counter()
     max_interval_ms = 0.0
@@ -432,7 +439,11 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
         )
 
         if ndi.is_open:
+            t_w0 = time.perf_counter()
             ndi.send_audio_packet(packet)
+            w_ms = (time.perf_counter() - t_w0) * 1000.0
+            if w_ms > max_write_ms:
+                max_write_ms = w_ms
         if dump_file is not None:
             try:
                 dump_file.write(packet)
@@ -443,8 +454,8 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
         t_next += interval
         now = time.perf_counter()
 
-        # >100 ms behind: catch up by sending immediately, never skip audio
-        if now - t_next > 0.100:
+        # More than two blocks behind: resync clock (audio is still all sent, never skipped)
+        if now - t_next > 2.0 * interval:
             t_next = now
 
         sleep_s = t_next - now
@@ -454,8 +465,12 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=800, sample_rate=480
             pass
 
         if now - t_last_log >= 10.0:
-            logger.info(f"🎙️ [NDI Audio Pump] Rolling max audio interval: {max_interval_ms:.2f} ms (Target: {interval*1000:.2f} ms)")
+            logger.info(
+                f"🎙️ [NDI Audio Pump] Rolling max audio interval: {max_interval_ms:.2f} ms "
+                f"(Target: {interval*1000:.2f} ms) | max time inside write_audio: {max_write_ms:.2f} ms"
+            )
             max_interval_ms = 0.0
+            max_write_ms = 0.0
             t_last_log = now
 
     if dump_file is not None:
@@ -514,7 +529,7 @@ def render_worker_main(
     # Start dedicated time-critical NDI audio pump thread
     audio_pump_thread = threading.Thread(
         target=ndi_audio_pump,
-        args=(ndi, shm, stop_event, samples_per_frame, visualizer.sample_rate),
+        args=(ndi, shm, stop_event, None, visualizer.sample_rate),  # None -> config.ndi_audio_block_samples
         name="ndi_audio_pump",
         daemon=True,
     )

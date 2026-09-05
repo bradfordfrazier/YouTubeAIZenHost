@@ -361,6 +361,9 @@ class AppConfig:
     # --------------------------------------------------------------------------
     ndi_stream_name: str = os.getenv("NDI_STREAM_NAME", "AI_COHOST_FEED")
     ndi_audio_enabled: bool = os.getenv("NDI_AUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
+    # Samples per NDI audio write. Larger blocks give the pump thread more slack before a CPU
+    # stall becomes audible (2400 = 50 ms). Must match AudioSendFrame capacity in ndi_streamer.
+    ndi_audio_block_samples: int = _get_int("NDI_AUDIO_BLOCK_SAMPLES", 2400)
     # --------------------------------------------------------------------------
     # 10. Hardware Performance Profile (Intel Core i5 / UHD 630 Graphics Optimization)
     # --------------------------------------------------------------------------

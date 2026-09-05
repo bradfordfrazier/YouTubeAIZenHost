@@ -58,3 +58,40 @@ def test_state_queue_fingerprint_deduplication():
         assert proxy.state_queue.qsize() <= 1
     finally:
         proxy.stop()
+
+
+def test_worker_restart_and_state_replay():
+    """
+    Verifies that when the render worker process dies unexpectedly,
+    check_and_restart_if_dead() respawns the worker and replays the active
+    visual state (mood, subtitle, pinned chat question).
+    """
+    proxy = VisualizerProxy(shm_name="iam_test_restart_shm")
+    try:
+        # 1. Establish visual state
+        proxy.set_mood("energetic")
+        proxy.set_subtitle("Replay Motto & Subtitle")
+        proxy.set_pinned({"author": "ZenMaster", "message": "What is the sound of one hand clapping?"})
+
+        # Drain queues so we can inspect replay accurately
+        time.sleep(0.5)
+
+        # 2. Simulate worker crash by terminating the worker process
+        initial_pid = proxy.process.pid
+        proxy.process.terminate()
+        proxy.process.join(timeout=2.0)
+        assert not proxy.process.is_alive()
+
+        # 3. Trigger crash recovery
+        restarted = proxy.check_and_restart_if_dead()
+        assert restarted is True
+        assert proxy.restart_count == 1
+        assert proxy.process.is_alive()
+        assert proxy.process.pid != initial_pid
+
+        # 4. Verify visual state attributes remain intact on the proxy
+        assert proxy.current_mood == "energetic"
+        assert proxy.ai_text_target == "Replay Motto & Subtitle"
+        assert proxy.current_pinned == {"author": "ZenMaster", "message": "What is the sound of one hand clapping?"}
+    finally:
+        proxy.stop()

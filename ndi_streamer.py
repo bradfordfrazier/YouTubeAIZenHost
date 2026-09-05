@@ -59,8 +59,12 @@ class NDIStreamer:
         self._frame_buffer_bytes: Optional[bytes] = None
         self._prev_frame_buffer_bytes: Optional[bytes] = None
 
-    def open(self) -> bool:
+    def open(self, restart_count: int = 0) -> bool:
         """Initialize and open the NDI Sender."""
+        if restart_count > 0:
+            logger.info(f"⏳ [NDI Streamer] Process restart detected (count={restart_count}). Waiting 1.5s for NDI runtime cleanup...")
+            time.sleep(1.5)
+
         if not CYNDILIB_AVAILABLE:
             logger.warning(
                 "cyndilib is not installed or unavailable. NDIStreamer running in Mock Broadcasting Mode."

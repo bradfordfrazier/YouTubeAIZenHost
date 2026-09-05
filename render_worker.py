@@ -309,6 +309,7 @@ def render_worker_main(
     should_quit_val: mp.Value,
     is_promo_active_val: mp.Value,
     stop_event: mp.Event,
+    restart_count: int = 0,
 ):
     """
     Dedicated 60 FPS Pygame Render Worker process.
@@ -330,7 +331,7 @@ def render_worker_main(
         format="%(asctime)s [%(levelname)s] [RENDER-WORKER] %(message)s",
         datefmt="%H:%M:%S",
     )
-    logger.info("🎨 [Render Worker] Dedicated 60 FPS Pygame & NDI process started.")
+    logger.info(f"🎨 [Render Worker] Dedicated 60 FPS Pygame & NDI process started (restart_count={restart_count}).")
 
     from visualizer import Visualizer
     from ndi_streamer import NDIStreamer
@@ -341,7 +342,19 @@ def render_worker_main(
     # Initialize Visualizer and single-owner NDI Streamer in this process
     visualizer = Visualizer()
     ndi = NDIStreamer()
-    ndi.open()
+    ndi.open(restart_count=restart_count)
+    logger.info(f"🎨 [Render Worker] NDI Sender active: stream_name='{ndi.stream_name}'")
+
+    # Spawn 3s delayed logging of NDI receiver connections
+    def _log_connections_delayed():
+        time.sleep(3.0)
+        try:
+            conns = ndi.get_num_connections()
+            logger.info(f"📡 [Render Worker] NDI Stream '{ndi.stream_name}' active receiver connections: {conns}")
+        except Exception as e:
+            logger.debug(f"Delayed connection check note: {e}")
+
+    threading.Thread(target=_log_connections_delayed, daemon=True, name="ndi_conn_check").start()
 
     samples_per_frame = int(visualizer.sample_rate // visualizer.fps)  # 800 samples @ 48kHz
 
@@ -530,12 +543,13 @@ class VisualizerProxy:
                 self.should_quit_val,
                 self.is_promo_active_val,
                 self.stop_event,
+                self.restart_count,
             ),
             name="RenderWorkerProcess",
             daemon=True,
         )
         self.process.start()
-        logger.info(f"🎨 [VisualizerProxy] Started render worker process (PID: {self.process.pid})")
+        logger.info(f"🎨 [VisualizerProxy] Started render worker process (PID: {self.process.pid}, restart_count: {self.restart_count})")
 
     def _send_cmd(self, cmd: str, arg: Any = None):
         """Pushes a control command to the render worker."""
@@ -555,6 +569,17 @@ class VisualizerProxy:
                 self.restart_count += 1
                 logger.error(f"⚠️ [VisualizerProxy] Render worker died (exit code {self.process.exitcode}). Restarting worker ({self.restart_count}/3)...")
                 self.start()
+                # Replay active visual state to restore mood, subtitle/motto, and pinned chat
+                if self.current_mood:
+                    self._send_cmd("SET_MOOD", self.current_mood)
+                if self.ai_text_target:
+                    self._send_cmd("SET_SUBTITLE", self.ai_text_target)
+                else:
+                    self._send_cmd("CLEAR_SUBTITLE", None)
+                if self.current_pinned:
+                    self._send_cmd("SET_PINNED", self.current_pinned)
+                else:
+                    self._send_cmd("CLEAR_PINNED", None)
                 return True
             else:
                 logger.error("❌ [VisualizerProxy] Render worker exceeded maximum restarts.")

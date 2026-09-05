@@ -2322,6 +2322,10 @@ class LocalCoHostApp:
             while self.running:
                 t_loop_start = time.perf_counter()
 
+                # 0. Check worker health and restart if dead
+                if hasattr(self.visualizer, "check_and_restart_if_dead"):
+                    self.visualizer.check_and_restart_if_dead()
+
                 # 1. Synchronize orchestrator state with dedicated render worker
                 self.visualizer.sync_state(
                     chat_messages=list(self.chat_history)[-50:],

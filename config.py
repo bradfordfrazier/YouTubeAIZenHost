@@ -191,6 +191,7 @@ class AppConfig:
     # 6. Neural TTS Settings (Dual-Backend: ChatterBox Turbo on LAN / Edge-TTS Failback)
     # --------------------------------------------------------------------------
     tts_backend: str = os.getenv("TTS_BACKEND", "chatterbox")  # "chatterbox" | "edge"
+    tts_engine: str = os.getenv("TTS_ENGINE", os.getenv("TTS_BACKEND", "chatterbox"))
     tts_server_url: str = os.getenv("TTS_SERVER_URL", "http://192.168.0.115:8123")
     tts_reference_voice: str = os.getenv("TTS_REFERENCE_VOICE", "cohost.wav")
     tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 4.0)

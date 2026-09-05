@@ -14,6 +14,7 @@ import logging
 import os
 import random
 import re
+import signal
 import socket
 import sys
 import threading
@@ -2642,7 +2643,6 @@ def main():
     app = LocalCoHostApp()
 
     # Clean signal handling for Ctrl+C, Ctrl+Break, and termination signals
-    import signal
     def _sig_handler(sig, frame):
         sig_name = "Ctrl+Break" if sig == getattr(signal, "SIGBREAK", -1) else "Ctrl+C"
         logger.info(f"Interrupt signal received ({sig_name}). Shutting down AI Co-Host cleanly...")
@@ -2650,7 +2650,6 @@ def main():
             app.stop()
         except Exception:
             pass
-        import os
         os._exit(0)
 
     try:
@@ -2672,7 +2671,6 @@ def main():
             app.stop()
         except Exception:
             pass
-        import os
         os._exit(0)
 
 

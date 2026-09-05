@@ -376,28 +376,33 @@ class TTSEngine:
         # Brief initial sleep so the pop_audio_packet / pop_local_audio threads register playback start
         await asyncio.sleep(0.05)
 
+        with self._buffer_lock:
+            total_samples = self._utterance_total_samples
+            first_push = self._first_push_time or t0
+
+        expected_dur = total_samples / self.sample_rate if total_samples > 0 else getattr(self, "last_synthesized_duration", 0.0)
+        hard_timeout = expected_dur + 3.0
+        effective_timeout = timeout if timeout is not None else hard_timeout
+
         while True:
             now = time.time()
             with self._buffer_lock:
                 utterance_open = self._utterance_open
+                local_enabled = getattr(self.cfg, "local_audio_enabled", True)
+                local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0 and local_enabled
                 ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0 and self.ndi_buffer_enabled
-                local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0
 
                 buf_len_ndi = self._buffered_samples_ndi() if ndi_active else 0
                 buf_len_local = self._buffered_samples_local() if local_active else 0
 
-                # If neither backend is actively popping (e.g. proxy NDI mode or standalone test harness),
-                # elapsed time matching expected duration means playback is complete
-                if not ndi_active and not local_active:
-                    expected_dur = self._utterance_total_samples / self.sample_rate if self._utterance_total_samples > 0 else getattr(self, "last_synthesized_duration", 0.0)
-                    elapsed = now - (self._first_push_time or t0)
-                    is_drained = (elapsed >= expected_dur)
-                elif not ndi_active and local_active:
+                if local_active:
                     is_drained = (buf_len_local == 0)
-                elif ndi_active and not local_active:
+                elif ndi_active:
                     is_drained = (buf_len_ndi == 0)
                 else:
-                    is_drained = (buf_len_ndi == 0 and buf_len_local == 0)
+                    # Neither local nor NDI is actively popping in main process (e.g. proxy mode with local_audio disabled, or test harness)
+                    elapsed = now - (self._first_push_time if self._first_push_time > 0 else t0)
+                    is_drained = (elapsed >= expected_dur)
 
                 is_done = (not utterance_open) and is_drained
 
@@ -410,8 +415,11 @@ class TTSEngine:
                 await asyncio.sleep(0.10)
                 break
 
-            if timeout and (time.time() - t0) >= timeout:
-                logger.warning(f"wait_until_speech_completed timed out after {timeout}s")
+            if (time.time() - t0) >= effective_timeout:
+                logger.warning(
+                    f"⚠️ [TTS-ENGINE] wait_until_speech_completed timed out after {effective_timeout:.2f}s "
+                    f"(expected {expected_dur:.2f}s, open={utterance_open})"
+                )
                 with self._buffer_lock:
                     self.is_speaking = False
                     self._audio_buffer_ndi.clear()
@@ -467,7 +475,7 @@ class TTSEngine:
 
         # Microsecond lock hold time: only append reference and update counters
         with self._buffer_lock:
-            if is_first_chunk:
+            if self._first_push_time == 0.0:
                 self._first_push_time = time.time()
                 self._utterance_open = True
 

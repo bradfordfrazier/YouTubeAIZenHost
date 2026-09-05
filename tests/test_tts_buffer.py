@@ -98,3 +98,35 @@ def test_pop_audio_packet_slice_and_wrap():
     reconstructed = np.vstack(drained)
     # The valid audio portion should match all_processed exactly
     assert np.allclose(all_processed, reconstructed[:total_samples], atol=1e-6)
+
+
+def test_wait_until_speech_completed_proxy_mode_elapsed_time():
+    """
+    Acceptance test for Item 8:
+    With no pop thread running and local_audio_enabled=False (proxy mode),
+    begin_utterance(); push(1s); push(1s); push(1s); end_utterance();
+    await wait_until_speech_completed() returns after >= 3.0s and < 3.5s wall time.
+    """
+    import asyncio
+    engine = TTSEngine()
+    engine.cfg.local_audio_enabled = False
+    engine.ndi_buffer_enabled = False
+    engine.cfg.inter_sentence_gap_sec = 0.0  # Exactly 3.0s total audio
+    sr = engine.sample_rate
+
+    c1 = np.ones((sr, 2), dtype=np.float32) * 0.1
+    c2 = np.ones((sr, 2), dtype=np.float32) * 0.1
+    c3 = np.ones((sr, 2), dtype=np.float32) * 0.1
+
+    t0 = time.perf_counter()
+    engine.begin_utterance()
+    engine.push_audio(c1)
+    engine.push_audio(c2)
+    engine.push_audio(c3)
+    engine.end_utterance()
+
+    asyncio.run(engine.wait_until_speech_completed())
+    elapsed = time.perf_counter() - t0
+    print(f"Elapsed speech completion wait time: {elapsed:.3f}s")
+    assert elapsed >= 3.0, f"Returned too fast: {elapsed:.3f}s < 3.0s"
+    assert elapsed < 3.5, f"Returned too slow: {elapsed:.3f}s >= 3.5s"

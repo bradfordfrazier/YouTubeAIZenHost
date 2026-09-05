@@ -39,15 +39,14 @@ def test_decoupled_audio_pump():
 
     def audio_pump():
         nonlocal audio_packets_sent, samples_sent
-        # Pop 480 samples every 10ms (exact 48000 Hz isochronous clock)
-        packet_samples = 480
-        target_interval = packet_samples / 48000.0  # 0.010 s = 10ms
+        packet_samples = int(ndi.audio_packet_samples)
+        target_interval = packet_samples / 48000.0
         t_next = time.perf_counter()
 
         while running:
             t_now = time.perf_counter()
             audio_for_ndi, _ = tts.pop_audio_packet(packet_samples)
-            ndi.send_audio(audio_for_ndi)
+            ndi.send_audio_packet(audio_for_ndi)
             audio_packets_sent += 1
             samples_sent += packet_samples
 

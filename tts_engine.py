@@ -150,7 +150,7 @@ class TTSEngine:
         # cannot be repaired here, but it can be detected: a run of samples pinned at full scale.
         max_val = float(np.max(np.abs(data))) if len(data) else 0.0
         clip_frac = float(np.mean(np.abs(data) >= 0.985)) if len(data) else 0.0
-        ceiling = float(getattr(self.cfg, "tts_peak_ceiling", 0.95))
+        ceiling = float(self.cfg.tts_peak_ceiling)
         if clip_frac > 0.0005:  # >0.05% of samples at full scale = source was clipped/wrapped
             logger.warning(
                 f"[TTS PEAK] Source audio arrived already clipped: peak={max_val:.3f}, "
@@ -325,7 +325,7 @@ class TTSEngine:
             if mood_match:
                 active_mood = mood_match.group(1).lower()
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
-        exag_max = float(getattr(self.cfg, "tts_exaggeration_max", 1.0))
+        exag_max = float(self.cfg.tts_exaggeration_max)
         if exaggeration > exag_max:
             exaggeration = exag_max
 

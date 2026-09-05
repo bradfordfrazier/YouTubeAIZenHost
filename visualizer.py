@@ -433,6 +433,9 @@ class Visualizer:
         self.promo_current_type = "ask_god"  # alternates: "ask_god" <-> "like_sub"
         self.promo_slide_factor = 0.0
         self.promo_alpha = 0.0
+        self.on_promo_completed: Optional[Callable[[str, float], None]] = None
+        self._last_promo_completed_map: Dict[str, float] = {}
+        self._promo_completed_stamped: bool = False
 
         # Scintillation glint seeds for glistening diamond twinkle
         random.seed(42)
@@ -586,6 +589,7 @@ class Visualizer:
         self.promo_state_timer = 0.0
         self.promo_slide_factor = 0.0
         self.promo_alpha = 0.0
+        self._promo_completed_stamped = False
 
 
     def trigger_celebration(self, duration: float = 5.0, count: int = 140):
@@ -2017,6 +2021,10 @@ class Visualizer:
     # --------------------------------------------------------------------------
     # Promotional Callout Graphic Overlays ("Ask God" & "Like & Subscribe")
     # --------------------------------------------------------------------------
+    def last_promo_completed(self, promo_type: str) -> float:
+        """Returns timestamp when promo was last completed (>=60% displayed)."""
+        return self._last_promo_completed_map.get(promo_type, 0.0)
+
     @property
     def is_promo_active(self) -> bool:
         """Returns True if a promotional overlay is currently entering, displaying, or exiting."""
@@ -2062,6 +2070,15 @@ class Visualizer:
             self.promo_state_timer += dt
             self.promo_slide_factor = 1.0
             self.promo_alpha = 1.0
+            if self.promo_state_timer >= 0.60 * self.promo_duration and not self._promo_completed_stamped:
+                self._promo_completed_stamped = True
+                ts = time.time()
+                self._last_promo_completed_map[self.promo_current_type] = ts
+                if self.on_promo_completed:
+                    try:
+                        self.on_promo_completed(self.promo_current_type, ts)
+                    except Exception as e:
+                        logger.debug(f"Promo completion callback note: {e}")
             if self.promo_state_timer >= self.promo_duration:
                 self.promo_state = "exit"
                 self.promo_state_timer = 0.0

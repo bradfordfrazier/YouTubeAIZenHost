@@ -23,8 +23,8 @@ def test_shared_memory_metrics_roundtrip():
     spec_in = np.random.uniform(0.0, 1.0, 32).astype(np.float32)
     ts_in = time.time()
 
-    shm_w.write(rms_in, speaking_in, spec_in, ts_in)
-    out = shm_r.read()
+    shm_w.write_metric_slot(0, ts_in, rms_in, speaking_in, spec_in)
+    out = shm_r.read_metrics_for(ts_in + 0.001)
 
     assert abs(out["rms"] - rms_in) < 1e-5
     assert out["is_speaking"] is True

@@ -85,9 +85,10 @@ def test_ndi():
 
     # Send 10 test frames
     video_data = np.zeros((1080, 1920, 4), dtype=np.uint8)
-    audio_data = np.zeros((2, 800), dtype=np.float32)
+    audio_data = np.zeros((ndi.audio_packet_samples, 2), dtype=np.float32)
     for _ in range(10):
-        ndi.send_frame(video_data.tobytes(), audio_data)
+        ndi.send_video(video_data.tobytes())
+        ndi.send_audio_packet(audio_data)
 
     print(f"-> Frames sent: {ndi.frames_sent}, Active connections: {ndi.get_num_connections()}")
     ndi.close()

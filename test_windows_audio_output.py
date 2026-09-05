@@ -56,15 +56,15 @@ async def test_dual_audio_output():
 
     # 5. Pump audio packets to NDI while PortAudio callback simultaneously drains local buffer
     print("-> Streaming frame-locked audio packets to NDI & WASAPI for 3.5 seconds...")
-    samples_per_packet = 800  # 800 samples @ 60 FPS = 16.666 ms
+    samples_per_packet = int(ndi.audio_packet_samples)
     packets_sent = 0
     t0 = time.perf_counter()
 
-    for _ in range(210):  # 210 frames * 16.666ms = 3.5 seconds
+    for _ in range(70):  # 70 blocks * 50ms = 3.5 seconds
         audio_for_ndi, _ = tts.pop_audio_packet(samples_per_packet)
-        ndi.send_audio(audio_for_ndi)
+        ndi.send_audio_packet(audio_for_ndi)
         packets_sent += 1
-        await asyncio.sleep(0.015)
+        await asyncio.sleep(0.045)
 
     t1 = time.perf_counter()
     print(f"-> Pumped {packets_sent} audio frames ({packets_sent/60:.2f}s) in {t1-t0:.3f}s")

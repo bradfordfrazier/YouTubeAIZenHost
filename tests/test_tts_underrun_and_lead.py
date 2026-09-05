@@ -30,6 +30,12 @@ def test_underrun_detection_in_pop_local_audio():
     assert tts.underrun_count == 0
     assert tts.underrun_samples == 0
 
+    # Push initial chunk so lead buffering completes and _utterance_chunk_count > 0
+    tts.push_audio(np.ones((800, 2), dtype=np.float32))
+    p0 = tts.pop_local_audio(num_samples=800)
+    assert len(p0) == 800
+    assert tts.underrun_count == 0
+
     # Pop when buffer is empty -> underrun
     packet = tts.pop_local_audio(num_samples=800)
     assert len(packet) == 800
@@ -54,13 +60,14 @@ def test_gpu_exclusivity_and_background_synthesis():
     """Verifies that synthesize_background waits for live turns to end and respects cooldown."""
     async def _run():
         tts = TTSEngine()
+        tts.active_backend = "chatterbox"
         synth_calls = []
 
-        async def mock_synth(text, mood="neutral", is_live=True):
-            synth_calls.append((text, mood, is_live, time.time()))
+        async def mock_synth(clean_text, exaggeration, is_live=True):
+            synth_calls.append((clean_text, is_live, time.time()))
             return np.ones((800, 2), dtype=np.float32)
 
-        tts.synthesize = mock_synth
+        tts._synthesize_chatterbox = mock_synth
 
         # Set live turn active
         tts.live_turn_active.set()
@@ -90,7 +97,7 @@ def test_gpu_exclusivity_and_background_synthesis():
         assert bg_task_done is True
         assert len(synth_calls) == 1
         assert synth_calls[0][0] == "Welcome new traveler"
-        assert synth_calls[0][2] is False  # is_live = False
+        assert synth_calls[0][1] is False  # is_live = False
 
     asyncio.run(_run())
 

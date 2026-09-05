@@ -137,3 +137,57 @@ def test_idle_promo_balanced_rotation():
     )
     assert should_sub is True, "Idle scheduler failed to alternate to like_sub during lull"
 
+
+def test_interrupted_promo_does_not_consume_cooldown():
+    """
+    Verifies that when a promo is interrupted before reaching 60% of its display duration
+    (e.g. by speech starting), its completion timestamp is NOT stamped, so it does not
+    falsely consume the cooldown.
+    """
+    vis = Visualizer()
+    vis.promo_mode = "event"
+    vis.promo_duration = 5.0
+    vis.trigger_promo("like_sub", duration=5.0)
+
+    # 1. Step through entrance (60 frames = 1.0s >= 0.8s entrance duration)
+    for _ in range(60):
+        vis._update_promo_state(1.0 / 60.0, is_speaking=False, is_turn_busy=False)
+    assert vis.promo_state == "display"
+    assert vis.last_promo_completed("like_sub") == 0.0
+
+    # 2. Step through 20% of display duration (1.0s < 60% of 5.0s = 3.0s)
+    for _ in range(60):
+        vis._update_promo_state(1.0 / 60.0, is_speaking=False, is_turn_busy=False)
+    assert vis.promo_state == "display"
+    assert vis.last_promo_completed("like_sub") == 0.0
+
+    # 3. Interrupt with speaking
+    vis._update_promo_state(1.0 / 60.0, is_speaking=True, is_turn_busy=True)
+    assert vis.promo_state == "exit"
+    # Interrupted promo must not have recorded completion
+    assert vis.last_promo_completed("like_sub") == 0.0, "Interrupted promo incorrectly stamped completion!"
+
+
+def test_completed_promo_stamps_cooldown():
+    """
+    Verifies that when a promo reaches >= 60% of its display duration,
+    it stamps completion and exposes a valid completion timestamp.
+    """
+    vis = Visualizer()
+    vis.promo_mode = "event"
+    vis.promo_duration = 5.0
+    vis.trigger_promo("like_sub", duration=5.0)
+
+    # 1. Step through entrance into display (60 frames)
+    for _ in range(60):
+        vis._update_promo_state(1.0 / 60.0, is_speaking=False, is_turn_busy=False)
+    assert vis.promo_state == "display"
+
+    # 2. Step through 65% of display duration (3.25s >= 3.0s = 195 frames)
+    for _ in range(195):
+        vis._update_promo_state(1.0 / 60.0, is_speaking=False, is_turn_busy=False)
+
+    completion_ts = vis.last_promo_completed("like_sub")
+    assert completion_ts > 0.0, "Promo >= 60% display failed to stamp completion timestamp!"
+
+

@@ -25,20 +25,29 @@ logger = logging.getLogger("render_worker")
 import threading
 
 # Shared memory format (SPSC Lockless Layout):
-# offset 0:    float32 rms (4 bytes)
-# offset 4:    uint8 is_speaking (1 byte)
-# offset 5:    uint8 padding [3 bytes]
-# offset 8:    float32 spectrum [32 bins * 4 bytes = 128 bytes]
-# offset 136:  float64 timestamp (8 bytes)
+# Header size: 4096 bytes (AUDIO_METRICS_HEADER_SIZE)
 # offset 144:  uint32 write_pos (4 bytes) - owned exclusively by writer (main process)
 # offset 148:  uint32 read_pos (4 bytes) - owned exclusively by reader (render worker)
 # offset 152:  uint8 padding [4 bytes]
 # offset 156:  uint8 utterance_open (1 byte) - 1 if speech utterance in progress, 0 if idle
-# offset 157:  uint8 padding [3 bytes]
-# offset 160:  float32 audio_ring_buffer [RING_BUFFER_FRAMES * 2 channels * 4 bytes]
+# offset 157:  uint8 padding [351 bytes]
+# offset 508:  uint32 metrics_head (4 bytes) - monotonically increasing metrics slot index
+# offset 512:  Metrics Ring of 8 slots (stride: 160 bytes per slot):
+#              Each slot:
+#                offset +0:   float64 play_at_ts (8 bytes)
+#                offset +8:   float32 rms (4 bytes)
+#                offset +12:  uint8 is_speaking (1 byte)
+#                offset +13:  uint8 padding [3 bytes]
+#                offset +16:  float32 spectrum [32 bins * 4 bytes = 128 bytes]
+#                offset +144: uint8 padding [16 bytes]
+# offset 4096: float32 audio_ring_buffer [RING_BUFFER_FRAMES * 2 channels * 4 bytes]
 # Sized to 30 seconds (1,440,000 frames @ 48kHz stereo = ~11.5 MB)
 RING_BUFFER_FRAMES = 48000 * 30
-AUDIO_METRICS_HEADER_SIZE = 160
+AUDIO_METRICS_HEADER_SIZE = 4096
+METRICS_HEAD_OFFSET = 508
+METRICS_RING_START_OFFSET = 512
+METRICS_RING_NUM_SLOTS = 8
+METRICS_SLOT_STRIDE = 160
 AUDIO_DATA_BYTE_SIZE = RING_BUFFER_FRAMES * 2 * 4
 AUDIO_SHM_SIZE = ((AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE + 4095) // 4096) * 4096
 AUDIO_SHM_NAME = "iam_audio_metrics_shm"
@@ -105,11 +114,19 @@ class AudioMetricsSharedMemory:
                     f"Render worker failed to attach to shared memory segment '{self.name}' after 10 attempts (2.0s)."
                 )
 
-    def write(self, rms: float, is_speaking: bool, spectrum: np.ndarray, timestamp: Optional[float] = None):
-        """Writes live audio metrics from TTS audio callback into shared memory."""
+    def write_metric_slot(
+        self,
+        slot_idx: int,
+        play_at_ts: float,
+        rms: float,
+        is_speaking: bool,
+        spectrum: np.ndarray,
+    ):
+        """Writes an audio metric slot into the 8-slot shared memory ring."""
         if not self.shm:
             return
-        ts = timestamp or time.time()
+        slot_num = slot_idx % METRICS_RING_NUM_SLOTS
+        slot_offset = METRICS_RING_START_OFFSET + slot_num * METRICS_SLOT_STRIDE
         sp_arr = np.asarray(spectrum, dtype=np.float32)
         if len(sp_arr) < 32:
             sp_padded = np.pad(sp_arr, (0, 32 - len(sp_arr)), "constant")
@@ -117,9 +134,9 @@ class AudioMetricsSharedMemory:
             sp_padded = sp_arr[:32]
 
         buf = self.shm.buf
-        struct.pack_into("=fB3x", buf, 0, float(rms), 1 if is_speaking else 0)
-        buf[8:136] = sp_padded.tobytes()
-        struct.pack_into("=d", buf, 136, ts)
+        struct.pack_into("=dfB3x", buf, slot_offset, float(play_at_ts), float(rms), 1 if is_speaking else 0)
+        buf[slot_offset + 16 : slot_offset + 144] = sp_padded.tobytes()
+        struct.pack_into("=I", buf, METRICS_HEAD_OFFSET, slot_idx)
 
     def set_utterance_state(self, is_open: bool):
         """Sets the utterance_open flag in shared memory header at byte offset 156."""
@@ -249,19 +266,46 @@ class AudioMetricsSharedMemory:
         struct.pack_into("=II", buf, 144, 0, 0)
         buf[AUDIO_METRICS_HEADER_SIZE : AUDIO_METRICS_HEADER_SIZE + AUDIO_DATA_BYTE_SIZE] = b"\x00" * AUDIO_DATA_BYTE_SIZE
 
-    def read(self) -> Dict[str, Any]:
-        """Reads live audio metrics from shared memory in the render worker process."""
+    def read_metrics_for(self, now: float) -> Dict[str, Any]:
+        """
+        Reads audio metrics from the 8-slot shared memory ring corresponding to time `now`.
+        Picks the slot with the greatest play_at_ts <= now; if none satisfy this condition,
+        picks the oldest valid slot. Returns default zero metrics if uninitialized.
+        """
         if not self.shm:
             return {"rms": 0.0, "is_speaking": False, "spectrum": np.zeros(32, dtype=np.float32), "timestamp": 0.0}
+
         buf = self.shm.buf
-        rms, is_speaking_b = struct.unpack_from("=fB", buf, 0)
-        spectrum = np.frombuffer(buf[8:136], dtype=np.float32).copy()
-        ts, = struct.unpack_from("=d", buf, 136)
+        best_slot: Optional[Tuple[float, float, bool, np.ndarray]] = None
+        oldest_slot: Optional[Tuple[float, float, bool, np.ndarray]] = None
+        max_le_ts = -1.0
+        min_ts = float("inf")
+
+        for i in range(METRICS_RING_NUM_SLOTS):
+            slot_offset = METRICS_RING_START_OFFSET + i * METRICS_SLOT_STRIDE
+            play_at_ts, rms, is_speaking_b = struct.unpack_from("=dfB", buf, slot_offset)
+            if play_at_ts <= 0.0:
+                continue
+            spectrum = np.frombuffer(buf[slot_offset + 16 : slot_offset + 144], dtype=np.float32).copy()
+            slot_data = (play_at_ts, rms, bool(is_speaking_b), spectrum)
+
+            if play_at_ts <= now and play_at_ts > max_le_ts:
+                max_le_ts = play_at_ts
+                best_slot = slot_data
+
+            if play_at_ts < min_ts:
+                min_ts = play_at_ts
+                oldest_slot = slot_data
+
+        chosen = best_slot or oldest_slot
+        if chosen is None:
+            return {"rms": 0.0, "is_speaking": False, "spectrum": np.zeros(32, dtype=np.float32), "timestamp": 0.0}
+
         return {
-            "rms": rms,
-            "is_speaking": bool(is_speaking_b),
-            "spectrum": spectrum,
-            "timestamp": ts,
+            "rms": chosen[1],
+            "is_speaking": chosen[2],
+            "spectrum": chosen[3],
+            "timestamp": chosen[0],
         }
 
     def close(self):
@@ -376,9 +420,10 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=None, sample_rate=48
         logger.debug(f"Audio pump thread priority note: {e}")
 
     if samples_per_packet is None:
-        samples_per_packet = int(getattr(config, "ndi_audio_block_samples", 2400))
+        samples_per_packet = int(config.ndi_audio_block_samples)
     analyzer = AudioAnalysisProcessor(sample_rate=sample_rate)
     interval = samples_per_packet / sample_rate  # 50 ms at the 2400-sample default
+    metrics_slot_idx = 0
     max_write_ms = 0.0  # longest time spent inside ndi.send_audio_packet in the current log window
     logger.info(
         f"🎙️ [NDI Audio Pump] block={samples_per_packet} samples ({interval*1000:.1f} ms); "
@@ -429,14 +474,7 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=None, sample_rate=48
                     )
                     last_underrun_log_time = now_call
 
-        packet = shm.read_audio_samples(samples_per_packet)  # (800, 2) float32, zeros if empty
-        metrics = analyzer.process(packet)
-        shm.write(
-            rms=metrics["rms"],
-            is_speaking=metrics["is_speaking"],
-            spectrum=metrics["spectrum"],
-            timestamp=now_call,
-        )
+        packet = shm.read_audio_samples(samples_per_packet)  # (2400, 2) float32, zeros if empty
 
         if ndi.is_open:
             t_w0 = time.perf_counter()
@@ -444,6 +482,27 @@ def ndi_audio_pump(ndi, shm, stop_event, samples_per_packet=None, sample_rate=48
             w_ms = (time.perf_counter() - t_w0) * 1000.0
             if w_ms > max_write_ms:
                 max_write_ms = w_ms
+
+        # Sub-divide block into 800-sample hops and populate 60Hz metrics ring
+        hop_samples = 800
+        num_hops = max(1, samples_per_packet // hop_samples)
+        latency_sec = float(config.ndi_audio_metrics_latency_sec)
+        t_block_send = time.time() + latency_sec
+
+        for k in range(num_hops):
+            hop_start = k * hop_samples
+            hop_end = min(len(packet), (k + 1) * hop_samples)
+            hop_packet = packet[hop_start:hop_end]
+            hop_metrics = analyzer.process(hop_packet)
+            play_at_ts = t_block_send + k * (hop_samples / sample_rate)
+            shm.write_metric_slot(
+                slot_idx=metrics_slot_idx,
+                play_at_ts=play_at_ts,
+                rms=hop_metrics["rms"],
+                is_speaking=hop_metrics["is_speaking"],
+                spectrum=hop_metrics["spectrum"],
+            )
+            metrics_slot_idx += 1
         if dump_file is not None:
             try:
                 dump_file.write(packet)
@@ -488,6 +547,7 @@ def render_worker_main(
     should_quit_val: mp.Value,
     is_promo_active_val: mp.Value,
     stop_event: mp.Event,
+    promo_event_queue: mp.Queue,
     restart_count: int = 0,
 ):
     """
@@ -512,6 +572,15 @@ def render_worker_main(
     ndi = NDIStreamer()
     ndi.open(restart_count=restart_count)
     logger.info(f"🎨 [Render Worker] NDI Sender active: stream_name='{ndi.stream_name}'")
+
+    # Connect promo completion callback to send events to proxy
+    def _on_promo_completed(ptype: str, ts: float):
+        try:
+            promo_event_queue.put_nowait((ptype, ts))
+        except Exception:
+            pass
+
+    visualizer.on_promo_completed = _on_promo_completed
 
     # Spawn 3s delayed logging of NDI receiver connections
     def _log_connections_delayed():
@@ -605,7 +674,7 @@ def render_worker_main(
                 state.update(newest_state)
 
             # 3. Read live audio metrics from shared memory for EQ/particle reactivity
-            audio_metrics = shm.read()
+            audio_metrics = shm.read_metrics_for(time.time())
 
             # 4. Render high-res 1080p60 frame (subtitle & pinned question owned exclusively by visualizer)
             rgba_bytes = visualizer.render_frame(
@@ -687,6 +756,8 @@ class VisualizerProxy:
         self.audio_shm = AudioMetricsSharedMemory(name=self.shm_name, create=True)
         self.ctrl_queue: mp.Queue = mp.Queue(maxsize=256)
         self.state_queue: mp.Queue = mp.Queue(maxsize=4)
+        self.promo_event_queue: mp.Queue = mp.Queue(maxsize=16)
+        self._last_promo_completed_map: Dict[str, float] = {}
         self._last_state_fingerprint: Optional[Tuple] = None
         self.should_quit_val: mp.Value = mp.Value("b", 0)
         self.is_promo_active_val: mp.Value = mp.Value("b", 0)
@@ -711,6 +782,7 @@ class VisualizerProxy:
                 self.should_quit_val,
                 self.is_promo_active_val,
                 self.stop_event,
+                self.promo_event_queue,
                 self.restart_count,
             ),
             name="RenderWorkerProcess",
@@ -754,9 +826,19 @@ class VisualizerProxy:
                 return False
         return True
 
-    def write_audio_metrics(self, rms: float, is_speaking: bool, spectrum: np.ndarray, timestamp: Optional[float] = None):
-        """Fast path: updates audio shared memory from TTS audio callback or pump."""
-        self.audio_shm.write(rms=rms, is_speaking=is_speaking, spectrum=spectrum, timestamp=timestamp)
+    def _drain_promo_events(self):
+        """Drains any pending promo completion events sent by the render worker."""
+        while not self.promo_event_queue.empty():
+            try:
+                ptype, ts = self.promo_event_queue.get_nowait()
+                self._last_promo_completed_map[ptype] = ts
+            except Exception:
+                break
+
+    def last_promo_completed(self, promo_type: str) -> float:
+        """Returns timestamp when promo was last completed (>=60% displayed)."""
+        self._drain_promo_events()
+        return self._last_promo_completed_map.get(promo_type, 0.0)
 
     def push_audio_samples(self, audio: np.ndarray):
         """Pushes stereo float32 audio samples into shared memory for synchronized NDI broadcast."""
@@ -822,6 +904,7 @@ class VisualizerProxy:
         is_stream_live: bool = True,
     ):
         """Synchronizes orchestrator state with the rendering process if changed."""
+        self._drain_promo_events()
         msgs = list(chat_messages)[-50:]
         last_msg_id = ""
         if msgs:

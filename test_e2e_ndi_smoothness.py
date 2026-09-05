@@ -70,8 +70,8 @@ async def run_smoothness_test():
             is_stream_live=True,
         )
 
-        # C. Atomically transmit synchronized Video + Audio over NDI
-        ndi.send_frame_sync(rgba_bytes, audio_for_ndi)
+        # C. Transmit Video over NDI
+        ndi.send_video(rgba_bytes)
 
         t_frame_end = time.perf_counter()
         t_used = t_frame_end - t_frame_start

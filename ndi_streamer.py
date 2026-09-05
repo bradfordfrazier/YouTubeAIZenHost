@@ -36,10 +36,7 @@ class NDIStreamer:
         self.sample_rate = self.cfg.tts_sample_rate  # 48000
         self.channels = 2  # Stereo
         self.samples_per_frame = self.sample_rate // self.fps  # 800 samples per 60fps frame
-        # Audio block size per write_audio call. Larger blocks (2400 = 50 ms) give the pump thread
-        # slack against CPU stalls (e.g. OBS decoding on the same machine); the SDK paces them
-        # out in real time because clock_audio=True. Must match the render worker's pump.
-        self.audio_packet_samples = int(getattr(self.cfg, "ndi_audio_block_samples", 2400))
+        self.audio_packet_samples = int(self.cfg.ndi_audio_block_samples)
         self._clock_audio = True
 
         self.sender = None
@@ -159,64 +156,6 @@ class NDIStreamer:
             except Exception as e:
                 logger.error(f"NDI write_audio error: {e}")
 
-    def send_frame_sync(self, video_rgba_bytes: bytes, audio_data: np.ndarray):
-        """
-        Atomically broadcasts synchronized video and audio frames to NDI.
-        Video: RGBA buffer of size (width * height * 4).
-        Audio: Planar float32 audio of shape (2, num_samples) or interleaved (num_samples, 2).
-        """
-        if not self.is_open:
-            return
-        if self._clock_audio:
-            logger.debug("send_frame_sync called while clock_audio is True; render worker should use send_video and ndi_audio_pump")
-        self.frames_sent += 1
-        if self.is_mock or not self.sender:
-            return
-
-        if audio_data.ndim == 2:
-            if audio_data.shape[1] == 2 and audio_data.shape[0] != 2:
-                audio_out = np.ascontiguousarray(audio_data.T, dtype=np.float32)
-            else:
-                audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
-        elif audio_data.ndim == 1:
-            audio_out = np.ascontiguousarray(np.vstack((audio_data, audio_data)), dtype=np.float32)
-        else:
-            audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
-
-        # Ensure exact match with self.samples_per_frame (800 samples) to prevent uninitialized memory gaps
-        target_samples = self.samples_per_frame
-        curr_samples = audio_out.shape[1] if audio_out.ndim == 2 else 0
-
-        if curr_samples < target_samples:
-            padded = np.zeros((2, target_samples), dtype=np.float32)
-            if curr_samples > 0:
-                padded[:, :curr_samples] = audio_out[:, :curr_samples]
-            audio_out = padded
-        elif curr_samples > target_samples:
-            audio_out = np.ascontiguousarray(audio_out[:, :target_samples], dtype=np.float32)
-
-        with self._lock:
-            try:
-                # Rotate double buffer so previous frame remains alive during NDI asynchronous read
-                target_buf = self._video_buffers[self._buffer_index]
-                self._buffer_index = 1 - self._buffer_index
-
-                if isinstance(video_rgba_bytes, (bytes, bytearray)):
-                    target_buf[:] = np.frombuffer(video_rgba_bytes, dtype=np.uint8)
-                else:
-                    target_buf[:] = np.ascontiguousarray(video_rgba_bytes.reshape(-1), dtype=np.uint8)
-
-                self._prev_frame_buffer = self._curr_frame_buffer
-                self._curr_frame_buffer = target_buf
-                self._prev_frame_buffer_bytes = self._frame_buffer_bytes
-                self._frame_buffer_bytes = video_rgba_bytes if isinstance(video_rgba_bytes, (bytes, bytearray)) else None
-
-                # Asynchronous video transmission + frame-locked synchronized audio
-                self.sender.write_video_async(target_buf)
-                self.sender.write_audio(audio_out)
-            except Exception as e:
-                logger.error(f"Error in synchronized NDI broadcast: {e}")
-
     def send_video(self, video_rgba_bytes: bytes):
         """Sends a single video frame asynchronously to NDI."""
         if not self.is_open:
@@ -245,46 +184,6 @@ class NDIStreamer:
                 self.sender.write_video_async(target_buf)
         except Exception as e:
             logger.error(f"Error streaming video frame over NDI: {e}")
-
-    def send_audio(self, audio_data: np.ndarray):
-        """Sends audio samples to NDI (shape: [2, num_samples] planar float32)."""
-        if not self.is_open or self.is_mock or not self.sender:
-            return
-        try:
-            if audio_data.ndim == 2:
-                if audio_data.shape[1] == 2 and audio_data.shape[0] != 2:
-                    audio_out = np.ascontiguousarray(audio_data.T, dtype=np.float32)
-                else:
-                    audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
-            elif audio_data.ndim == 1:
-                audio_out = np.ascontiguousarray(np.vstack((audio_data, audio_data)), dtype=np.float32)
-            else:
-                audio_out = np.ascontiguousarray(audio_data, dtype=np.float32)
-
-            target_samples = self.audio_packet_samples
-            curr_samples = audio_out.shape[1] if audio_out.ndim == 2 else 0
-            if curr_samples == 0:
-                return
-
-            with self._audio_lock:
-                for chunk_start in range(0, curr_samples, target_samples):
-                    chunk = audio_out[:, chunk_start : chunk_start + target_samples]
-                    if chunk.shape[1] < target_samples:
-                        # Only send short tail chunk if >= 480 samples, never zero-pad
-                        if chunk.shape[1] >= 480:
-                            padded = np.zeros((2, target_samples), dtype=np.float32)
-                            padded[:, : chunk.shape[1]] = chunk
-                            self.sender.write_audio(padded)
-                        else:
-                            logger.debug(f"send_audio: dropping short tail chunk ({chunk.shape[1]} samples < 480)")
-                    else:
-                        self.sender.write_audio(np.ascontiguousarray(chunk, dtype=np.float32))
-        except Exception as e:
-            logger.error(f"Error streaming audio packet over NDI: {e}")
-
-    def send_frame(self, video_rgba_bytes: bytes, audio_data: np.ndarray):
-        """Legacy combined method forwarding directly to send_frame_sync."""
-        self.send_frame_sync(video_rgba_bytes, audio_data)
 
     def get_num_connections(self) -> int:
         """Returns the number of active NDI receivers (e.g. OBS Studio or NDI Monitor)."""

@@ -970,9 +970,10 @@ class LocalCoHostApp:
                 sentence_queue: asyncio.Queue = asyncio.Queue()
                 buffered_synthesized_chunks: List[np.ndarray] = []
                 first_push_done = False
+                pending_queue_chars = 0
 
                 async def _tts_consumer():
-                    nonlocal pushed_chunks, first_audio_ts, active_mood, first_push_done
+                    nonlocal pushed_chunks, first_audio_ts, active_mood, first_push_done, pending_queue_chars
                     gate_deferred_by_hold = False  # lead satisfied but question hold not yet elapsed
                     while True:
                         if gate_deferred_by_hold:
@@ -992,6 +993,7 @@ class LocalCoHostApp:
                             hold_tick = False
                         if item is not None:
                             sent_text, sent_mood = item
+                            pending_queue_chars = max(0, pending_queue_chars - len(sent_text))
                             self.turn_phase = "synth"
                             s_audio = await self.tts.synthesize(
                                 sent_text, mood=sent_mood, is_live=True, _from_live_turn=True
@@ -1010,9 +1012,8 @@ class LocalCoHostApp:
                             self.turn_phase = "lead_gate"
                             buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
 
-                            # Calculate pending characters in queue
-                            raw_q = list(getattr(sentence_queue, "_queue", []))
-                            queue_chars = sum(len(it[0]) for it in raw_q if it is not None)
+                            # Calculate pending characters in queue using producer-maintained counter
+                            queue_chars = pending_queue_chars
                             # Sentences not yet received from Gemini count as one average sentence (capped at 3 pending sentences)
                             pending_unreceived = 1 if not is_completed else 0
                             pending_chars = queue_chars + (pending_unreceived * int(self.cfg.tts_avg_sentence_chars))
@@ -1089,6 +1090,7 @@ class LocalCoHostApp:
                         sent_mood = chunk_ev.get("mood", active_mood)
                         if sent:
                             clean_sent = re.sub(r"@+", "@", sent).strip()
+                            pending_queue_chars += len(clean_sent)
                             await sentence_queue.put((clean_sent, sent_mood))
                     elif ev_type == "complete":
                         full_statement = chunk_ev.get("full_text", "").strip()
@@ -2292,7 +2294,7 @@ class LocalCoHostApp:
         )
 
         last_ask_promo_time = 0.0
-        last_like_sub_time = 0.0
+        last_like_sub_trigger_time = 0.0
 
         while self.running:
             try:
@@ -2317,7 +2319,9 @@ class LocalCoHostApp:
                 # 1. Check "Like & Subscribe" promo:
                 # Trigger within promo_sub_after_turn_sec after completed non-spontaneous turn or celebration
                 time_since_turn_done = now - getattr(self, "last_turn_completed_time", 0.0)
-                time_since_last_like_sub = now - last_like_sub_time
+                last_like_sub_completed = self.visualizer.last_promo_completed("like_sub") if hasattr(self.visualizer, "last_promo_completed") else 0.0
+                time_since_last_like_sub = now - last_like_sub_completed
+                time_since_last_like_sub_trigger = now - last_like_sub_trigger_time
                 sub_after_turn_sec = self.cfg.promo_sub_after_turn_sec
                 sub_min_interval = self.cfg.promo_sub_min_interval_sec
                 last_event_type = getattr(self, "last_turn_event_type", "")
@@ -2325,11 +2329,15 @@ class LocalCoHostApp:
                 if (
                     time_since_turn_done <= sub_after_turn_sec
                     and time_since_last_like_sub >= sub_min_interval
+                    and time_since_last_like_sub_trigger >= 10.0
                     and last_event_type in ("chat", "superchat", "direct_mention", "cast", "greeting", "celebration")
                 ):
+                    if len(self.comment_queue) > 0:
+                        logger.debug("📣 Post-turn 'like_sub' promo skipped: comment queue has pending items.")
+                        continue
                     logger.info("📣 [Promo Trigger] Showing 'Like & Subscribe' callout after completed viewer interaction.")
                     self.visualizer.trigger_promo("like_sub")
-                    last_like_sub_time = now
+                    last_like_sub_trigger_time = now
                     # Reset turn completed time to avoid double triggering
                     self.last_turn_completed_time = 0.0
                     continue
@@ -2345,15 +2353,16 @@ class LocalCoHostApp:
                     viewers >= 1
                     and time_since_last_chat >= ask_quiet_sec
                 ):
-                    # If Like & Subscribe hasn't been shown for promo_sub_min_interval_sec and is older than last Ask Anything, alternate to Like & Subscribe
+                    # If Like & Subscribe hasn't been completed for promo_sub_min_interval_sec and is older than last Ask Anything, alternate to Like & Subscribe
                     if (
                         time_since_last_like_sub >= sub_min_interval
-                        and (last_like_sub_time <= last_ask_promo_time or time_since_last_ask < max(ask_quiet_sec, 60.0))
+                        and time_since_last_like_sub_trigger >= 10.0
+                        and (last_like_sub_completed <= last_ask_promo_time or time_since_last_ask < max(ask_quiet_sec, 60.0))
                         and time_since_last_like_sub >= max(ask_quiet_sec, 60.0)
                     ):
                         logger.info(f"📣 [Promo Trigger] Showing 'Like & Subscribe' callout during stream lull (Cooldown: {time_since_last_like_sub:.1f}s >= {sub_min_interval:.1f}s).")
                         self.visualizer.trigger_promo("like_sub")
-                        last_like_sub_time = now
+                        last_like_sub_trigger_time = now
                     elif time_since_last_ask >= max(ask_quiet_sec, 60.0):
                         logger.info(f"📣 [Promo Trigger] Showing 'Ask Anything' callout (Chat quiet for {time_since_last_chat:.1f}s >= {ask_quiet_sec:.1f}s).")
                         self.visualizer.trigger_promo("ask_god")
@@ -2372,18 +2381,6 @@ class LocalCoHostApp:
         if status:
             logger.debug(f"Audio Callback status: {status}")
         outdata[:] = self.tts.pop_local_audio(frames, volume=self.cfg.local_audio_volume)
-        # When the render worker owns the NDI sender, its audio pump is the single source of
-        # avatar metrics (same timeline as the broadcast audio). Writing here too would make two
-        # writers on two different timelines fight over the same shared-memory slot.
-        if isinstance(self.visualizer, VisualizerProxy):
-            return
-        metrics = self.tts.get_audio_metrics()
-        if hasattr(self.visualizer, "write_audio_metrics"):
-            self.visualizer.write_audio_metrics(
-                rms=metrics["rms"],
-                is_speaking=metrics["is_speaking"],
-                spectrum=metrics["spectrum"],
-            )
 
     async def stream_observability_task(self):
         """
@@ -2439,14 +2436,7 @@ class LocalCoHostApp:
             try:
                 audio_for_ndi, _ = self.tts.pop_audio_packet(packet_samples)
                 if self.ndi and self.ndi.is_open:
-                    self.ndi.send_audio_packet(audio_for_ndi.T)
-                metrics = self.tts.get_audio_metrics()
-                if hasattr(self.visualizer, "write_audio_metrics"):
-                    self.visualizer.write_audio_metrics(
-                        rms=metrics["rms"],
-                        is_speaking=metrics["is_speaking"],
-                        spectrum=metrics["spectrum"],
-                    )
+                    self.ndi.send_audio_packet(audio_for_ndi)
             except Exception as e:
                 logger.debug(f"NDI audio pump note: {e}")
 

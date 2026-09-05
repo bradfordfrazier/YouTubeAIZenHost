@@ -42,8 +42,8 @@ def test_audio_metrics_shared_memory():
     test_spectrum = np.linspace(0.1, 1.0, 32, dtype=np.float32)
     test_ts = time.time()
 
-    shm_writer.write(test_rms, test_speaking, test_spectrum, test_ts)
-    read_data = shm_reader.read()
+    shm_writer.write_metric_slot(0, test_ts, test_rms, test_speaking, test_spectrum)
+    read_data = shm_reader.read_metrics_for(test_ts + 0.001)
 
     assert abs(read_data["rms"] - test_rms) < 1e-5, f"RMS mismatch: {read_data['rms']} != {test_rms}"
     assert read_data["is_speaking"] is True, f"Speaking flag mismatch: {read_data['is_speaking']}"
@@ -136,11 +136,6 @@ async def test_async_event_loop_lag_heartbeat():
             engagement_mode="active",
             concurrent_viewers=25,
             is_stream_live=True,
-        )
-        proxy.write_audio_metrics(
-            rms=0.5,
-            is_speaking=True,
-            spectrum=np.full(32, 0.4, dtype=np.float32),
         )
 
         # 2. Heartbeat lag measurement

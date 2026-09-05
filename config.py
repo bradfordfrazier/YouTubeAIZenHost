@@ -364,6 +364,8 @@ class AppConfig:
     # Samples per NDI audio write. Larger blocks give the pump thread more slack before a CPU
     # stall becomes audible (2400 = 50 ms). Must match AudioSendFrame capacity in ndi_streamer.
     ndi_audio_block_samples: int = _get_int("NDI_AUDIO_BLOCK_SAMPLES", 2400)
+    # Latency adjustment (seconds) applied to avatar metrics play_at timestamp relative to NDI send
+    ndi_audio_metrics_latency_sec: float = _get_float("NDI_AUDIO_METRICS_LATENCY_SEC", 0.0)
     # --------------------------------------------------------------------------
     # 10. Hardware Performance Profile (Intel Core i5 / UHD 630 Graphics Optimization)
     # --------------------------------------------------------------------------

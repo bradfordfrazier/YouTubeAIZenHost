@@ -124,17 +124,18 @@ async def test_async_event_loop_lag_heartbeat():
         for i in range(30)
     ]
 
+    proxy.set_pinned({"author": "Luna", "message": "What is infinity?", "is_cast": True})
+    proxy.set_subtitle("Exploring the infinite cosmos.")
+
     t_test_end = time.perf_counter() + 3.0  # Run for 3 seconds
     while time.perf_counter() < t_test_end:
         # 1. Sync state
         proxy.sync_state(
             chat_messages=mock_chat,
-            pinned_chat_message={"author": "Luna", "message": "What is infinity?", "is_cast": True},
             obs_connected=True,
             engagement_mode="active",
             concurrent_viewers=25,
             is_stream_live=True,
-            ai_subtitle="Exploring the infinite cosmos.",
         )
         proxy.write_audio_metrics(
             rms=0.5,

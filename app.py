@@ -867,6 +867,11 @@ class LocalCoHostApp:
         else:
             self.current_pinned_chat = None
 
+        if self.current_pinned_chat:
+            self.visualizer.set_pinned(self.current_pinned_chat)
+        else:
+            self.visualizer.clear_pinned()
+
         # 1. Immediately fade out motto / previous comment to clear canvas for the upcoming turn
         self.visualizer.fade_out_for_turn()
         self.current_ai_subtitle = ""
@@ -1108,6 +1113,7 @@ class LocalCoHostApp:
                         logger.info(f"✨ [Motto Transition] {refl_delay:.1f}s post-reflection pause finished with empty queue. Transitioning to motto.")
                         self.current_pinned_chat = None
                         self.current_ai_subtitle = ""
+                        self.visualizer.clear_pinned()
                         self.visualizer.clear_subtitle()
 
                 else:
@@ -1151,6 +1157,7 @@ class LocalCoHostApp:
                         logger.info(f"✨ [Motto Transition] {max_hold:.1f}s post-speech hold finished with empty queue. Unpinning question and transitioning to motto.")
                         self.current_pinned_chat = None
                         self.current_ai_subtitle = ""
+                        self.visualizer.clear_pinned()
                         self.visualizer.clear_subtitle()
 
         except asyncio.CancelledError:
@@ -1167,6 +1174,7 @@ class LocalCoHostApp:
             if not self.comment_queue:
                 self.current_pinned_chat = None
                 self.current_ai_subtitle = ""
+                self.visualizer.clear_pinned()
                 self.visualizer.clear_subtitle()
 
     # --------------------------------------------------------------------------
@@ -2317,12 +2325,10 @@ class LocalCoHostApp:
                 # 1. Synchronize orchestrator state with dedicated render worker
                 self.visualizer.sync_state(
                     chat_messages=list(self.chat_history)[-50:],
-                    pinned_chat_message=self.current_pinned_chat,
                     obs_connected=self.obs_connected,
                     engagement_mode=self.engagement_mode,
                     concurrent_viewers=self.concurrent_viewers,
                     is_stream_live=self.is_streaming,
-                    ai_subtitle=self.current_ai_subtitle,
                 )
 
                 # 2. Check if Pygame preview window was closed

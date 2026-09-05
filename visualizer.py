@@ -661,13 +661,22 @@ class Visualizer:
                 self.ai_text_y_drift = 6.0
             self._active_pinned_message = None
 
+    def set_pinned(self, message: Optional[Dict]):
+        """Explicitly sets or updates the active pinned chat message."""
+        self._active_pinned_message = message
+
+    def clear_pinned(self):
+        """Explicitly clears the active pinned chat message."""
+        self._active_pinned_message = None
+
     def set_subtitle(self, text: str):
         """Update AI co-host speaking subtitle text with clean ethereal emergence."""
+        clean = re.sub(r"@+", "@", text).strip() if text else ""
+        logger.debug(f"✨ [Visualizer] set_subtitle called: '{clean[:40]}'")
         if getattr(self.cfg, "vox_only_mode", False):
             self.subtitle_target_text = ""
             return
 
-        clean = re.sub(r"@+", "@", text).strip() if text else ""
         if not clean or len(clean) < 4:
             self.subtitle_target_text = ""
             return
@@ -719,12 +728,12 @@ class Visualizer:
         self,
         audio_metrics: Dict,
         chat_messages: List[Dict],
-        ai_subtitle: str,
         obs_connected: bool = True,
         engagement_mode: str = "active",
         concurrent_viewers: int = 0,
         is_stream_live: bool = True,
         pinned_chat_message: Optional[Dict] = None,
+        ai_subtitle: Optional[str] = None,
     ) -> bytes:
         """
         Renders a full 1080p60 frame and returns the RGBA byte buffer.
@@ -732,7 +741,8 @@ class Visualizer:
         dt = 1.0 / self.fps
         self.time_elapsed += dt
         self._update_palette_lerp(dt)
-        self.set_subtitle(ai_subtitle)
+        if ai_subtitle is not None:
+            self.set_subtitle(ai_subtitle)
 
         # Extract audio metrics
         rms = audio_metrics.get("rms", 0.0)

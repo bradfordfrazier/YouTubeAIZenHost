@@ -339,11 +339,9 @@ def render_worker_main(
     )
     audio_pump_thread.start()
 
-    # Local state mirror
+    # Local state mirror (SYNC_STATE is only broadcast telemetry & chat feed)
     state = {
         "chat_messages": [],
-        "pinned_chat_message": None,
-        "ai_subtitle": "",
         "obs_connected": True,
         "engagement_mode": "active",
         "concurrent_viewers": 0,
@@ -374,7 +372,10 @@ def render_worker_main(
                     visualizer.set_mood(arg)
                 elif cmd == "SET_SUBTITLE":
                     visualizer.set_subtitle(arg)
-                    state["ai_subtitle"] = arg
+                elif cmd == "SET_PINNED":
+                    visualizer.set_pinned(arg)
+                elif cmd == "CLEAR_PINNED":
+                    visualizer.clear_pinned()
                 elif cmd == "FADE_OUT_FOR_TURN":
                     visualizer.fade_out_for_turn()
                 elif cmd == "FADE_OUT_QUESTION":
@@ -410,16 +411,15 @@ def render_worker_main(
             # 3. Read live audio metrics from shared memory for EQ/particle reactivity
             audio_metrics = shm.read()
 
-            # 4. Render high-res 1080p60 frame
+            # 4. Render high-res 1080p60 frame (subtitle & pinned question owned exclusively by visualizer)
             rgba_bytes = visualizer.render_frame(
                 audio_metrics=audio_metrics,
                 chat_messages=state["chat_messages"],
-                ai_subtitle=state["ai_subtitle"],
                 obs_connected=state["obs_connected"],
                 engagement_mode=state["engagement_mode"],
                 concurrent_viewers=state["concurrent_viewers"],
                 is_stream_live=state["is_stream_live"],
-                pinned_chat_message=state["pinned_chat_message"],
+                pinned_chat_message=visualizer._active_pinned_message,
             )
 
             # 5. Transmit video frame asynchronously over NDI (audio is clocked independently in ndi_audio_pump)
@@ -568,6 +568,16 @@ class VisualizerProxy:
         self.ai_text_target = text
         self._send_cmd("SET_SUBTITLE", text)
 
+    def set_pinned(self, message: Optional[Dict]):
+        """Updates the active pinned chat question."""
+        self.current_pinned = message
+        self._send_cmd("SET_PINNED", message)
+
+    def clear_pinned(self):
+        """Clears the active pinned chat question."""
+        self.current_pinned = None
+        self._send_cmd("CLEAR_PINNED", None)
+
     def fade_out_for_turn(self):
         """Initiates smooth fade-out for speech turn canvas preparation."""
         self.ai_text_state = "fade_out"
@@ -594,12 +604,10 @@ class VisualizerProxy:
     def sync_state(
         self,
         chat_messages: List[Dict],
-        pinned_chat_message: Optional[Dict] = None,
         obs_connected: bool = True,
         engagement_mode: str = "active",
         concurrent_viewers: int = 0,
         is_stream_live: bool = True,
-        ai_subtitle: str = "",
     ):
         """Synchronizes orchestrator state with the rendering process if changed."""
         msgs = list(chat_messages)[-50:]
@@ -608,14 +616,9 @@ class VisualizerProxy:
             last = msgs[-1]
             last_msg_id = last.get("id") or hash((last.get("author", ""), last.get("message", ""), last.get("timestamp", 0)))
 
-        pinned_id = None
-        if pinned_chat_message and isinstance(pinned_chat_message, dict):
-            pinned_id = pinned_chat_message.get("id") or hash((pinned_chat_message.get("author", ""), pinned_chat_message.get("message", "")))
-
         fp = (
             len(msgs),
             last_msg_id,
-            pinned_id,
             engagement_mode,
             concurrent_viewers,
             is_stream_live,
@@ -627,12 +630,10 @@ class VisualizerProxy:
 
         state_dict = {
             "chat_messages": msgs,
-            "pinned_chat_message": pinned_chat_message,
             "obs_connected": obs_connected,
             "engagement_mode": engagement_mode,
             "concurrent_viewers": concurrent_viewers,
             "is_stream_live": is_stream_live,
-            "ai_subtitle": ai_subtitle,
         }
 
         try:
@@ -703,12 +704,12 @@ def run_audio_selftest():
 
     # Simultaneously hammer the visualizer with state updates and full render load
     for i in range(30):
+        proxy.set_subtitle(f"Audio self-test active rendering load frame iteration {i}")
         proxy.sync_state(
             chat_messages=[
                 {"author": f"User_{j}", "message": f"Stress load message #{j} with particles and glow"}
                 for j in range(20)
             ],
-            ai_subtitle=f"Audio self-test active rendering load frame iteration {i}",
         )
         time.sleep(0.03)
 

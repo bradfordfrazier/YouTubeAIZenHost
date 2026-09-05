@@ -69,6 +69,7 @@ class TTSEngine:
         self.last_synthesized_duration: float = 0.0
 
         # Dual independent sample buffers for NDI and Local Windows Audio
+        self.ndi_buffer_enabled: bool = True
         self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
         self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
         self._last_ndi_pop_time = 0.0
@@ -299,20 +300,23 @@ class TTSEngine:
         return self.remaining_speech_duration
 
     def begin_utterance(self):
-        """Begins a new utterance turn, resetting sample counters and marking utterance as open."""
+        """Marks the start of a new conversational turn or multi-sentence sequence."""
         with self._buffer_lock:
             self._utterance_total_samples = 0
-            self._utterance_open = True
             self._utterance_chunk_count = 0
             self._first_push_time = 0.0
+            self._utterance_open = True
+            self.is_speaking = True
 
     def end_utterance(self):
-        """Marks current utterance as closed so wait_until_speech_completed resolves after buffers drain."""
+        """Marks that all sentences for the active turn have been synthesized and pushed."""
         with self._buffer_lock:
             self._utterance_open = False
+            if self._utterance_total_samples == 0:
+                self.is_speaking = False
 
     def clear_audio_buffer(self):
-        """Immediately flushes all queued speech samples, resets speaking state, and closes utterance."""
+        """Immediately purges all pending audio queues on turn interruption or barge-in."""
         with self._buffer_lock:
             self._audio_buffer_ndi = np.zeros((0, 2), dtype=np.float32)
             self._audio_buffer_local = np.zeros((0, 2), dtype=np.float32)
@@ -335,18 +339,22 @@ class TTSEngine:
             now = time.time()
             with self._buffer_lock:
                 utterance_open = self._utterance_open
-                ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0
+                ndi_active = (now - getattr(self, "_last_ndi_pop_time", 0.0)) < 1.0 and self.ndi_buffer_enabled
                 local_active = (now - getattr(self, "_last_local_pop_time", 0.0)) < 1.0
 
                 buf_len_ndi = len(self._audio_buffer_ndi) if ndi_active else 0
                 buf_len_local = len(self._audio_buffer_local) if local_active else 0
 
-                # If neither backend is actively popping (e.g. standalone test harness or headless run),
+                # If neither backend is actively popping (e.g. proxy NDI mode or standalone test harness),
                 # elapsed time matching expected duration means playback is complete
                 if not ndi_active and not local_active:
                     expected_dur = self._utterance_total_samples / self.sample_rate if self._utterance_total_samples > 0 else getattr(self, "last_synthesized_duration", 0.0)
                     elapsed = now - (self._first_push_time or t0)
                     is_drained = (elapsed >= expected_dur)
+                elif not ndi_active and local_active:
+                    is_drained = (buf_len_local == 0)
+                elif ndi_active and not local_active:
+                    is_drained = (buf_len_ndi == 0)
                 else:
                     is_drained = (buf_len_ndi == 0 and buf_len_local == 0)
 
@@ -397,7 +405,7 @@ class TTSEngine:
 
         with self._buffer_lock:
             is_first_chunk = (self._utterance_chunk_count == 0)
-            buffer_empty = (len(self._audio_buffer_ndi) == 0)
+            buffer_empty = (len(self._audio_buffer_ndi) == 0) if self.ndi_buffer_enabled else (len(self._audio_buffer_local) == 0)
 
             # Apply 5ms linear fade-in to chunk head (skip for first chunk into empty buffer for crisp onset)
             if fade_samples > 0 and not (is_first_chunk and buffer_empty):
@@ -419,13 +427,15 @@ class TTSEngine:
             self._utterance_chunk_count += 1
             self._utterance_total_samples += len(audio)
 
-            self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
+            if self.ndi_buffer_enabled:
+                self._audio_buffer_ndi = np.vstack((self._audio_buffer_ndi, audio))
             self._audio_buffer_local = np.vstack((self._audio_buffer_local, audio))
             self.is_speaking = True
 
+            total_buf_sec = (len(self._audio_buffer_ndi) if self.ndi_buffer_enabled else len(self._audio_buffer_local)) / self.sample_rate
             logger.info(
                 f"Queued {dur:.2f}s pre-synthesized audio "
-                f"(chunk #{self._utterance_chunk_count}, total buffered: {len(self._audio_buffer_ndi)/self.sample_rate:.2f}s)"
+                f"(chunk #{self._utterance_chunk_count}, total buffered: {total_buf_sec:.2f}s)"
             )
 
     def pop_audio_packet(self, num_samples: int = 800) -> Tuple[np.ndarray, np.ndarray]:

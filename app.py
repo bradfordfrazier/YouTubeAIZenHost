@@ -427,6 +427,8 @@ class LocalCoHostApp:
         self.brain = AIBrain()
         self.tts = TTSEngine()
         self.visualizer = VisualizerProxy()
+        if isinstance(self.visualizer, VisualizerProxy):
+            self.tts.ndi_buffer_enabled = False
         self.ndi = NDIStreamer()
         self.session_log = SessionLogger.get_instance(log_dir=self.cfg.session_log_dir) if getattr(self.cfg, "session_logging_enabled", True) else None
         self.cast = CastEngine()
@@ -953,7 +955,53 @@ class LocalCoHostApp:
                 )
                 await self.tts.wait_until_speech_completed()
             else:
-                # 3. Stream from Gemini AI Brain
+                # 3. Stream from Gemini AI Brain with sentence pipelining (Phase 2.4)
+                sentence_queue: asyncio.Queue = asyncio.Queue()
+
+                async def _tts_consumer():
+                    nonlocal pushed_chunks, first_audio_ts, active_mood
+                    self.tts.begin_utterance()
+                    while True:
+                        item = await sentence_queue.get()
+                        if item is None:
+                            sentence_queue.task_done()
+                            break
+                        sent_text, sent_mood = item
+                        try:
+                            s_audio = await self.tts.synthesize(sent_text, mood=sent_mood)
+                        except TypeError:
+                            s_audio = await self.tts.synthesize(sent_text)
+
+                        if s_audio is not None and len(s_audio) > 0:
+                            if first_audio_ts is None:
+                                first_audio_ts = time.perf_counter()
+                                # Question display hold before pushing first audio chunk
+                                if question_text and min_time_before_fade_out > 0:
+                                    elapsed = time.perf_counter() - t_question_shown
+                                    remaining_hold = min_time_before_fade_out - elapsed
+                                    if remaining_hold > 0.05:
+                                        logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
+                                        await asyncio.sleep(remaining_hold)
+
+                                is_vox_only = getattr(self.cfg, "vox_only_mode", False)
+                                if question_text:
+                                    if is_vox_only:
+                                        logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
+                                    elif hasattr(self.visualizer, "fade_out_question"):
+                                        self.visualizer.fade_out_question()
+                                        if q_fade_out_sec > 0:
+                                            logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
+                                            await asyncio.sleep(q_fade_out_sec)
+
+                            self.tts.push_audio(s_audio)
+                            if hasattr(self.visualizer, "push_audio_samples"):
+                                self.visualizer.push_audio_samples(s_audio)
+                            pushed_chunks += 1
+                        sentence_queue.task_done()
+                    self.tts.end_utterance()
+
+                consumer_task = asyncio.create_task(_tts_consumer())
+
                 async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
                     ev_type = chunk_ev.get("type", "")
                     if ev_type == "mood":
@@ -965,48 +1013,40 @@ class LocalCoHostApp:
                     elif ev_type == "sentence":
                         if first_sentence_ts is None:
                             first_sentence_ts = time.perf_counter()
+                        sent = chunk_ev.get("sentence", "").strip()
+                        sent_mood = chunk_ev.get("mood", active_mood)
+                        if sent:
+                            clean_sent = re.sub(r"@+", "@", sent).strip()
+                            await sentence_queue.put((clean_sent, sent_mood))
                     elif ev_type == "complete":
                         full_statement = chunk_ev.get("full_text", "").strip()
                         active_mood = chunk_ev.get("mood", active_mood)
                         is_completed = True
 
+                await sentence_queue.put(None)
+                await consumer_task
+
                 clean_speech = re.sub(r"@+", "@", full_statement).strip()
 
-                if is_completed and clean_speech:
-                    # 4. Synthesize complete statement (guarantees seamless audio buffer without mid-sentence dropouts)
+                # Fallback: if no sentences were produced but full statement exists
+                if pushed_chunks == 0 and is_completed and clean_speech:
                     try:
                         s_audio = await self.tts.synthesize(clean_speech, mood=active_mood)
                     except TypeError:
                         s_audio = await self.tts.synthesize(clean_speech)
 
                     if s_audio is not None and len(s_audio) > 0:
-                        # Question display hold before pushing audio
-                        if question_text and min_time_before_fade_out > 0:
-                            elapsed = time.perf_counter() - t_question_shown
-                            remaining_hold = min_time_before_fade_out - elapsed
-                            if remaining_hold > 0.05:
-                                logger.info(f"⏳ [Question Display] Holding question for {remaining_hold:.2f}s to satisfy reading duration ({min_display_hold_sec:.2f}s hold target)...")
-                                await asyncio.sleep(remaining_hold)
-
-                        is_vox_only = getattr(self.cfg, "vox_only_mode", False)
-                        if question_text:
-                            if is_vox_only:
-                                logger.info("🎙️ [VOX_ONLY Mode] Keeping active chat question steadily displayed during speech playback.")
-                            elif hasattr(self.visualizer, "fade_out_question"):
-                                self.visualizer.fade_out_question()
-                                if q_fade_out_sec > 0:
-                                    logger.info(f"✨ [Question Fade Out] Dissolving question preview ({q_fade_out_sec:.2f}s)...")
-                                    await asyncio.sleep(q_fade_out_sec)
-
+                        if first_audio_ts is None:
+                            first_audio_ts = time.perf_counter()
                         self.tts.begin_utterance()
-                        first_audio_ts = time.perf_counter()
                         self.tts.push_audio(s_audio)
                         if hasattr(self.visualizer, "push_audio_samples"):
                             self.visualizer.push_audio_samples(s_audio)
                         self.tts.end_utterance()
                         pushed_chunks = 1
 
-                        await self.tts.wait_until_speech_completed()
+                if pushed_chunks > 0:
+                    await self.tts.wait_until_speech_completed()
 
             if pushed_chunks > 0 and clean_speech:
                 t_total = time.perf_counter() - t_start
@@ -2240,15 +2280,15 @@ class LocalCoHostApp:
         if isinstance(self.visualizer, VisualizerProxy):
             return
 
-        packet_samples = 480
-        target_interval = packet_samples / 48000.0  # 0.010 s
+        packet_samples = 800
+        target_interval = packet_samples / 48000.0  # ~0.01667 s
         t_next = time.perf_counter()
 
         while self.running and self.ndi_audio_running:
             try:
                 audio_for_ndi, _ = self.tts.pop_audio_packet(packet_samples)
                 if self.ndi and self.ndi.is_open:
-                    self.ndi.send_audio(audio_for_ndi)
+                    self.ndi.send_audio_packet(audio_for_ndi.T)
                 metrics = self.tts.get_audio_metrics()
                 if hasattr(self.visualizer, "write_audio_metrics"):
                     self.visualizer.write_audio_metrics(
@@ -2292,15 +2332,6 @@ class LocalCoHostApp:
                     is_stream_live=self.is_streaming,
                     ai_subtitle=self.current_ai_subtitle,
                 )
-
-                # 1b. Write audio metrics into shared memory for the render worker
-                metrics = self.tts.get_audio_metrics()
-                if hasattr(self.visualizer, "write_audio_metrics"):
-                    self.visualizer.write_audio_metrics(
-                        rms=metrics.get("rms", 0.0),
-                        is_speaking=metrics.get("is_speaking", False),
-                        spectrum=metrics.get("spectrum"),
-                    )
 
                 # 2. Check if Pygame preview window was closed
                 if getattr(self.visualizer, "should_quit", False):

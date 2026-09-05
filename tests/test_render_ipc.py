@@ -103,3 +103,55 @@ def test_shared_memory_long_reflection_audio_no_cutoff():
     shm_w.close()
     shm_w.unlink()
 
+
+def test_spsc_ring_buffer_concurrency():
+    """Verifies that concurrent single-producer single-consumer read/write streams without sample loss."""
+    import threading
+    from render_worker import RING_BUFFER_FRAMES
+    import struct
+
+    shm_w = AudioMetricsSharedMemory(name="pytest_spsc_concur_shm", create=True)
+    shm_r = AudioMetricsSharedMemory(name="pytest_spsc_concur_shm", create=False)
+
+    # 3.0 seconds of audio streamed in 800-sample chunks (180 chunks)
+    total_chunks = 180
+    chunk_samples = 800
+    test_data = np.random.uniform(-0.5, 0.5, (total_chunks * chunk_samples, 2)).astype(np.float32)
+
+    collected = []
+    stop_event = threading.Event()
+
+    def _reader_thread():
+        while len(collected) < total_chunks and not stop_event.is_set():
+            buf = shm_r.shm.buf
+            r_pos = struct.unpack_from("=I", buf, 148)[0]
+            w_pos = struct.unpack_from("=I", buf, 144)[0]
+            avail = (w_pos - r_pos) % RING_BUFFER_FRAMES
+            if avail >= chunk_samples:
+                chunk = shm_r.read_audio_samples(chunk_samples)
+                collected.append(chunk)
+            else:
+                time.sleep(0.0005)
+
+    thread = threading.Thread(target=_reader_thread)
+    thread.start()
+
+    # Writer streams chunks
+    for i in range(total_chunks):
+        chunk = test_data[i * chunk_samples : (i + 1) * chunk_samples]
+        shm_w.write_audio_samples(chunk)
+        time.sleep(0.001)
+
+    thread.join(timeout=5.0)
+    stop_event.set()
+    assert len(collected) == total_chunks
+
+    reconstructed = np.vstack(collected)
+    assert np.allclose(test_data, reconstructed, atol=1e-6)
+
+    shm_r.close()
+    shm_w.close()
+    shm_w.unlink()
+
+
+

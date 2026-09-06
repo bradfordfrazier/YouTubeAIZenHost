@@ -247,6 +247,9 @@ class AIBrain:
 
         # Regex for mood tags like [MOOD: hyped] or [MOOD: energetic]
         self.mood_pattern = re.compile(r"\[MOOD:\s*([a-zA-Z_-]+)\]", re.IGNORECASE)
+        # Comedic beat marker. The model places [BEAT] immediately before a punchline; the TTS
+        # layer turns it into a longer pause (tts_beat_gap_sec) instead of the normal sentence gap.
+        self.beat_pattern = re.compile(r"\[\s*BEAT\s*\]", re.IGNORECASE)
 
         # Sentence ender pattern for incremental TTS delivery
         self.sentence_pattern = re.compile(r"([^.!?]+[.!?]+)")
@@ -889,6 +892,12 @@ class AIBrain:
                 "5. ALWAYS start with an expressive MOOD tag matching your tone: "
                 "[MOOD: transcendent], [MOOD: mysterious], [MOOD: thoughtful], [MOOD: deadpan], [MOOD: snarky], [MOOD: hyped], [MOOD: laughing], [MOOD: savage] (for ego-judo on joke questions), [MOOD: chill], [MOOD: curious], [MOOD: shocked], or [MOOD: neutral].\n"
             )
+            prompt_parts.append(
+                "\nCOMEDIC TIMING: When your final sentence is a punchline or a turn, write the token [BEAT] "
+                "immediately before it (e.g. 'You asked the universe for a sign. [BEAT] It sent you a buffering icon.'). "
+                "[BEAT] becomes a real pause in your voice, so use it at most once per reply and never when there is "
+                "no punchline. It may also sit mid-sentence right before the twist."
+            )
             if override_prompt:
                 prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
             else:
@@ -905,9 +914,9 @@ class AIBrain:
             return mood, clean_text
         return "neutral", text.strip()
 
-    def _extract_completed_sentences(self, buffer: str) -> Tuple[List[str], str]:
+    def _split_piece(self, buffer: str) -> Tuple[List[str], str]:
         """
-        Splits streaming buffer into (completed_sentences, remaining_buffer).
+        Splits a beat-free streaming buffer into (completed_sentences, remaining_buffer).
         Guarantees:
         - Never splits on abbreviations (e.g. Dr., Mr., vs., etc.).
         - Never splits on decimals (e.g. 3.14).
@@ -945,6 +954,46 @@ class AIBrain:
         remaining = buffer[current_pos:]
         return sentences, remaining
 
+    def _extract_completed_sentences(self, buffer: str) -> Tuple[List[Tuple[str, bool]], str]:
+        """
+        Beat-aware sentence extraction for the streaming TTS pipeline.
+
+        Returns (sentences, remaining_buffer) where each sentence is (text, beat_before).
+        [BEAT] is a hard boundary: whatever precedes it is flushed as its own chunk (even
+        without terminal punctuation — that pause is the point), and the chunk that follows
+        is flagged beat_before=True so the TTS layer inserts the longer comedic pause.
+        A trailing [BEAT] with nothing after it yet is kept in the remaining buffer so the
+        flag survives until the punchline tokens arrive.
+        """
+        if not buffer:
+            return [], ""
+
+        pieces = self.beat_pattern.split(buffer)
+        results: List[Tuple[str, bool]] = []
+        pending_beat = False
+        remaining = ""
+
+        for i, piece in enumerate(pieces):
+            is_last = (i == len(pieces) - 1)
+            sents, rem = self._split_piece(piece)
+            for s_text in sents:
+                results.append((s_text, pending_beat))
+                pending_beat = False
+
+            if is_last:
+                remaining = rem
+                if pending_beat:
+                    # Nothing after the beat yet: re-emit the marker so it is seen next time.
+                    remaining = "[BEAT] " + remaining
+            else:
+                # Piece is closed by a following [BEAT]: flush the fragment before the pause.
+                frag = re.sub(r"@+", "@", rem).strip()
+                if frag:
+                    results.append((frag, pending_beat))
+                pending_beat = True
+
+        return results, remaining
+
     async def generate_response_stream(
         self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False
     ) -> AsyncGenerator[Dict, None]:
@@ -964,9 +1013,9 @@ class AIBrain:
                 # Yield sentence chunks for cached reflection if multi-sentence
                 c_sents, _ = self._extract_completed_sentences(cached.full_text + " ")
                 if not c_sents:
-                    c_sents = [cached.full_text]
-                for s in c_sents:
-                    yield {"type": "sentence", "text": s, "mood": cached.mood}
+                    c_sents = [(self.beat_pattern.sub("", cached.full_text).strip(), False)]
+                for s_text, s_beat in c_sents:
+                    yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": cached.mood}
                 yield {"type": "token", "chunk": cached.full_text, "full_text": cached.full_text, "mood": cached.mood}
                 yield {"type": "complete", "full_text": cached.full_text, "mood": cached.mood, "is_precomputed": True}
                 return
@@ -1052,6 +1101,7 @@ class AIBrain:
                         sentence_buffer += text_piece
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                    clean_spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", clean_spoken)).strip()
                     clean_spoken = re.sub(r"@+", "@", clean_spoken)
                     if not mood_detected and clean_spoken.startswith("[") and "]" not in clean_spoken:
                         clean_spoken = ""
@@ -1065,8 +1115,8 @@ class AIBrain:
                     # Check for complete sentences only after mood is resolved
                     if mood_detected and sentence_buffer:
                         completed_sents, sentence_buffer = self._extract_completed_sentences(sentence_buffer)
-                        for s in completed_sents:
-                            yield {"type": "sentence", "text": s, "mood": active_mood}
+                        for s_text, s_beat in completed_sents:
+                            yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": active_mood}
 
                     await asyncio.sleep(0.001)
 
@@ -1092,6 +1142,7 @@ class AIBrain:
                         sentence_buffer += text_piece
 
                     clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                    clean_spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", clean_spoken)).strip()
                     clean_spoken = re.sub(r"@+", "@", clean_spoken)
                     yield {
                         "type": "token",
@@ -1102,23 +1153,26 @@ class AIBrain:
 
                     if mood_detected and sentence_buffer:
                         completed_sents, sentence_buffer = self._extract_completed_sentences(sentence_buffer)
-                        for s in completed_sents:
-                            yield {"type": "sentence", "text": s, "mood": active_mood}
+                        for s_text, s_beat in completed_sents:
+                            yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": active_mood}
 
                     await asyncio.sleep(0.005)
 
             # Flush and repair remaining sentence buffer
             final_spoken = self.mood_pattern.sub("", accumulated_text).strip()
-            final_spoken = re.sub(r"@+", "@", final_spoken)
+            final_spoken = self.beat_pattern.sub(" ", final_spoken)
+            final_spoken = re.sub(r"\s{2,}", " ", re.sub(r"@+", "@", final_spoken)).strip()
 
             rem = sentence_buffer.strip()
             if rem:
+                tail_beat = bool(self.beat_pattern.match(rem))
+                rem = self.beat_pattern.sub("", rem).strip()
                 rem_words = rem.split()
                 if len(rem_words) >= 3 and len(rem) >= 12:
                     if rem[-1] not in ".!?\"'”’)":
                         rem += "."
                         logger.warning(f"Repairing incomplete sentence fragment by appending period: '{rem}'")
-                    yield {"type": "sentence", "text": re.sub(r"@+", "@", rem), "mood": active_mood}
+                    yield {"type": "sentence", "text": re.sub(r"@+", "@", rem), "beat_before": tail_beat, "mood": active_mood}
 
             words = final_spoken.split()
             is_valid = bool(final_spoken and len(words) >= 3 and len(final_spoken) >= 12)
@@ -1212,9 +1266,9 @@ class AIBrain:
         # Chunk simulation text into sentences
         sim_sents, _ = self._extract_completed_sentences(text + " ")
         if not sim_sents:
-            sim_sents = [text]
-        for s in sim_sents:
-            yield {"type": "sentence", "text": s, "mood": mood}
+            sim_sents = [(text, False)]
+        for s_text, s_beat in sim_sents:
+            yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": mood}
 
         yield {"type": "complete", "full_text": text, "mood": mood}
         now_ts = time.time()

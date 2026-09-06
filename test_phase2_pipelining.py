@@ -54,22 +54,22 @@ def test_sentence_splitter_and_repair():
     sents, rem = brain._extract_completed_sentences(sample_text + " ")
     print(f"-> Extracted sentences from decimal/abbrev text: {sents}")
     assert len(sents) == 2, f"Expected 2 sentences, got {len(sents)}: {sents}"
-    assert "3.14" in sents[0] and "Dr. Smith" in sents[0] and "vs." in sents[0]
-    assert sents[1] == "Notice how your mind calculates that."
+    assert "3.14" in sents[0][0] and "Dr. Smith" in sents[0][0] and "vs." in sents[0][0]
+    assert sents[1][0] == "Notice how your mind calculates that."
 
     # Case B: Ellipsis safety ("Wait... what?")
     ellipsis_text = "Wait... what did you think was happening? Everything is already complete."
     sents_e, rem_e = brain._extract_completed_sentences(ellipsis_text + " ")
     print(f"-> Extracted sentences from ellipsis text: {sents_e}")
     assert len(sents_e) == 2, f"Expected 2 sentences, got {len(sents_e)}: {sents_e}"
-    assert sents_e[1] == "Everything is already complete."
+    assert sents_e[1][0] == "Everything is already complete."
 
     # Case C: Short fragment guard (minimum 3 words & 12 chars)
     short_text = "No. Yes. @Neo, this is the actual first valid sentence of the transmission."
     sents_s, rem_s = brain._extract_completed_sentences(short_text + " ")
     print(f"-> Extracted sentences with short fragment merge: {sents_s}")
     assert len(sents_s) == 1, f"Expected 1 merged sentence, got {len(sents_s)}: {sents_s}"
-    assert "No. Yes. @Neo" in sents_s[0]
+    assert "No. Yes. @Neo" in sents_s[0][0]
 
     print("[PASS] Sentence splitter guards verified!")
 

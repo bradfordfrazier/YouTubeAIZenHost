@@ -31,8 +31,12 @@ def test_ctrl_queue_never_drops_during_worker_stall():
             proxy.set_mood(m)
             sent_moods.append(m)
 
-        # Wait for worker to finish stall and process the queue
-        time.sleep(3.5)
+        # Wait for worker to finish startup, stall, and process the queue
+        t_end = time.time() + 6.0
+        while time.time() < t_end:
+            if proxy.ctrl_queue.empty() or proxy.ctrl_queue.qsize() < 20:
+                break
+            time.sleep(0.2)
 
         # Confirm proxy's tracking of current mood matches the 20th sent command
         assert proxy.current_mood == sent_moods[-1]

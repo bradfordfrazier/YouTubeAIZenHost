@@ -22,7 +22,7 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -968,7 +968,7 @@ class LocalCoHostApp:
             else:
                 # 3. Stream from Gemini AI Brain with sentence pipelining & adaptive lead buffer (Phase 2.4 & Underrun Fix)
                 sentence_queue: asyncio.Queue = asyncio.Queue()
-                buffered_synthesized_chunks: List[np.ndarray] = []
+                buffered_synthesized_chunks: List[Tuple[np.ndarray, bool]] = []  # (audio, beat_before)
                 first_push_done = False
                 pending_queue_chars = 0
 
@@ -992,7 +992,7 @@ class LocalCoHostApp:
                         else:
                             hold_tick = False
                         if item is not None:
-                            sent_text, sent_mood = item
+                            sent_text, sent_mood, sent_beat = item
                             pending_queue_chars = max(0, pending_queue_chars - len(sent_text))
                             self.turn_phase = "synth"
                             s_audio = await self.tts.synthesize(
@@ -1002,15 +1002,15 @@ class LocalCoHostApp:
                             if s_audio is not None and len(s_audio) > 0:
                                 if first_push_done:
                                     # Subsequent chunks push immediately as they finish
-                                    self.tts.push_audio(s_audio)
+                                    self.tts.push_audio(s_audio, beat_before=sent_beat)
                                     pushed_chunks += 1
                                 else:
-                                    buffered_synthesized_chunks.append(s_audio)
+                                    buffered_synthesized_chunks.append((s_audio, sent_beat))
 
                         # Check adaptive lead buffer start condition
                         if not first_push_done:
                             self.turn_phase = "lead_gate"
-                            buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
+                            buffered_audio_sec = sum(len(c) for c, _ in buffered_synthesized_chunks) / self.tts.sample_rate
 
                             # Calculate pending characters in queue using producer-maintained counter
                             queue_chars = pending_queue_chars
@@ -1043,8 +1043,8 @@ class LocalCoHostApp:
                                     logger.info("🎙️ Keeping active chat question steadily displayed in center comment card during speech playback.")
 
                                 self.turn_phase = "push"
-                                for chunk in buffered_synthesized_chunks:
-                                    self.tts.push_audio(chunk)
+                                for chunk, chunk_beat in buffered_synthesized_chunks:
+                                    self.tts.push_audio(chunk, beat_before=chunk_beat)
                                     pushed_chunks += 1
                                 buffered_synthesized_chunks.clear()
                                 first_push_done = True
@@ -1054,13 +1054,13 @@ class LocalCoHostApp:
                         if item is None:
                             # Final drain check on sentinel
                             if not first_push_done and len(buffered_synthesized_chunks) > 0:
-                                buffered_audio_sec = sum(len(c) for c in buffered_synthesized_chunks) / self.tts.sample_rate
+                                buffered_audio_sec = sum(len(c) for c, _ in buffered_synthesized_chunks) / self.tts.sample_rate
                                 logger.info(f"[TTS LEAD] starting playback on turn completion with {buffered_audio_sec:.1f}s buffered")
                                 self.tts.begin_utterance()
                                 if first_audio_ts is None:
                                     first_audio_ts = time.perf_counter()
-                                for chunk in buffered_synthesized_chunks:
-                                    self.tts.push_audio(chunk)
+                                for chunk, chunk_beat in buffered_synthesized_chunks:
+                                    self.tts.push_audio(chunk, beat_before=chunk_beat)
                                     pushed_chunks += 1
                                 buffered_synthesized_chunks.clear()
                                 first_push_done = True
@@ -1086,12 +1086,14 @@ class LocalCoHostApp:
                     elif ev_type == "sentence":
                         if first_sentence_ts is None:
                             first_sentence_ts = time.perf_counter()
-                        sent = chunk_ev.get("sentence", "").strip()
+                        # Brain yields the sentence under "text" (older builds used "sentence").
+                        sent = (chunk_ev.get("text") or chunk_ev.get("sentence") or "").strip()
                         sent_mood = chunk_ev.get("mood", active_mood)
+                        sent_beat = bool(chunk_ev.get("beat_before", False))
                         if sent:
                             clean_sent = re.sub(r"@+", "@", sent).strip()
                             pending_queue_chars += len(clean_sent)
-                            await sentence_queue.put((clean_sent, sent_mood))
+                            await sentence_queue.put((clean_sent, sent_mood, sent_beat))
                     elif ev_type == "complete":
                         full_statement = chunk_ev.get("full_text", "").strip()
                         active_mood = chunk_ev.get("mood", active_mood)

@@ -197,6 +197,8 @@ class AppConfig:
     tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 4.0)
     tts_request_timeout_ceiling: float = _get_float("TTS_REQUEST_TIMEOUT_CEILING", 30.0)
     inter_sentence_gap_sec: float = _get_float("INTER_SENTENCE_GAP_SEC", 0.15)
+    # Longer pause inserted where the model wrote [BEAT] (right before a punchline)
+    tts_beat_gap_sec: float = _get_float("TTS_BEAT_GAP_SEC", 0.55)
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)

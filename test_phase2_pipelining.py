@@ -51,7 +51,7 @@ def test_sentence_splitter_and_repair():
 
     # Case A: Decimal safety (3.14) & Abbreviation safety (Dr. Smith, vs.)
     sample_text = "@CosmicVoyager, Dr. Smith says 3.14 is pi vs. 2.71 for e. Notice how your mind calculates that."
-    sents, rem = brain._extract_completed_sentences(sample_text + " ")
+    sents, rem, _ = brain._extract_completed_sentences(sample_text + " ")
     print(f"-> Extracted sentences from decimal/abbrev text: {sents}")
     assert len(sents) == 2, f"Expected 2 sentences, got {len(sents)}: {sents}"
     assert "3.14" in sents[0][0] and "Dr. Smith" in sents[0][0] and "vs." in sents[0][0]
@@ -59,14 +59,14 @@ def test_sentence_splitter_and_repair():
 
     # Case B: Ellipsis safety ("Wait... what?")
     ellipsis_text = "Wait... what did you think was happening? Everything is already complete."
-    sents_e, rem_e = brain._extract_completed_sentences(ellipsis_text + " ")
+    sents_e, rem_e, _ = brain._extract_completed_sentences(ellipsis_text + " ")
     print(f"-> Extracted sentences from ellipsis text: {sents_e}")
     assert len(sents_e) == 2, f"Expected 2 sentences, got {len(sents_e)}: {sents_e}"
     assert sents_e[1][0] == "Everything is already complete."
 
     # Case C: Short fragment guard (minimum 3 words & 12 chars)
     short_text = "No. Yes. @Neo, this is the actual first valid sentence of the transmission."
-    sents_s, rem_s = brain._extract_completed_sentences(short_text + " ")
+    sents_s, rem_s, _ = brain._extract_completed_sentences(short_text + " ")
     print(f"-> Extracted sentences with short fragment merge: {sents_s}")
     assert len(sents_s) == 1, f"Expected 1 merged sentence, got {len(sents_s)}: {sents_s}"
     assert "No. Yes. @Neo" in sents_s[0][0]
@@ -101,7 +101,7 @@ async def test_audio_chunk_crossfades_and_silence():
     # First chunk into empty buffer should NOT have head fade (crisp onset), but tail has 5ms fade
     # Check tail 5 samples: should fade towards 0
     with tts._buffer_lock:
-        buf1 = tts._audio_buffer_ndi.copy()
+        buf1 = np.vstack([item[0][item[1]:] for item in tts._audio_buffer_ndi])
     assert np.all(np.abs(buf1[-5:]) < 0.05), "Expected chunk 1 tail to fade out smoothly"
 
     # Push chunk 2 (should prepend 0.15s gap silence and apply head + tail fades)
@@ -110,7 +110,7 @@ async def test_audio_chunk_crossfades_and_silence():
     gap_samples = int(sr * 0.15)
     # The gap silence region in the buffer between chunk 1 and chunk 2 should be exactly zeros
     with tts._buffer_lock:
-        buf2 = tts._audio_buffer_ndi.copy()
+        buf2 = np.vstack([item[0][item[1]:] for item in tts._audio_buffer_ndi])
     chunk1_len = len(raw_tone1)
     gap_region = buf2[chunk1_len : chunk1_len + gap_samples]
     assert np.all(gap_region == 0.0), f"Expected gap silence of {gap_samples} samples, got max {np.max(np.abs(gap_region))}"
@@ -124,9 +124,9 @@ async def test_audio_chunk_crossfades_and_silence():
 
     # Total duration should be 3 * 1.0s + 2 * 0.15s gap = 3.30s
     total_expected_samples = 3 * sr + 2 * gap_samples
-    assert len(tts._audio_buffer_ndi) == total_expected_samples, f"Expected {total_expected_samples} samples, got {len(tts._audio_buffer_ndi)}"
+    assert tts._buffered_samples_ndi() == total_expected_samples, f"Expected {total_expected_samples} samples, got {tts._buffered_samples_ndi()}"
 
-    print(f"-> Total buffered audio: {len(tts._audio_buffer_ndi)/sr:.2f}s across 3 chunks with 2 gap silences.")
+    print(f"-> Total buffered audio: {tts._buffered_samples_ndi()/sr:.2f}s across 3 chunks with 2 gap silences.")
     print("[PASS] Audio chunk crossfades and silence verified!")
 
 

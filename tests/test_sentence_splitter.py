@@ -15,29 +15,29 @@ from ai_brain import AIBrain
 def test_sentence_splitter_basic():
     brain = AIBrain()
     stream_buffer = "We are all one experiencing itself. What is your question today? "
-    sentences, rem = brain._extract_completed_sentences(stream_buffer)
+    sentences, rem, _ = brain._extract_completed_sentences(stream_buffer)
     assert len(sentences) == 2
-    assert sentences[0] == ("We are all one experiencing itself.", False)
-    assert sentences[1] == ("What is your question today?", False)
+    assert sentences[0][:2] == ("We are all one experiencing itself.", False)
+    assert sentences[1][:2] == ("What is your question today?", False)
     assert rem == ""
 
 
 def test_sentence_splitter_partial():
     brain = AIBrain()
     stream_buffer = "The universe is expanding into infinity. But in your mind,"
-    sentences, rem = brain._extract_completed_sentences(stream_buffer)
+    sentences, rem, _ = brain._extract_completed_sentences(stream_buffer)
     assert len(sentences) == 1
-    assert sentences[0] == ("The universe is expanding into infinity.", False)
+    assert sentences[0][:2] == ("The universe is expanding into infinity.", False)
     assert rem == "But in your mind,"
 
 
 def test_sentence_splitter_abbreviations():
     brain = AIBrain()
     stream_buffer = "Dr. Smith met with Mr. Jones vs. the cosmic council. What do you think? "
-    sentences, rem = brain._extract_completed_sentences(stream_buffer)
+    sentences, rem, _ = brain._extract_completed_sentences(stream_buffer)
     assert len(sentences) == 2
-    assert sentences[0] == ("Dr. Smith met with Mr. Jones vs. the cosmic council.", False)
-    assert sentences[1] == ("What do you think?", False)
+    assert sentences[0][:2] == ("Dr. Smith met with Mr. Jones vs. the cosmic council.", False)
+    assert sentences[1][:2] == ("What do you think?", False)
 
 
 def test_mood_tag_extraction():

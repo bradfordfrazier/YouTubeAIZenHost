@@ -1086,7 +1086,9 @@ class LocalCoHostApp:
                     logger.info(f"🗣️ [Read Question] '{intro_text[:80]}'")
 
                 self.turn_phase = "gemini"
-                async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
+                async for chunk_ev in self.brain.generate_response_stream(
+                    event.prompt_trigger, name_already_spoken=bool(intro_text)
+                ):
                     ev_type = chunk_ev.get("type", "")
                     if ev_type == "mood":
                         active_mood = chunk_ev.get("mood", "chill")

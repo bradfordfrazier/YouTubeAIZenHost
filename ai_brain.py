@@ -781,7 +781,8 @@ class AIBrain:
 
         return False, "no_trigger_keywords"
 
-    def _build_context_prompt(self, override_prompt: Optional[str] = None) -> str:
+    def _build_context_prompt(self, override_prompt: Optional[str] = None,
+                              name_already_spoken: bool = False) -> str:
         """Construct the dynamic context prompt for Gemini."""
         prompt_parts = []
         chan_handle = self.cfg.youtube_channel_handle
@@ -951,9 +952,14 @@ class AIBrain:
                 ),
             }
             beat_rule = (
-                "Put [BEAT] immediately before the closer (the last sentence). "
+                "PAUSE (optional, and usually wrong): [BEAT] inserts real silence. It only works when the "
+                "closer REVERSES the setup — the listener is heading one way and the last line turns them "
+                "around. If the closer continues, explains, elaborates, or softly lands the same idea, DO NOT "
+                "use it; silence before a non-reversal sounds like a mistake. Most bits should have no [BEAT] "
+                "at all. When in doubt, leave it out. "
                 if selected_form != "one_liner" else
-                "Do not use [BEAT] unless the sentence has a natural mid-point twist; if so, place it right before the twist. "
+                "PAUSE: one-liners almost never take a [BEAT]. Use it only if the sentence has a genuine "
+                "mid-sentence swerve, placed immediately before the swerve. Otherwise omit it entirely. "
             )
             favs = self.sample_favorites(int(self.cfg.favorites_few_shot))
             if favs:
@@ -1009,10 +1015,13 @@ class AIBrain:
                 "[MOOD: transcendent], [MOOD: mysterious], [MOOD: thoughtful], [MOOD: deadpan], [MOOD: snarky], [MOOD: hyped], [MOOD: laughing], [MOOD: savage] (for ego-judo on joke questions), [MOOD: chill], [MOOD: curious], [MOOD: shocked], or [MOOD: neutral].\n"
             )
             prompt_parts.append(
-                "\nCOMEDIC TIMING: When your final sentence is a punchline or a turn, write the token [BEAT] "
-                "immediately before it (e.g. 'You asked the universe for a sign. [BEAT] It sent you a buffering icon.'). "
-                "[BEAT] becomes a real pause in your voice, so use it at most once per reply and never when there is "
-                "no punchline. It may also sit mid-sentence right before the twist.\n"
+                "\nCOMEDIC TIMING: [BEAT] inserts real silence in your voice. It is earned, not decorative. "
+                "Use it ONLY when the final line REVERSES the direction of the setup.\n"
+                "  YES: 'You asked the universe for a sign. [BEAT] It sent you a buffering icon.' "
+                "(the listener expects meaning, gets a loading spinner — a reversal)\n"
+                "  NO: 'You are not lost. [BEAT] You are just standing somewhere you have not called home yet.' "
+                "(the closer continues the same thought — the pause would sound like a dropout)\n"
+                "Most replies should contain no [BEAT]. Never more than one. When unsure, omit it.\n"
                 "DELIVERY CONTRAST: The opening MOOD tag sets the voice for the whole reply, but you may switch register for "
                 "the closer by writing a second tag right before it, after the [BEAT] (e.g. '... [BEAT] [MOOD: savage] It sent you a buffering icon.'). "
                 "Contrast is the point: deadpan setup into savage, hyped, or laughing; or a snarky run into a quiet [MOOD: thoughtful] landing. "
@@ -1022,6 +1031,16 @@ class AIBrain:
                 prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
             else:
                 prompt_parts.append(f"\n{self.host_name}:")
+
+        if name_already_spoken:
+            # The turn already read "<Name> asks: <question>" aloud. Opening the answer with the
+            # handle again makes the host sound like it is introducing someone twice.
+            prompt_parts.append(
+                "\nOVERRIDE — NAME ALREADY SPOKEN: The asker's name and question have just been read aloud "
+                "to the audience, immediately before you speak. Do NOT open with their name or handle, and do "
+                "not restate the question. Answer them directly in the second person ('you'), starting with "
+                "the substance. Their name may appear later in the reply only if it genuinely lands as a joke."
+            )
 
         return "\n".join(prompt_parts)
 
@@ -1140,7 +1159,8 @@ class AIBrain:
         return results, remaining, current_mood
 
     async def generate_response_stream(
-        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False
+        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False,
+        name_already_spoken: bool = False,
     ) -> AsyncGenerator[Dict, None]:
         """
         Queries Gemini with streaming tokens and yields structured chunks:
@@ -1187,7 +1207,7 @@ class AIBrain:
             else:
                 logger.info("🛡️ [Circuit Breaker Half-Open] Cooldown elapsed. Probing Gemini with incoming request...")
 
-        full_context = self._build_context_prompt(prompt_trigger)
+        full_context = self._build_context_prompt(prompt_trigger, name_already_spoken=name_already_spoken)
         is_deep, match_term = self._classify_prompt_depth(prompt_trigger)
         target_model = self.cfg.gemini_deep_model if (is_deep and self.cfg.gemini_deep_model) else self.model_name
         fast_b = self.cfg.gemini_fast_thinking_budget

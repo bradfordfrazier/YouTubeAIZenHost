@@ -200,6 +200,14 @@ class AppConfig:
     tts_request_timeout_floor: float = _get_float("TTS_REQUEST_TIMEOUT_FLOOR", 4.0)
     tts_request_timeout_ceiling: float = _get_float("TTS_REQUEST_TIMEOUT_CEILING", 30.0)
     inter_sentence_gap_sec: float = _get_float("INTER_SENTENCE_GAP_SEC", 0.15)
+    # Read the chat question aloud before answering it. "off" | "cast" | "viewers" | "all".
+    # Reading the question makes a Q&A clip self-contained (a Short viewer hears the setup),
+    # and it lowers TTFA: the question chunk synthesizes while Gemini is still writing.
+    read_question_aloud: str = os.getenv("READ_QUESTION_ALOUD", "off").strip().lower()
+    read_question_mood: str = os.getenv("READ_QUESTION_MOOD", "neutral").strip().lower()
+    # {author} and {question} placeholders. Keep it short; it is spoken before every answer.
+    read_question_template: str = os.getenv("READ_QUESTION_TEMPLATE", "{author} asks: {question}")
+    read_question_max_words: int = _get_int("READ_QUESTION_MAX_WORDS", 40)
     # Longer pause inserted where the model wrote [BEAT] (right before a punchline)
     tts_beat_gap_sec: float = _get_float("TTS_BEAT_GAP_SEC", 0.55)
     # Spontaneous bit generator: word budget for multi-line bits (~2.7 words/s -> 65-85 words = 25-32 s)

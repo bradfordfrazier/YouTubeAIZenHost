@@ -1074,6 +1074,17 @@ class LocalCoHostApp:
 
                 consumer_task = asyncio.create_task(_tts_consumer())
 
+                # Optionally read the question aloud first. It goes on the queue BEFORE Gemini
+                # produces anything, so it synthesizes in parallel with generation; the first
+                # answer chunk then gets a beat so the question and the answer don't run together.
+                force_beat_on_first_answer = False
+                intro_text = self._question_read_aloud_text(event)
+                if intro_text:
+                    pending_queue_chars += len(intro_text)
+                    await sentence_queue.put((intro_text, self.cfg.read_question_mood, False))
+                    force_beat_on_first_answer = True
+                    logger.info(f"🗣️ [Read Question] '{intro_text[:80]}'")
+
                 self.turn_phase = "gemini"
                 async for chunk_ev in self.brain.generate_response_stream(event.prompt_trigger):
                     ev_type = chunk_ev.get("type", "")
@@ -1089,8 +1100,9 @@ class LocalCoHostApp:
                         # Brain yields the sentence under "text" (older builds used "sentence").
                         sent = (chunk_ev.get("text") or chunk_ev.get("sentence") or "").strip()
                         sent_mood = chunk_ev.get("mood", active_mood)
-                        sent_beat = bool(chunk_ev.get("beat_before", False))
+                        sent_beat = bool(chunk_ev.get("beat_before", False)) or force_beat_on_first_answer
                         if sent:
+                            force_beat_on_first_answer = False
                             clean_sent = re.sub(r"@+", "@", sent).strip()
                             pending_queue_chars += len(clean_sent)
                             await sentence_queue.put((clean_sent, sent_mood, sent_beat))
@@ -1265,6 +1277,62 @@ class LocalCoHostApp:
                 self.current_ai_subtitle = ""
                 self.visualizer.clear_pinned()
                 self.visualizer.clear_subtitle()
+
+    # ------------------------------------------------------------------
+    # Read-the-question-aloud helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _speakable_handle(handle: str) -> str:
+        """'MillCreekExchange' -> 'Mill Creek Exchange'; 'DebraW1957' -> 'Debra W'; underscores -> spaces."""
+        h = (handle or "").strip().lstrip("@").replace("_", " ").replace("-", " ")
+        h = re.sub(r"\d+", " ", h)                                  # drop digit runs
+        h = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", h)                  # camelCase -> camel Case
+        h = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", h)             # ABCDef -> ABC Def
+        # Drop decorative fragments like the 'Xx' / 'xX' in XxDarkLordxX (1-2 letter tokens at the ends)
+        toks = [t for t in h.split() if t]
+        while len(toks) > 1 and len(toks[0]) <= 2 and toks[0].lower() in ("xx", "x", "xo", "ox"):
+            toks.pop(0)
+        while len(toks) > 1 and len(toks[-1]) <= 2 and toks[-1].lower() in ("xx", "x", "xo", "ox"):
+            toks.pop()
+        return " ".join(toks).strip() or "A viewer"
+
+    def _speakable_question(self, text: str) -> str:
+        """Cleans a chat message for reading aloud: no handles, sane case, bounded length."""
+        q = re.sub(r"@\S+", "", text or "").strip()
+        q = re.sub(r"\s{2,}", " ", q)
+        letters = [ch for ch in q if ch.isalpha()]
+        if letters and sum(ch.isupper() for ch in letters) / len(letters) > 0.6:
+            # Caps-lock cast characters (DebraW1957) should not be shouted by the TTS.
+            # Sentence-case each segment while keeping its own terminal punctuation.
+            segs = re.split(r"(?<=[.!?])\s+", q.lower())
+            q = " ".join(seg.strip()[:1].upper() + seg.strip()[1:] for seg in segs if seg.strip())
+        words = q.split()
+        max_w = int(self.cfg.read_question_max_words)
+        if len(words) > max_w:
+            q = " ".join(words[:max_w]).rstrip(",;:") + "..."
+        if q and q[-1] not in ".!?":
+            q += "."
+        return q
+
+    def _question_read_aloud_text(self, event: "CommentEvent") -> str:
+        """Returns the spoken intro for this turn, or '' when the mode/turn doesn't call for one."""
+        mode = self.cfg.read_question_aloud
+        if mode in ("", "off", "false", "0"):
+            return ""
+        is_cast = event.event_type == "cast"
+        is_viewer = event.event_type in ("chat", "superchat", "direct_mention", "greeting")
+        if mode == "cast" and not is_cast:
+            return ""
+        if mode == "viewers" and not is_viewer:
+            return ""
+        if mode == "all" and not (is_cast or is_viewer):
+            return ""
+        pinned = self.current_pinned_chat or {}
+        author = self._speakable_handle(pinned.get("author", ""))
+        question = self._speakable_question(pinned.get("message", ""))
+        if not question:
+            return ""
+        return self.cfg.read_question_template.format(author=author, question=question).strip()
 
     async def _recover_from_stuck_turn(self):
         """

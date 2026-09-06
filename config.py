@@ -243,6 +243,27 @@ class AppConfig:
         }
     )
 
+    # Chatterbox cfg_weight: adherence/pacing. Lower = slower, more deliberate delivery.
+    # Global default, plus optional per-mood overrides so deadpan can breathe while hyped drives.
+    tts_cfg_weight: float = _get_float("TTS_CFG_WEIGHT", 0.4)
+    tts_mood_cfg_weight_map: Dict[str, float] = field(
+        default_factory=lambda: {
+            "deadpan": 0.30,       # slowest: the flat setup and the Steven Wright one-liners
+            "thoughtful": 0.35,
+            "mysterious": 0.35,
+            "transcendent": 0.35,
+            "chill": 0.40,
+            "neutral": 0.40,
+            "curious": 0.45,
+            "snarky": 0.45,
+            "savage": 0.50,        # the closer lands a little tighter than the setup
+            "laughing": 0.55,
+            "shocked": 0.55,
+            "hyped": 0.60,
+            "energetic": 0.60,
+        }
+    )
+
     # Neural TTS voice and fallback settings (48kHz Stereo)
     tts_voice: str = os.getenv("TTS_VOICE", "en-US-ChristopherNeural")
     tts_sample_rate: int = _get_int("TTS_SAMPLE_RATE", 48000)

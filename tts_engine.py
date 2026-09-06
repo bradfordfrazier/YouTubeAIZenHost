@@ -50,6 +50,7 @@ class TTSEngine:
         self.timeout_ceiling = self.cfg.tts_request_timeout_ceiling
         self.exaggeration_default = self.cfg.tts_exaggeration_default
         self.mood_exaggeration_map = self.cfg.tts_mood_exaggeration_map
+        self.mood_cfg_weight_map = self.cfg.tts_mood_cfg_weight_map
         self.max_concurrent_synth = self.cfg.max_concurrent_synth
         self._synth_semaphore = asyncio.Semaphore(self.max_concurrent_synth)
 
@@ -218,7 +219,8 @@ class TTSEngine:
             with self._buffer_lock:
                 self._rtf_history.append(float(rtf))
 
-    async def _synthesize_chatterbox(self, clean_text: str, exaggeration: float, is_live: bool = True) -> Optional[np.ndarray]:
+    async def _synthesize_chatterbox(self, clean_text: str, exaggeration: float,
+                                     cfg_weight: Optional[float] = None, is_live: bool = True) -> Optional[np.ndarray]:
         """Synthesizes speech via remote ChatterBox Turbo GPU inference server."""
         url = f"{self.server_url}/synthesize"
         # Calibrated timeout: estimate audio length and give generous headroom clamped to [8, 45]s
@@ -229,7 +231,7 @@ class TTSEngine:
             "text": clean_text,
             "voice": self.reference_voice,
             "exaggeration": exaggeration,
-            "cfg_weight": 0.5,
+            "cfg_weight": float(self.cfg.tts_cfg_weight if cfg_weight is None else cfg_weight),
             "format": "wav",
         }
         tag = "[TTS LIVE]" if is_live else "[TTS BG]"
@@ -317,8 +319,8 @@ class TTSEngine:
             logger.error(f"{tag} Error during edge-tts synthesis: {e}")
             return self._generate_sine_placeholder(len(clean_text) * 0.06)
 
-    def _prepare_text(self, text: str, mood: str) -> Tuple[str, str, float]:
-        """Resolves mood/exaggeration and cleans text for the synthesizer."""
+    def _prepare_text(self, text: str, mood: str) -> Tuple[str, str, float, float]:
+        """Resolves mood -> (clean_text, mood, exaggeration, cfg_weight) for the synthesizer."""
         active_mood = (mood or "neutral").lower().strip()
         if active_mood == "neutral":
             mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
@@ -332,9 +334,12 @@ class TTSEngine:
         clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
         clean_text = re.sub(r"@+", "", clean_text)
         clean_text = clean_text.replace("*", "").replace("`", "").strip()
-        return clean_text, active_mood, exaggeration
 
-    async def _synthesize_locked(self, clean_text: str, active_mood: str, exaggeration: float, is_live: bool) -> np.ndarray:
+        cfg_weight = float(self.mood_cfg_weight_map.get(active_mood, self.cfg.tts_cfg_weight))
+        return clean_text, active_mood, exaggeration, cfg_weight
+
+    async def _synthesize_locked(self, clean_text: str, active_mood: str, exaggeration: float,
+                                 cfg_weight: float, is_live: bool) -> np.ndarray:
         """
         Backend dispatch. MUST be called with self.gpu_lock already held by the caller.
         Never acquires the lock itself (asyncio.Lock is not re-entrant).
@@ -344,7 +349,7 @@ class TTSEngine:
 
         # 1. Primary: Remote Chatterbox Turbo GPU inference server
         if self.active_backend == "chatterbox":
-            data = await self._synthesize_chatterbox(clean_text, exaggeration, is_live=is_live)
+            data = await self._synthesize_chatterbox(clean_text, exaggeration, cfg_weight, is_live=is_live)
             if data is not None and len(data) > 0:
                 self.last_synthesized_duration = len(data) / self.sample_rate
                 return data
@@ -382,17 +387,17 @@ class TTSEngine:
                 stack_info=True,
             )
 
-        clean_text, active_mood, exaggeration = self._prepare_text(text, mood)
+        clean_text, active_mood, exaggeration, cfg_weight = self._prepare_text(text, mood)
         if not clean_text:
             return np.zeros((0, 2), dtype=np.float32)
 
         tag = "[TTS LIVE]" if is_live else "[TTS BG]"
         logger.info(
-            f"{tag} Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, exaggeration={exaggeration:.2f}): "
-            f"'{clean_text[:60]}...'"
+            f"{tag} Synthesizing speech ({len(clean_text)} chars, mood={active_mood}, "
+            f"exaggeration={exaggeration:.2f}, cfg_weight={cfg_weight:.2f}): '{clean_text[:60]}...'"
         )
         async with self.gpu_lock:
-            return await self._synthesize_locked(clean_text, active_mood, exaggeration, is_live)
+            return await self._synthesize_locked(clean_text, active_mood, exaggeration, cfg_weight, is_live)
 
     def _bg_may_proceed(self) -> bool:
         """True when no live turn is active and the post-turn cooldown has elapsed."""
@@ -410,7 +415,7 @@ class TTSEngine:
         (b) acquires gpu_lock,
         (c) re-checks; if a turn started meanwhile, releases and goes back to (a).
         """
-        clean_text, active_mood, exaggeration = self._prepare_text(text, mood)
+        clean_text, active_mood, exaggeration, cfg_weight = self._prepare_text(text, mood)
         if not clean_text:
             return np.zeros((0, 2), dtype=np.float32)
 
@@ -427,9 +432,9 @@ class TTSEngine:
                 try:
                     logger.info(
                         f"[TTS BG] Synthesizing ({len(clean_text)} chars, mood={active_mood}, "
-                        f"exaggeration={exaggeration:.2f}): '{clean_text[:60]}...'"
+                        f"exaggeration={exaggeration:.2f}, cfg_weight={cfg_weight:.2f}): '{clean_text[:60]}...'"
                     )
-                    return await self._synthesize_locked(clean_text, active_mood, exaggeration, is_live=False)
+                    return await self._synthesize_locked(clean_text, active_mood, exaggeration, cfg_weight, is_live=False)
                 finally:
                     self._bg_inside_gpu_lock = False
 

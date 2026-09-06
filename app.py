@@ -2001,6 +2001,20 @@ class LocalCoHostApp:
                         self._trigger_ai_turn(prompt_trigger=prompt, event_type="superchat", priority=1)
                     continue
 
+                # Favourite command: save the last spontaneous bit that played as a few-shot exemplar
+                if msg_lower in ("/fav", "fav", "!fav", "/favorite", "/favourite"):
+                    saved = self.brain.add_favorite()
+                    if saved:
+                        logger.info(f"⭐ [Console] Favourite saved: [{saved.get('form','bit')}] '{saved.get('text','')[:80]}'")
+                    else:
+                        logger.info("⭐ [Console] No bit has played yet; nothing to save.")
+                    continue
+                if msg_lower in ("/favs", "/favorites", "/favourites"):
+                    logger.info(f"⭐ [Console] {len(self.brain.favorites)} favourite bits in {self.brain.favorites_path}")
+                    for f in self.brain.favorites[-5:]:
+                        logger.info(f"   - [{f.get('form','bit')}] {f.get('text','')[:90]}")
+                    continue
+
                 # Celebration command
                 if msg_lower in ("celebrate!", "celebrate", "!celebrate", "party!", "let's celebrate", "lets celebrate") or msg_lower.startswith("celebrate!"):
                     logger.info(f"🎉 [Console Event] Celebration trigger from {author}: '{message}'")

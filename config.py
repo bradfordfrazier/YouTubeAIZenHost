@@ -209,6 +209,12 @@ class AppConfig:
     one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
     # Hard cap for one-liners (multi-line bits are capped at bit_words_max * 1.2)
     one_liner_words_max: int = _get_int("ONE_LINER_WORDS_MAX", 25)
+    # Offline bit generation gets its own thinking budget and temperature (latency is irrelevant there)
+    bit_thinking_budget: int = _get_int("BIT_THINKING_BUDGET", 1024)
+    bit_temperature: float = _get_float("BIT_TEMPERATURE", 0.85)
+    # Operator-curated favourite bits used as few-shot examples for new bits
+    favorites_path: str = os.getenv("FAVORITES_PATH", "data/favorite_bits.jsonl")
+    favorites_few_shot: int = _get_int("FAVORITES_FEW_SHOT", 5)
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)

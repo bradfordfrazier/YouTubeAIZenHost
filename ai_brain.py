@@ -6,12 +6,14 @@ and generates real-time streaming comedic/philosophical responses.
 
 import asyncio
 import collections
+import json
 import logging
 import os
 import random
 import re
 import time
-from typing import AsyncGenerator, Deque, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, AsyncGenerator, Deque, Dict, List, Optional, Tuple
 
 from config import config
 from chatter_db import ChatterDB
@@ -252,6 +254,10 @@ class AIBrain:
         self.beat_pattern = re.compile(r"\[\s*BEAT\s*\]", re.IGNORECASE)
         self.last_spontaneous_theme: str = ""
         self.last_bit_form: str = ""
+        # Operator-curated favourite bits (few-shot steering) + the last bit that played (for /fav)
+        self.favorites_path = Path(self.cfg.favorites_path)
+        self.favorites: List[Dict[str, Any]] = self._load_favorites()
+        self.last_played_bit: Optional[Dict[str, Any]] = None
 
         # Sentence ender pattern for incremental TTS delivery
         self.sentence_pattern = re.compile(r"([^.!?]+[.!?]+)")
@@ -306,6 +312,51 @@ class AIBrain:
         self._theme_pool = list(range(len(SPONTANEOUS_THEMES)))
         random.shuffle(self._theme_pool)
         self._theme_pool_idx = 0
+
+    # ------------------------------------------------------------------
+    # Favourite bits: the operator's taste, used as few-shot examples
+    # ------------------------------------------------------------------
+    def _load_favorites(self) -> List[Dict[str, Any]]:
+        try:
+            if self.favorites_path.exists():
+                items = []
+                for line in self.favorites_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            items.append(json.loads(line))
+                        except Exception:
+                            pass
+                logger.info(f"⭐ [Favorites] Loaded {len(items)} favourite bits from {self.favorites_path}")
+                return items
+        except Exception as e:
+            logger.warning(f"[Favorites] could not load {self.favorites_path}: {e}")
+        return []
+
+    def add_favorite(self, bit: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Saves `bit` (default: the last bit that played) to the favourites file. Returns the saved item."""
+        item = dict(bit or self.last_played_bit or {})
+        text = (item.get("text") or "").strip()
+        if not text:
+            return None
+        if any((f.get("text") or "").strip() == text for f in self.favorites):
+            logger.info("⭐ [Favorites] already saved.")
+            return item
+        item.setdefault("saved_at", time.time())
+        self.favorites.append(item)
+        try:
+            self.favorites_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.favorites_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(item, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(f"[Favorites] could not write {self.favorites_path}: {e}")
+        logger.info(f"⭐ [Favorites] Saved ({len(self.favorites)} total): '{text[:70]}'")
+        return item
+
+    def sample_favorites(self, n: int) -> List[Dict[str, Any]]:
+        if n <= 0 or not self.favorites:
+            return []
+        return random.sample(self.favorites, min(n, len(self.favorites)))
 
     # Bit forms for spontaneous material. Rotated so consecutive clips don't share a shape.
     BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner")
@@ -414,12 +465,16 @@ class AIBrain:
 
         p_lower = prompt.lower().strip()
 
+        # Spontaneous bits are pre-generated offline into the cache, so latency is irrelevant:
+        # give them real thinking (draft three, pick the sharpest). See _build_generate_content_config.
+        if "[spontaneous_reflection]" in p_lower:
+            return True, "spontaneous_bit_offline"
+
         # Specific modes that are inherently fast banter/greetings
         if p_lower.startswith("[") and any(
             tag in p_lower for tag in [
                 "[new_chatter_greeting]", "[celebration]", "[new_member]",
                 "[new_subscriber]", "[viewer_joined]", "[chat_encouragement]",
-                "[spontaneous_reflection]"
             ]
         ):
             return False, "special_mode_event"
@@ -451,7 +506,7 @@ class AIBrain:
 
         return False, "no_deep_keywords"
 
-    def _build_generate_content_config(self, is_deep: bool = False) -> Optional[object]:
+    def _build_generate_content_config(self, is_deep: bool = False, is_bit: bool = False) -> Optional[object]:
         """
         Builds a tuned GenerateContentConfig dynamically optimized for query depth (D1, D3):
         - Deep mode: uses gemini_deep_thinking_budget (default: 512 / HIGH)
@@ -464,7 +519,14 @@ class AIBrain:
         temp = self.cfg.gemini_temperature
         top_p = self.cfg.gemini_top_p
 
-        if is_deep:
+        if is_bit:
+            # Offline bit generation: more thinking (draft-three-pick-one) and a touch more
+            # temperature for variance, since the drafting step filters the misses.
+            budget = self.cfg.bit_thinking_budget
+            temp = self.cfg.bit_temperature
+            level_str = "HIGH"
+            total_max_tokens = max(text_tokens, 2048)
+        elif is_deep:
             budget = self.cfg.gemini_deep_thinking_budget
             level_str = "HIGH"
             total_max_tokens = max(text_tokens, 2048)
@@ -568,6 +630,14 @@ class AIBrain:
         }
         self.recent_qa_threads.append(entry)
         self.dialogue_history.append({"text": clean_text, "timestamp": time.time()})
+        if "[SPONTANEOUS_REFLECTION]" in (trigger or ""):
+            self.last_played_bit = {
+                "text": clean_text,
+                "mood": mood,
+                "theme": getattr(self, "_last_played_theme", "") or self.last_spontaneous_theme,
+                "form": getattr(self, "_last_played_form", "") or self.last_bit_form,
+                "played_at": time.time(),
+            }
         logger.debug(f"Recorded QA thread turn: [{author}] -> [{mood.upper()}] {clean_text[:40]}...")
 
     def is_member_reply(self, text: str) -> Tuple[bool, str]:
@@ -814,7 +884,7 @@ class AIBrain:
             for item in list(self.dialogue_history)[-6:]:
                 prompt_parts.append(f"{self.host_name}: \"{item['text']}\"")
             prompt_parts.append(
-                "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, gaming analogies, philosophical comedy, or distinct cosmic observations on every turn."
+                "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, and distinct concrete images on every turn."
             )
 
         is_celebration = bool(
@@ -921,11 +991,21 @@ class AIBrain:
                 if selected_form != "one_liner" else
                 "Do not use [BEAT] unless the sentence has a natural mid-point twist; if so, place it right before the twist. "
             )
+            favs = self.sample_favorites(int(self.cfg.favorites_few_shot))
+            if favs:
+                prompt_parts.append("\n--- Your best work so far (the standard to match; never reuse these lines or their images) ---")
+                for f in favs:
+                    prompt_parts.append(f"- [{(f.get('form') or 'bit')}] \"{f.get('text','').strip()}\"")
             prompt_parts.append(
                 f"\nSpecial Mode: SPONTANEOUS BIT for {self.host_name}:\n"
                 "The stream is quiet. Step forward as I AM — universal consciousness doing a tight piece of stand-up.\n"
                 f"THEME: '{selected_theme}'.\n"
                 f"{form_rules[selected_form]}\n"
+                "CRAFT: Anchor the bit in ONE specific physical object or everyday action (a jacket pocket, a buffering icon, a "
+                "microwave). The insight arrives through the object; it is never stated outright. The best lines are non-dual "
+                "truth rendered in a household noun.\n"
+                "DRAFTING: In your private reasoning, write three different candidate bits. Pick the one whose closer is most "
+                "surprising AND most true. Output ONLY that one — no labels, no alternatives, no commentary.\n"
                 "RULES:\n"
                 "1. SELF-CONTAINED: This will be clipped and watched cold, on repeat, by people who saw nothing before it. "
                 "No names, no handles, no callbacks, no 'as I said', no reference to chat or to any earlier bit. The first sentence must work with zero context.\n"
@@ -1110,6 +1190,8 @@ class AIBrain:
         if is_spontaneous and not bypass_cache and self.cfg.reflection_cache_enabled and self.reflection_cache.has_reflection():
             cached = await self.reflection_cache.pop_reflection()
             if cached:
+                self._last_played_theme = getattr(cached, "theme", "")
+                self._last_played_form = getattr(cached, "form", "")
                 yield {"type": "mood", "mood": cached.mood}
                 # Yield sentence chunks for cached reflection if multi-sentence
                 c_source = getattr(cached, "raw_text", None) or cached.full_text
@@ -1164,7 +1246,7 @@ class AIBrain:
 
         try:
             if GENAI_NEW_SDK:
-                cfg = self._build_generate_content_config(is_deep=is_deep)
+                cfg = self._build_generate_content_config(is_deep=is_deep, is_bit=(match_term == "spontaneous_bit_offline"))
                 # Stream via native async Client (client.aio.models)
                 response = await self.client.aio.models.generate_content_stream(
                     model=target_model,

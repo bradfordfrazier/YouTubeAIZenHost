@@ -927,12 +927,12 @@ class AIBrain:
 
             form_rules = {
                 "observation": (
-                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 3 to 4 sentences. Notice something about this exact situation — "
+                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 2 to 3 sentences. Notice something about this exact situation — "
                     "a livestream, an AI voice, a handful of humans watching a glowing shape, the hour, the medium itself — and escalate it "
-                    "in three steps toward a single sharp closer. One idea only."
+                    "in two steps toward a single sharp closer. One idea only."
                 ),
                 "announcement": (
-                    f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 3 to 4 sentences. Deliver it as an official notice, PSA, terms-of-service "
+                    f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 2 to 3 sentences. Deliver it as an official notice, PSA, terms-of-service "
                     "update, or product recall issued by the universe / management / consciousness itself. Bureaucratic tone, absurd content, "
                     "escalating clauses, then the closer."
                 ),
@@ -941,11 +941,11 @@ class AIBrain:
                     "a concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (
-                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 3 to 4 sentences. Speak straight to whoever is watching in the second person. "
+                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 2 to 3 sentences. Speak straight to whoever is watching in the second person. "
                     "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back on the small thing."
                 ),
                 "one_liner": (
-                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, in the style of Steven Wright: deadpan, literal-minded, "
+                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, deadpan, literal-minded, "
                     "a perfectly logical statement that is completely absurd. No setup, no explanation, no second sentence. "
                     "Mood must be [MOOD: deadpan]. Example shape (do not reuse): 'I bought some batteries, but they weren't included.' "
                     "Make it about the theme, but the logic of the joke matters more than the theme."

@@ -2,6 +2,11 @@
 Voice Manager for ChatterBox Turbo TTS Inference Server.
 Handles local voice resolution, speaker aliases, and automatic downloading/extraction
 of VCTK corpus and Speech Accent Archive speakers (e.g. p248, p308, p361, p374, pure_oracle).
+
+NOTE ON REFERENCE QUALITY: edge_tts.Communicate.save() writes an MP3 stream regardless of the
+filename extension. Chatterbox clones codec artifacts along with the voice, so every generated
+reference is decoded to PCM_16 before it is used. `ensure_pcm()` also repairs pre-existing
+mislabelled files on load.
 """
 
 import os
@@ -22,6 +27,24 @@ RAINBOW_PASSAGE = (
     "The rainbow is a division of white light into many beautiful colors. "
     "These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon."
 )
+
+# Reference text used for the I AM host clone. The Rainbow Passage is a phonetics text read as
+# description, which clones a narrator cadence; the 'spacious' passage below won two blind
+# audition rounds for flat, unhurried delivery with hard sentence landings.
+try:
+    from oracle_reference_passages import PASSAGES as ORACLE_PASSAGES, DEFAULT_PASSAGE
+    ORACLE_PASSAGE = ORACLE_PASSAGES.get("spacious") or ORACLE_PASSAGES[DEFAULT_PASSAGE]
+except Exception:
+    ORACLE_PASSAGE = (
+        "Everything that is happening is already complete. The light on the wall. "
+        "The traffic outside. The small unfinished argument you are still carrying. "
+        "None of it is waiting on your approval. It simply continues, evenly, "
+        "whether or not you decide to notice."
+    )
+
+# Reference clips longer than this are trimmed at the last sentence boundary that fits.
+# Chatterbox wants roughly 5-20 s; shorter, uniform clips cloned more consistently in testing.
+REFERENCE_TARGET_SEC = float(os.getenv("REFERENCE_TARGET_SEC", "14.0"))
 
 STELLA_PASSAGE = (
     "Please call Stella. Ask her to bring these things with her from the store: "
@@ -71,12 +94,92 @@ SPEAKER_RECIPES: Dict[str, Dict[str, str]] = {
         "rate": "-4%",
     },
     "pure_oracle": {
-        "description": "Pure Oracle: Androgynous Transcendent Tone (~155 Hz, zero emotional inflection)",
+        # Winner of two blind audition rounds ('spacious' text, grounded recipe): flat, unhurried,
+        # lands hard on periods. Beat 3 other passages and 3 other base voices on the one-liner
+        # and long-form tests.
+        "description": "Pure Oracle: flat, grounded, unhurried (Christopher -3Hz / -12%)",
         "voice": "en-US-ChristopherNeural",
-        "pitch": "+2Hz",
-        "rate": "-5%",
+        "pitch": "-3Hz",
+        "rate": "-12%",
+        "passage": "oracle",
     },
 }
+
+
+def ensure_pcm(path: Path, target_sr: Optional[int] = None) -> Path:
+    """
+    Guarantees `path` is real PCM WAV. edge-tts (and some downloads) write MP3 data into a
+    .wav filename; Chatterbox then clones the codec artifacts. Rewrites in place when needed.
+    Returns the path for chaining.
+    """
+    try:
+        info = sf.info(str(path))
+    except Exception as e:
+        logger.warning(f"Could not inspect '{path.name}': {e}")
+        return path
+
+    needs_rewrite = ("PCM" not in (info.subtype or "").upper()) or (
+        target_sr is not None and info.samplerate != target_sr
+    )
+    if not needs_rewrite:
+        return path
+
+    try:
+        data, sr = sf.read(str(path), dtype="float32", always_2d=False)
+        if getattr(data, "ndim", 1) > 1:  # reference clips are mono
+            data = data.mean(axis=1)
+        tmp = path.with_suffix(".pcm.tmp.wav")
+        sf.write(str(tmp), data, sr, subtype="PCM_16")
+        os.replace(str(tmp), str(path))
+        logger.info(
+            f"🔧 Re-encoded '{path.name}' from {info.format}/{info.subtype} to PCM_16 "
+            f"({len(data) / sr:.2f}s @ {sr}Hz) — codec artifacts would otherwise be cloned."
+        )
+    except Exception as e:
+        logger.error(f"Failed to re-encode '{path.name}' to PCM: {e}")
+    return path
+
+
+def trim_to_sentence(path: Path, target_sec: float = REFERENCE_TARGET_SEC,
+                     min_sec: float = 6.0, silence_db: float = -45.0) -> Path:
+    """
+    Trims an over-long reference clip at the last silence gap (i.e. sentence boundary) that
+    falls under `target_sec`. Leaves ~120 ms of trailing silence. No-op if already short enough
+    or if no suitable boundary is found above `min_sec`.
+    """
+    try:
+        import numpy as np
+        data, sr = sf.read(str(path), dtype="float32", always_2d=False)
+        if getattr(data, "ndim", 1) > 1:
+            data = data.mean(axis=1)
+        dur = len(data) / sr
+        if dur <= target_sec + 0.5:
+            return path
+
+        win = max(1, int(sr * 0.02))  # 20 ms RMS windows
+        n_win = len(data) // win
+        rms = np.sqrt(np.maximum(np.mean(data[: n_win * win].reshape(n_win, win) ** 2, axis=1), 1e-12))
+        quiet = 20 * np.log10(rms) < silence_db
+
+        # Candidate cut points: end of a quiet run of >= 150 ms, within [min_sec, target_sec]
+        best = None
+        run = 0
+        for i, q in enumerate(quiet):
+            run = run + 1 if q else 0
+            if run * 0.02 >= 0.15:
+                t = (i + 1) * 0.02
+                if min_sec <= t <= target_sec:
+                    best = t
+        if best is None:
+            logger.info(f"'{path.name}' is {dur:.1f}s but no sentence boundary found under {target_sec:.0f}s; leaving as is.")
+            return path
+
+        cut = int(min(len(data), (best + 0.12) * sr))
+        sf.write(str(path), data[:cut], sr, subtype="PCM_16")
+        logger.info(f"✂️ Trimmed '{path.name}' {dur:.2f}s -> {cut / sr:.2f}s at a sentence boundary.")
+    except Exception as e:
+        logger.warning(f"Could not trim '{path.name}': {e}")
+    return path
 
 
 def get_available_voices() -> List[str]:
@@ -116,7 +219,8 @@ async def ensure_voice_available(voice_name: Optional[str]) -> Path:
     target_path = VOICES_DIR / normalized
 
     if target_path.exists() and target_path.stat().st_size > 1024:
-        return target_path
+        # Repair legacy clips that were saved as MP3-in-.wav before this was fixed.
+        return ensure_pcm(target_path)
 
     logger.info(f"🎙️ Reference voice '{normalized}' not found locally. Auto-fetching target voice...")
 
@@ -167,9 +271,9 @@ async def _try_download_vctk_speaker(speaker_id: str, out_path: Path) -> Optiona
                 raw_bytes = sample["audio"].get("bytes")
                 if raw_bytes:
                     data, sr = sf.read(io.BytesIO(raw_bytes))
-                    sf.write(str(out_path), data, sr)
+                    sf.write(str(out_path), data, sr, subtype="PCM_16")
                     logger.info(f"✅ Auto-downloaded VCTK speaker '{speaker_id}' ({len(data)/sr:.2f}s @ {sr}Hz) -> {out_path}")
-                    return out_path
+                    return ensure_pcm(out_path)
             if count >= 150:
                 break
     except Exception as e:
@@ -178,18 +282,29 @@ async def _try_download_vctk_speaker(speaker_id: str, out_path: Path) -> Optiona
 
 
 async def _generate_speaker_recipe(stem: str, out_path: Path):
-    """Generates the targeted phonetic passage with calibrated pitch/rate/inflection."""
+    """
+    Generates the targeted reference clip with calibrated pitch/rate/inflection, then decodes it
+    to PCM and trims it to a sentence boundary so Chatterbox clones the voice, not the codec.
+    """
     try:
         import edge_tts
         recipe = SPEAKER_RECIPES.get(stem, SPEAKER_RECIPES["pure_oracle"])
         voice = recipe.get("voice", "en-US-ChristopherNeural")
         pitch = recipe.get("pitch", "+0Hz")
         rate = recipe.get("rate", "-4%")
-        text = RAINBOW_PASSAGE
+        # VCTK recipes keep the phonetic passage; the host clone uses the audition-winning text.
+        text = ORACLE_PASSAGE if recipe.get("passage") == "oracle" else RAINBOW_PASSAGE
 
-        logger.info(f"Synthesizing Pure Oracle reference clip '{out_path.name}' using voice={voice}, pitch={pitch}, rate={rate}...")
+        logger.info(
+            f"Synthesizing reference clip '{out_path.name}' using voice={voice}, pitch={pitch}, "
+            f"rate={rate}, passage={'oracle' if recipe.get('passage') == 'oracle' else 'rainbow'}..."
+        )
         communicate = edge_tts.Communicate(text=text, voice=voice, pitch=pitch, rate=rate)
         await communicate.save(str(out_path))
-        logger.info(f"✅ Generated high-fidelity reference voice: {out_path}")
+
+        # edge-tts always emits MP3; decode to PCM_16 and trim before the clip is ever cloned.
+        ensure_pcm(out_path)
+        trim_to_sentence(out_path)
+        logger.info(f"✅ Generated reference voice: {out_path}")
     except Exception as e:
         logger.error(f"Failed to generate reference voice: {e}", exc_info=True)

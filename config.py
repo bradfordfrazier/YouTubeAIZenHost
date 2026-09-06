@@ -206,10 +206,21 @@ class AppConfig:
     read_question_aloud: str = os.getenv("READ_QUESTION_ALOUD", "off").strip().lower()
     read_question_mood: str = os.getenv("READ_QUESTION_MOOD", "neutral").strip().lower()
     # {author} and {question} placeholders. Keep it short; it is spoken before every answer.
-    read_question_template: str = os.getenv("READ_QUESTION_TEMPLATE", "{author} asks: {question}")
+    # {author} and {question} placeholders. Pipe-separated alternatives are rotated (no immediate
+    # repeat) so the intro does not become a tic. Questions and statements get different verbs.
+    read_question_template: str = os.getenv(
+        "READ_QUESTION_TEMPLATE",
+        "{author} asks: {question}|{author} wants to know: {question}|From {author}: {question}",
+    )
+    read_statement_template: str = os.getenv(
+        "READ_STATEMENT_TEMPLATE",
+        "{author} says: {question}|{author}: {question}|From {author}: {question}",
+    )
     read_question_max_words: int = _get_int("READ_QUESTION_MAX_WORDS", 40)
     # Longer pause inserted where the model wrote [BEAT] (right before a punchline)
-    tts_beat_gap_sec: float = _get_float("TTS_BEAT_GAP_SEC", 0.55)
+    tts_beat_gap_sec: float = _get_float("TTS_BEAT_GAP_SEC", 0.45)
+    # Random +/- fraction applied to each beat so the rhythm never becomes metronomic (0 = fixed)
+    tts_beat_gap_jitter: float = _get_float("TTS_BEAT_GAP_JITTER", 0.25)
     # Spontaneous bit generator: word budget for multi-line bits (~2.7 words/s -> 65-85 words = 25-32 s)
     bit_words_min: int = _get_int("BIT_WORDS_MIN", 65)
     bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)

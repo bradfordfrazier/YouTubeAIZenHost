@@ -1316,6 +1316,38 @@ class LocalCoHostApp:
             q += "."
         return q
 
+    # Openers that begin a question even without a '?' ("how do i...", "why is it that...")
+    _QUESTION_OPENERS = (
+        "who", "what", "why", "how", "when", "where", "which", "whose",
+        "is", "are", "was", "were", "am", "do", "does", "did", "can", "could",
+        "should", "would", "will", "shall", "may", "might", "have", "has", "had",
+        "if", "any", "anyone", "anybody", "tell me", "explain",
+    )
+
+    @classmethod
+    def _looks_like_question(cls, text: str) -> bool:
+        """True when the message reads as a question, so the intro verb can be 'asks' not 'says'."""
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        if "?" in t:
+            return True
+        first_two = " ".join(t.split()[:2])
+        first = t.split()[0] if t.split() else ""
+        return first in cls._QUESTION_OPENERS or first_two in cls._QUESTION_OPENERS
+
+    def _pick_read_template(self, is_question: bool) -> str:
+        """Rotates through the pipe-separated alternatives without repeating the last one used."""
+        raw = self.cfg.read_question_template if is_question else self.cfg.read_statement_template
+        options = [o.strip() for o in str(raw).split("|") if o.strip()]
+        if not options:
+            return "{author}: {question}"
+        last = getattr(self, "_last_read_template", None)
+        pool = [o for o in options if o != last] or options
+        choice = random.choice(pool)
+        self._last_read_template = choice
+        return choice
+
     def _question_read_aloud_text(self, event: "CommentEvent") -> str:
         """Returns the spoken intro for this turn, or '' when the mode/turn doesn't call for one."""
         mode = self.cfg.read_question_aloud
@@ -1334,7 +1366,8 @@ class LocalCoHostApp:
         question = self._speakable_question(pinned.get("message", ""))
         if not question:
             return ""
-        return self.cfg.read_question_template.format(author=author, question=question).strip()
+        template = self._pick_read_template(self._looks_like_question(pinned.get("message", "")))
+        return template.format(author=author, question=question).strip()
 
     async def _recover_from_stuck_turn(self):
         """

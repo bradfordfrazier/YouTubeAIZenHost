@@ -2296,12 +2296,17 @@ class LocalCoHostApp:
 
         logger.info(
             f"📣 [Promo Monitor] Event-driven promo engine active "
-            f"(Ask Quiet: {self.cfg.promo_ask_quiet_sec}s, "
-            f"Like/Sub Cooldown: {self.cfg.promo_sub_min_interval_sec}s)"
+            f"(min gap between any promos: {self.cfg.promo_overlay_interval_sec}s, "
+            f"Ask Quiet: {self.cfg.promo_ask_quiet_sec}s, "
+            f"Like/Sub Cooldown: {self.cfg.promo_sub_min_interval_sec}s, "
+            f"Like/Sub idle fallback: {self.cfg.promo_sub_idle_fallback_sec}s)"
         )
 
         last_ask_promo_time = 0.0
         last_like_sub_trigger_time = 0.0
+        last_any_promo_time = 0.0  # global spacing: no two promos closer than promo_overlay_interval_sec
+        min_gap = float(self.cfg.promo_overlay_interval_sec)
+        idle_sub_fallback = float(self.cfg.promo_sub_idle_fallback_sec)
 
         while self.running:
             try:
@@ -2310,6 +2315,11 @@ class LocalCoHostApp:
                     break
 
                 now = time.time()
+                # Global spacing applies to every promo type. This is what PROMO_OVERLAY_INTERVAL_SEC means
+                # in event mode: the minimum quiet time between any two callouts.
+                if now - last_any_promo_time < min_gap:
+                    continue
+
                 is_turn_busy = (
                     self.brain.is_generating
                     or self.tts.is_speaking
@@ -2345,6 +2355,7 @@ class LocalCoHostApp:
                     logger.info("📣 [Promo Trigger] Showing 'Like & Subscribe' callout after completed viewer interaction.")
                     self.visualizer.trigger_promo("like_sub")
                     last_like_sub_trigger_time = now
+                    last_any_promo_time = now
                     # Reset turn completed time to avoid double triggering
                     self.last_turn_completed_time = 0.0
                     continue
@@ -2360,20 +2371,23 @@ class LocalCoHostApp:
                     viewers >= 1
                     and time_since_last_chat >= ask_quiet_sec
                 ):
-                    # If Like & Subscribe hasn't been completed for promo_sub_min_interval_sec and is older than last Ask Anything, alternate to Like & Subscribe
+                    # Idle slot is for 'Ask Anything'. 'Like & Subscribe' belongs after a viewer interaction
+                    # (when people are primed to act); during a lull it only appears as a long-absence
+                    # fallback so a stream with zero chat still shows it occasionally.
                     if (
-                        time_since_last_like_sub >= sub_min_interval
-                        and time_since_last_like_sub_trigger >= 10.0
-                        and (last_like_sub_completed <= last_ask_promo_time or time_since_last_ask < max(ask_quiet_sec, 60.0))
-                        and time_since_last_like_sub >= max(ask_quiet_sec, 60.0)
+                        idle_sub_fallback > 0
+                        and time_since_last_like_sub >= idle_sub_fallback
+                        and time_since_last_like_sub_trigger >= idle_sub_fallback
                     ):
-                        logger.info(f"📣 [Promo Trigger] Showing 'Like & Subscribe' callout during stream lull (Cooldown: {time_since_last_like_sub:.1f}s >= {sub_min_interval:.1f}s).")
+                        logger.info(f"📣 [Promo Trigger] Showing 'Like & Subscribe' fallback (none completed for {time_since_last_like_sub:.0f}s >= {idle_sub_fallback:.0f}s).")
                         self.visualizer.trigger_promo("like_sub")
                         last_like_sub_trigger_time = now
-                    elif time_since_last_ask >= max(ask_quiet_sec, 60.0):
+                        last_any_promo_time = now
+                    elif time_since_last_ask >= max(ask_quiet_sec, min_gap):
                         logger.info(f"📣 [Promo Trigger] Showing 'Ask Anything' callout (Chat quiet for {time_since_last_chat:.1f}s >= {ask_quiet_sec:.1f}s).")
                         self.visualizer.trigger_promo("ask_god")
                         last_ask_promo_time = now
+                        last_any_promo_time = now
 
             except asyncio.CancelledError:
                 break

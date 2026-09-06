@@ -207,6 +207,8 @@ class AppConfig:
     bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)
     # Fraction of spontaneous slots that get a Steven Wright style one-liner instead of a full bit
     one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
+    # Hard cap for one-liners (multi-line bits are capped at bit_words_max * 1.2)
+    one_liner_words_max: int = _get_int("ONE_LINER_WORDS_MAX", 25)
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)
@@ -351,7 +353,10 @@ class AppConfig:
     promo_ask_quiet_sec: float = float(os.getenv("PROMO_ASK_QUIET_SEC", "45.0"))
     promo_sub_after_turn_sec: float = float(os.getenv("PROMO_SUB_AFTER_TURN_SEC", "8.0"))
     promo_sub_min_interval_sec: float = float(os.getenv("PROMO_SUB_MIN_INTERVAL_SEC", "120.0"))
-    promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "75.0"))
+    # Timer mode: period between promos. Event mode: MINIMUM gap between any two promos of any type.
+    promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "90.0"))
+    # Event mode: show 'Like & Subscribe' during a lull only if none has completed for this long (0 = never)
+    promo_sub_idle_fallback_sec: float = float(os.getenv("PROMO_SUB_IDLE_FALLBACK_SEC", "600.0"))
     promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))
     promo_overlay_entrance_sec: float = float(os.getenv("PROMO_OVERLAY_ENTRANCE_SEC", "0.9"))
     promo_overlay_exit_sec: float = float(os.getenv("PROMO_OVERLAY_EXIT_SEC", "1.15"))

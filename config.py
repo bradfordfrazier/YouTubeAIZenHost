@@ -159,6 +159,9 @@ class AppConfig:
     min_interjection_interval_sec: float = _get_float("MIN_INTERJECTION_INTERVAL_SEC", 5.0)
     auto_chat_response_probability: float = _get_float("AUTO_CHAT_RESPONSE_PROB", 0.60)
     chat_sampling_viewer_threshold: int = _get_int("CHAT_SAMPLING_VIEWER_THRESHOLD", 25)
+    # At or below this many concurrent viewers, every real (non-peer-reply) chat message gets a
+    # response regardless of keywords. 0 disables the rule.
+    small_room_viewers: int = _get_int("SMALL_ROOM_VIEWERS", 5)
     chat_sampling_probability: float = _get_float("CHAT_SAMPLING_PROBABILITY", 0.35)
     cast_badge_label: str = os.getenv("CAST_BADGE_LABEL", "CAST")
     chat_reader_mode: bool = os.getenv("CHAT_READER_MODE", "false").lower() in ("true", "1", "yes")

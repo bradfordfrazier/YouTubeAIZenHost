@@ -613,20 +613,21 @@ class AIBrain:
         if self.engagement_mode == "standby" and self.cfg.obs_require_stream_active and not self.is_stream_live:
             return False, "stream_standby_paused (0 tokens - OBS stream offline)"
 
-        # Enforce sliding rate limiter
-        rate_ok, rate_reason = self._check_rate_limit()
-        if not rate_ok:
-            return False, rate_reason
-
         text_clean = text.strip()
         text_lower = text_clean.lower()
 
-        # 0. Superchats and new chatter greetings have immediate high priority (never sampled out)
+        # 0. Superchats and new chatter greetings have immediate high priority (never sampled out,
+        #    and exempt from the per-minute rate limiter: a viewer's first message is worth a reply).
         if is_superchat:
             return True, "superchat"
 
         if is_new_chatter and self.cfg.greet_new_chatters:
             return True, "new_chatter_greeting"
+
+        # Enforce sliding rate limiter for everything else
+        rate_ok, rate_reason = self._check_rate_limit()
+        if not rate_ok:
+            return False, rate_reason
 
         # 1. Direct address triggers (Chat explicitly mentions AI / God / Host / Channel Handle)
         # Check channel handle (@handle or whole word)
@@ -684,16 +685,24 @@ class AIBrain:
             if is_peer:
                 return False, peer_reason
 
-        # 3. Eco Mode Gating: In Eco mode (0 viewers), suppress generic chat keywords to preserve tokens
+        # 3. Chat direct questions (contains '?') — never sampled out, never eco-suppressed
+        if "?" in text_lower:
+            return True, "chat_question"
+
+        # 4. Small room rule: with only a handful of viewers every real message deserves a reply.
+        # Ignoring a viewer in a room of three is far more costly than the tokens it saves.
+        small_room = int(self.cfg.small_room_viewers)
+        if small_room > 0 and self.concurrent_viewers <= small_room:
+            return True, f"small_room_chat (viewers={self.concurrent_viewers} <= {small_room})"
+
+        # 5. Eco Mode Gating: suppress generic keyword chat to preserve tokens.
+        # (A real message already proves someone is watching, so this only applies when the
+        # small-room rule is disabled or the room is larger than the small-room threshold.)
         is_eco = (self.engagement_mode == "eco") and self.cfg.eco_mode_enabled
         if is_eco:
             return False, "eco_mode_suppressed (generic chat in eco mode)"
 
-        # 4. Chat direct questions (contains '?') — never sampled out
-        if "?" in text_lower:
-            return True, "chat_question"
-
-        # 5. General Chat interactive keywords & explicit asks
+        # 6. General Chat interactive keywords & explicit asks
         # Removed single-letter & ultra-common tokens (w, l, gg, lol, lmao, real, fake, game, play, win, lose, trash, clutch, based)
         chat_keywords = [
             "roast", "how", "why", "who", "what", "when", "where", "opinion", "thoughts",
@@ -702,7 +711,7 @@ class AIBrain:
         tokens = set(re.findall(r"\b\w+\b", text_lower))
         matched_keywords = [kw for kw in chat_keywords if kw in tokens]
 
-        # 6. Sampling layer for non-question, non-mention chat interactions (Phase 3.1)
+        # 7. Sampling layer for non-question, non-mention chat interactions (Phase 3.1)
         # When concurrent viewers > chat_sampling_viewer_threshold (default 25),
         # sample at chat_sampling_probability (default 0.35)
         if matched_keywords or self.cfg.chat_reader_mode:
@@ -1183,7 +1192,10 @@ class AIBrain:
                     logger.warning(f"Repairing full response text with terminal punctuation: '{final_spoken}'")
                 now_ts = time.time()
                 self.dialogue_history.append({"text": final_spoken, "mood": active_mood, "timestamp": now_ts})
-                self.response_timestamps.append(now_ts)
+                if not bypass_cache:
+                    # Cache refills (bypass_cache=True) are background work and must not consume the
+                    # interactive rate budget; at boot they fill 7 slots in a minute and would silence chat.
+                    self.response_timestamps.append(now_ts)
                 self.consecutive_gemini_errors = 0
                 self.circuit_breaker_tripped = False
                 yield {"type": "complete", "full_text": final_spoken, "mood": active_mood}

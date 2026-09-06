@@ -18,7 +18,7 @@ from app import CommentEvent, LocalCoHostApp
 def test_trigger_hygiene_no_trigger_on_common_words():
     """'w', 'l', 'gg', 'lol', 'real', 'game', 'play', 'win', 'lose', 'god that game was trash' -> no trigger."""
     brain = AIBrain()
-    brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
+    brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=15, is_chat_active=True)
 
     for word in ["w", "l", "gg", "lol", "real", "game", "play", "win", "lose", "again lol", "god that game was trash", "the bot died"]:
         trig, reason = brain.should_trigger_response(word)

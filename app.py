@@ -1823,6 +1823,8 @@ class LocalCoHostApp:
                             asyncio.create_task(self.tts.queue_speech(spoken_text))
                         elif is_new_chatter and self.cfg.greet_new_chatters:
                             should_trigger, reason = self.brain.should_trigger_response(msg, is_new_chatter=True)
+                            if not (is_superchat or should_trigger):
+                                logger.info(f"⏭️ [Greeting Skipped] @{author_name}: '{msg[:60]}' -> {reason}")
                             if is_superchat or should_trigger:
                                 prompt = (
                                     f"[NEW_CHATTER_GREETING] @{author_name.lstrip('@')} just sent their very first message: '{msg}'. "
@@ -1841,6 +1843,9 @@ class LocalCoHostApp:
                                     logger.info(f"⏸️ [Chat Filtered] Not triggering AI ({reason}). Preserving member entanglement.")
                                 elif "eco_mode_suppressed" in reason:
                                     logger.info(f"🌙 [Eco Mode Throttled] Not triggering AI ({reason}).")
+                                else:
+                                    # Every skipped viewer message must be visible in the log with its reason.
+                                    logger.info(f"⏭️ [Chat Skipped] @{author_name}: '{msg[:60]}' -> {reason}")
 
                     await asyncio.sleep(self.cfg.chat_poll_interval)
 

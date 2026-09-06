@@ -23,7 +23,7 @@ def test_trigger_hygiene():
     print("=" * 60)
 
     brain = AIBrain()
-    brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=5, is_chat_active=True)
+    brain.set_engagement_mode("active", is_stream_live=True, concurrent_viewers=15, is_chat_active=True)
 
     # 1. False substring matches must NOT trigger direct_mention
     false_positives = [

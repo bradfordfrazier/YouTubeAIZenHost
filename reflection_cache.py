@@ -21,6 +21,8 @@ class CachedReflection:
     mood: str
     full_text: str
     created_at: float
+    raw_text: str = ""   # full_text with [BEAT] markers preserved (for comedic timing on playback)
+    form: str = ""       # bit form: observation / announcement / story / address / one_liner
 
     def to_dict(self) -> Dict[str, str]:
         return {
@@ -64,7 +66,7 @@ class ReflectionCache:
             item = self.queue.pop(0)
             self.total_served += 1
             logger.info(
-                f"⚡ [Reflection Cache Hit] Popped instant reflection on '{item.theme}' "
+                f"⚡ [Reflection Cache Hit] Playing {item.form or 'bit'} on '{item.theme}' "
                 f"([{item.mood.upper()}]: '{item.full_text[:40]}...'). Remaining in cache: {len(self.queue)}"
             )
             return item
@@ -76,9 +78,11 @@ class ReflectionCache:
                 return False
             self.queue.append(reflection)
             self.total_generated += 1
+            words = len(reflection.full_text.split())
             logger.info(
-                f"🧠 [Reflection Cache Primed] Pre-computed '{reflection.theme}' "
-                f"([{reflection.mood.upper()}]: '{reflection.full_text[:40]}...'). Cache level: {len(self.queue)}/{self.max_size}"
+                f"🧠 [Reflection Cache Primed] {reflection.form or 'bit'} on '{reflection.theme}' "
+                f"([{reflection.mood.upper()}], {words} words, beat={'yes' if '[BEAT]' in (reflection.raw_text or '').upper() else 'no'}: "
+                f"'{reflection.full_text[:40]}...'). Cache level: {len(self.queue)}/{self.max_size}"
             )
             return True
 
@@ -104,10 +108,10 @@ class ReflectionCache:
                 if brain.is_generating:
                     continue
 
-                theme = brain.get_next_spontaneous_theme()
-                logger.debug(f"Pre-generating spontaneous reflection for theme '{theme}'...")
+                logger.debug("Pre-generating spontaneous bit...")
 
                 full_text = ""
+                raw_text = ""
                 active_mood = "thoughtful"
                 async for chunk in brain.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True):
                     ev_type = chunk.get("type", "")
@@ -115,7 +119,13 @@ class ReflectionCache:
                         active_mood = chunk.get("mood", "thoughtful")
                     elif ev_type == "complete":
                         full_text = chunk.get("full_text", "").strip()
+                        raw_text = chunk.get("raw_text", "").strip()
                         active_mood = chunk.get("mood", active_mood)
+
+                # The prompt builder draws the theme and form; read them back rather than drawing
+                # our own (which advanced the deck twice and mislabelled every cached item).
+                theme = getattr(brain, "last_spontaneous_theme", "") or "spontaneous"
+                form = getattr(brain, "last_bit_form", "") or ""
 
                 if full_text and len(full_text) >= 15:
                     item = CachedReflection(
@@ -123,6 +133,8 @@ class ReflectionCache:
                         mood=active_mood,
                         full_text=full_text,
                         created_at=time.time(),
+                        raw_text=raw_text,
+                        form=form,
                     )
                     await self.add_reflection(item)
 

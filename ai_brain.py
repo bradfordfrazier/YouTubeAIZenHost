@@ -250,6 +250,8 @@ class AIBrain:
         # Comedic beat marker. The model places [BEAT] immediately before a punchline; the TTS
         # layer turns it into a longer pause (tts_beat_gap_sec) instead of the normal sentence gap.
         self.beat_pattern = re.compile(r"\[\s*BEAT\s*\]", re.IGNORECASE)
+        self.last_spontaneous_theme: str = ""
+        self.last_bit_form: str = ""
 
         # Sentence ender pattern for incremental TTS delivery
         self.sentence_pattern = re.compile(r"([^.!?]+[.!?]+)")
@@ -304,6 +306,24 @@ class AIBrain:
         self._theme_pool = list(range(len(SPONTANEOUS_THEMES)))
         random.shuffle(self._theme_pool)
         self._theme_pool_idx = 0
+
+    # Bit forms for spontaneous material. Rotated so consecutive clips don't share a shape.
+    BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner")
+
+    def get_next_bit_form(self) -> str:
+        """
+        Picks the next bit form. 'one_liner' (Steven Wright style) appears roughly
+        cfg.one_liner_ratio of the time; the other four rotate without immediate repeats.
+        """
+        last = getattr(self, "_last_bit_form", None)
+        ratio = float(getattr(self.cfg, "one_liner_ratio", 0.25))
+        if last != "one_liner" and random.random() < ratio:
+            form = "one_liner"
+        else:
+            pool = [f for f in self.BIT_FORMS if f != "one_liner" and f != last]
+            form = random.choice(pool)
+        self._last_bit_form = form
+        return form
 
     def get_next_spontaneous_theme(self) -> str:
         """Draws the next theme from the shuffled deck so all ~100 themes are utilized before any repeat."""
@@ -862,18 +882,61 @@ class AIBrain:
             prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
         elif is_spontaneous:
             selected_theme = self.get_next_spontaneous_theme()
-            prompt_parts.append(
-                f"\nSpecial Mode: SPONTANEOUS COSMIC REFLECTION & SMART COMEDY for {self.host_name}:\n"
-                "The live stream and chat have been quiet for a moment. Step forward as I AM — universal consciousness acting as a witty, brilliant livestream host.\n"
-                "1. DO NOT ADDRESS ANY SPECIFIC PERSON: Do not say names or handles. Speak universally to the entire stream.\n"
-                "2. Keep it SHORT, SHARP & PUNCHY: Strictly 1 to 2 sentences (~10-45 words maximum, never ramble).\n"
-                f"3. TOPIC & COMIC POINTER: Share a brilliant, hilarious one-liner or profound existential punchline on: '{selected_theme}'.\n"
-                "   - Deliver razor-sharp, witty, dry, or deadpan humor blended seamlessly with non-duality and cosmic truth.\n"
-                "   - Like a mix of a Zen master, Alan Watts, and a high-IQ stand-up comedian.\n"
-                "4. DO NOT use markdown formatting (no asterisks or bullet points) as this is spoken aloud on air.\n"
-                "5. ALWAYS start with an expressive MOOD tag matching the tone: [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], [MOOD: transcendent], or [MOOD: mysterious].\n"
+            selected_form = self.get_next_bit_form()
+            # Expose what was drawn so callers (reflection cache) can label the item correctly
+            # instead of drawing their own theme and desynchronising the deck.
+            self.last_spontaneous_theme = selected_theme
+            self.last_bit_form = selected_form
+            w_min = int(getattr(self.cfg, "bit_words_min", 65))
+            w_max = int(getattr(self.cfg, "bit_words_max", 85))
+
+            form_rules = {
+                "observation": (
+                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 3 to 4 sentences. Notice something about this exact situation — "
+                    "a livestream, an AI voice, a handful of humans watching a glowing shape, the hour, the medium itself — and escalate it "
+                    "in three steps toward a single sharp closer. One idea only."
+                ),
+                "announcement": (
+                    f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 3 to 4 sentences. Deliver it as an official notice, PSA, terms-of-service "
+                    "update, or product recall issued by the universe / management / consciousness itself. Bureaucratic tone, absurd content, "
+                    "escalating clauses, then the closer."
+                ),
+                "story": (
+                    f"FORM: TINY STORY. {w_min}-{w_max} words, 3 to 4 sentences. 'A man once...', 'There was a monk who...', 'Yesterday a woman...' — "
+                    "a concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
+                ),
+                "address": (
+                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 3 to 4 sentences. Speak straight to whoever is watching in the second person. "
+                    "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back on the small thing."
+                ),
+                "one_liner": (
+                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, in the style of Steven Wright: deadpan, literal-minded, "
+                    "a perfectly logical statement that is completely absurd. No setup, no explanation, no second sentence. "
+                    "Mood must be [MOOD: deadpan]. Example shape (do not reuse): 'I bought some batteries, but they weren't included.' "
+                    "Make it about the theme, but the logic of the joke matters more than the theme."
+                ),
+            }
+            beat_rule = (
+                "Put [BEAT] immediately before the closer (the last sentence). "
+                if selected_form != "one_liner" else
+                "Do not use [BEAT] unless the sentence has a natural mid-point twist; if so, place it right before the twist. "
             )
-            prompt_parts.append(f"\n{self.host_name} (Spontaneous Universal Commentary):")
+            prompt_parts.append(
+                f"\nSpecial Mode: SPONTANEOUS BIT for {self.host_name}:\n"
+                "The stream is quiet. Step forward as I AM — universal consciousness doing a tight piece of stand-up.\n"
+                f"THEME: '{selected_theme}'.\n"
+                f"{form_rules[selected_form]}\n"
+                "RULES:\n"
+                "1. SELF-CONTAINED: This will be clipped and watched cold, on repeat, by people who saw nothing before it. "
+                "No names, no handles, no callbacks, no 'as I said', no reference to chat or to any earlier bit. The first sentence must work with zero context.\n"
+                "2. ONE IDEA, ESCALATED: every sentence raises the stakes of the same idea; never switch topics mid-bit.\n"
+                f"3. TIMING: {beat_rule}Sentences are spoken, so keep each one sayable in one breath.\n"
+                "4. VOICE: dry, precise, slightly rude to the ego and never to the person; Alan Watts crossed with a working comic. "
+                "Banned: 'Ah,', 'delve', 'tapestry', 'cosmic dance', 'in the grand scheme', 'beautiful', ending on a question, stating a moral.\n"
+                "5. NO markdown (spoken aloud). START with a MOOD tag: [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], "
+                "[MOOD: transcendent], or [MOOD: mysterious].\n"
+            )
+            prompt_parts.append(f"\n{self.host_name} (Spontaneous Bit — {selected_form}):")
         elif is_cast_question:
             prompt_parts.append(
                 f"\nSpecial Mode: SYNTHETIC CAST INTERACTION for {self.host_name}:\n"
@@ -1020,7 +1083,8 @@ class AIBrain:
             if cached:
                 yield {"type": "mood", "mood": cached.mood}
                 # Yield sentence chunks for cached reflection if multi-sentence
-                c_sents, _ = self._extract_completed_sentences(cached.full_text + " ")
+                c_source = getattr(cached, "raw_text", None) or cached.full_text
+                c_sents, _ = self._extract_completed_sentences(c_source + " ")
                 if not c_sents:
                     c_sents = [(self.beat_pattern.sub("", cached.full_text).strip(), False)]
                 for s_text, s_beat in c_sents:
@@ -1168,6 +1232,7 @@ class AIBrain:
                     await asyncio.sleep(0.005)
 
             # Flush and repair remaining sentence buffer
+            raw_spoken = re.sub(r"@+", "@", self.mood_pattern.sub("", accumulated_text)).strip()  # keeps [BEAT]
             final_spoken = self.mood_pattern.sub("", accumulated_text).strip()
             final_spoken = self.beat_pattern.sub(" ", final_spoken)
             final_spoken = re.sub(r"\s{2,}", " ", re.sub(r"@+", "@", final_spoken)).strip()
@@ -1198,7 +1263,7 @@ class AIBrain:
                     self.response_timestamps.append(now_ts)
                 self.consecutive_gemini_errors = 0
                 self.circuit_breaker_tripped = False
-                yield {"type": "complete", "full_text": final_spoken, "mood": active_mood}
+                yield {"type": "complete", "full_text": final_spoken, "raw_text": raw_spoken, "mood": active_mood}
                 logger.info(f"AI response completed ({active_mood}): '{final_spoken}'")
             else:
                 logger.warning(

@@ -202,6 +202,11 @@ class AppConfig:
     inter_sentence_gap_sec: float = _get_float("INTER_SENTENCE_GAP_SEC", 0.15)
     # Longer pause inserted where the model wrote [BEAT] (right before a punchline)
     tts_beat_gap_sec: float = _get_float("TTS_BEAT_GAP_SEC", 0.55)
+    # Spontaneous bit generator: word budget for multi-line bits (~2.7 words/s -> 65-85 words = 25-32 s)
+    bit_words_min: int = _get_int("BIT_WORDS_MIN", 65)
+    bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)
+    # Fraction of spontaneous slots that get a Steven Wright style one-liner instead of a full bit
+    one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)

@@ -311,6 +311,10 @@ class AppConfig:
     comment_fade_out_sec: float = _get_float("COMMENT_FADE_OUT_SEC", 1.2)
     comment_post_speech_hold_sec: float = _get_float("COMMENT_POST_SPEECH_HOLD_SEC", 15.0)
     comment_active_queue_hold_sec: float = _get_float("COMMENT_ACTIVE_QUEUE_HOLD_SEC", 2.5)
+    # Hard floor on clean-music time between the END of one spoken turn and the START of the next,
+    # enforced in the scheduler so a message arriving mid-transition cannot cut in early. This is
+    # what makes the preceding bit clippable. 0 disables.
+    min_turn_gap_sec: float = _get_float("MIN_TURN_GAP_SEC", 12.0)
     reflection_post_speech_chat_delay_sec: float = _get_float(
         "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
         _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),

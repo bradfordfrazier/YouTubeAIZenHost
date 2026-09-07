@@ -458,6 +458,8 @@ class LocalCoHostApp:
         # Activity & Commentary Timers
         self.last_activity_time = time.time()
         self.last_turn_completed_time = 0.0
+        # End of the previous turn's audible speech; the scheduler enforces min_turn_gap_sec from it.
+        self.last_turn_audio_end: float = 0.0
         self.last_turn_event_type = ""
         self.last_chat_time = 0.0
         self.last_real_chat_time = 0.0
@@ -818,6 +820,23 @@ class LocalCoHostApp:
                 event = heapq.heappop(self.comment_queue)
                 self.active_turn_event = event
                 self.active_turn_task = asyncio.current_task()
+
+                # Clean-music floor: guarantee min_turn_gap_sec between the end of the previous
+                # turn's audio and the start of this one, regardless of when the item arrived
+                # (a message landing mid-transition used to cut in with no gap at all).
+                # Superchats and direct mentions skip the wait.
+                gap_floor = float(self.cfg.min_turn_gap_sec)
+                if gap_floor > 0 and self.last_turn_audio_end > 0 and event.event_type not in ("superchat", "direct_mention"):
+                    remaining = gap_floor - (time.time() - self.last_turn_audio_end)
+                    if remaining > 0.05:
+                        logger.info(
+                            f"⏸️ [Turn Spacing] Holding {remaining:.1f}s more clean music before "
+                            f"'{event.event_type}' (floor {gap_floor:.1f}s) so the previous turn stays clippable."
+                        )
+                        try:
+                            await asyncio.sleep(remaining)
+                        except asyncio.CancelledError:
+                            pass
 
                 # Execute full sequential turn under a hard timeout so a stuck turn can never
                 # block the scheduler (cast, reflections, chat replies) indefinitely.
@@ -1282,6 +1301,8 @@ class LocalCoHostApp:
                 self.visualizer.set_utterance_state(False)
             self.last_activity_time = time.time()
             self.last_turn_completed_time = time.time()
+            # End of audible speech for this turn; the scheduler enforces min_turn_gap_sec from it.
+            self.last_turn_audio_end = time.time()
             self.last_turn_event_type = event.event_type
             if event.event_type == "spontaneous":
                 self.last_spontaneous_time = time.time()

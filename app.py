@@ -1230,7 +1230,25 @@ class LocalCoHostApp:
                     if has_queued_next:
                         logger.info(f"✨ [Direct Turn Transition] Proceeding directly to next queued comment ({len(self.comment_queue)} pending) without motto.")
                     else:
-                        logger.info("✨ [Motto Transition] Reflection finished with empty queue. Transitioning straight to motto.")
+                        # Optional extra stillness after a bit before the motto fades in. Bits are
+                        # the clippable unit, so their tail is tuned separately from a chat answer's.
+                        motto_delay = float(self.cfg.reflection_post_speech_motto_delay_sec)
+                        if motto_delay > 0:
+                            logger.info(f"⏳ [Post-Reflection Stillness] Holding {motto_delay:.1f}s before the motto...")
+                            t_still = time.perf_counter()
+                            try:
+                                while time.perf_counter() - t_still < motto_delay:
+                                    await asyncio.sleep(0.05)
+                                    if len(self.comment_queue) > 0:
+                                        logger.info("⏳ [Post-Reflection Stillness] Comment arrived; ending stillness early.")
+                                        break
+                            except asyncio.CancelledError:
+                                pass
+                            if len(self.comment_queue) > 0:
+                                logger.info(f"✨ [Direct Turn Transition] Proceeding to queued comment ({len(self.comment_queue)} pending) without motto.")
+                                has_queued_next = True
+                        if not has_queued_next:
+                            logger.info("✨ [Motto Transition] Reflection finished with empty queue. Transitioning to motto.")
                         self.current_pinned_chat = None
                         self.current_ai_subtitle = ""
                         self.visualizer.clear_pinned()

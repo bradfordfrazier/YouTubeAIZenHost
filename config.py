@@ -315,6 +315,10 @@ class AppConfig:
     # enforced in the scheduler so a message arriving mid-transition cannot cut in early. This is
     # what makes the preceding bit clippable. 0 disables.
     min_turn_gap_sec: float = _get_float("MIN_TURN_GAP_SEC", 12.0)
+    # Extra stillness after a spontaneous bit finishes speaking, BEFORE the motto begins its
+    # pre-fade. Applies only to bits (chat/cast turns keep their own post-speech hold), so a
+    # finished bit can breathe without making a viewer's answer linger on screen.
+    reflection_post_speech_motto_delay_sec: float = _get_float("REFLECTION_POST_SPEECH_MOTTO_DELAY_SEC", 0.0)
     reflection_post_speech_chat_delay_sec: float = _get_float(
         "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
         _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),

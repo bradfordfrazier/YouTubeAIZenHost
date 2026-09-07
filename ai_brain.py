@@ -1013,7 +1013,7 @@ class AIBrain:
                     "escalating clauses, then the closer."
                 ),
                 "story": (
-                    f"FORM: TINY STORY. {w_min}-{w_max} words, 3 to 4 sentences. 'A man once...', 'There was a monk who...', 'Yesterday a woman...' — "
+                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. 'A man once...', 'There was a monk who...', 'Yesterday a woman...' — "
                     "a concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (

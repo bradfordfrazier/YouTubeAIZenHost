@@ -1185,22 +1185,33 @@ class LocalCoHostApp:
 
                 if is_spontaneous:
                     # After a spontaneous reflection finishes speaking:
-                    # Hold in serene silence/stillness for reflection_post_speech_chat_delay_sec (default 3.0s)
-                    # before allowing ANY next sequence (chat question or motto) to emerge.
+                    #  - Nothing queued -> go straight to the motto. The bit is over; the only
+                    #    pause the viewer should perceive is MOTTO_PRE_FADE_IN_SEC.
+                    #  - Something queued -> hold reflection_post_speech_chat_delay_sec of clean
+                    #    music first, so the finished bit is clippable before the next turn cuts in.
+                    #    Poll rather than sleeping the whole span, so a queue that drains (TTL
+                    #    expiry) releases the motto immediately.
                     refl_delay = float(self.cfg.reflection_post_speech_chat_delay_sec)
-                    logger.info(f"⏳ [Post-Reflection Hold] Holding peaceful stillness for {refl_delay:.1f}s after reflection (Queue: {len(self.comment_queue)})...")
-                    t_hold_start = time.perf_counter()
-                    try:
-                        while time.perf_counter() - t_hold_start < refl_delay:
-                            await asyncio.sleep(0.05)
-                    except asyncio.CancelledError:
-                        pass
+                    if len(self.comment_queue) > 0 and refl_delay > 0:
+                        logger.info(
+                            f"⏳ [Post-Reflection Hold] {len(self.comment_queue)} queued; holding "
+                            f"{refl_delay:.1f}s of clean music so this bit stays clippable..."
+                        )
+                        t_hold_start = time.perf_counter()
+                        try:
+                            while time.perf_counter() - t_hold_start < refl_delay:
+                                await asyncio.sleep(0.05)
+                                if len(self.comment_queue) == 0:
+                                    logger.info("⏳ [Post-Reflection Hold] Queue drained; releasing early to motto.")
+                                    break
+                        except asyncio.CancelledError:
+                            pass
 
                     has_queued_next = len(self.comment_queue) > 0
                     if has_queued_next:
                         logger.info(f"✨ [Direct Turn Transition] Proceeding directly to next queued comment ({len(self.comment_queue)} pending) without motto.")
                     else:
-                        logger.info(f"✨ [Motto Transition] {refl_delay:.1f}s post-reflection pause finished with empty queue. Transitioning to motto.")
+                        logger.info("✨ [Motto Transition] Reflection finished with empty queue. Transitioning straight to motto.")
                         self.current_pinned_chat = None
                         self.current_ai_subtitle = ""
                         self.visualizer.clear_pinned()

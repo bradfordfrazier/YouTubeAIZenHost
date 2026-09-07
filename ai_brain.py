@@ -842,6 +842,9 @@ class AIBrain:
     def _build_context_prompt(self, override_prompt: Optional[str] = None,
                               name_already_spoken: bool = False) -> str:
         """Construct the dynamic context prompt for Gemini."""
+        # Defined up front: the anti-repetition block below branches on it. It was previously
+        # declared further down, which raised UnboundLocalError on every non-spontaneous turn.
+        is_spontaneous = bool(override_prompt and "[SPONTANEOUS_REFLECTION]" in override_prompt)
         prompt_parts = []
         chan_handle = self.cfg.youtube_channel_handle
         prompt_parts.append(
@@ -936,7 +939,6 @@ class AIBrain:
         is_new_chatter = bool(override_prompt and "[NEW_CHATTER_GREETING]" in override_prompt)
         is_viewer_joined = bool(override_prompt and "[VIEWER_JOINED]" in override_prompt)
         is_chat_encouragement = bool(override_prompt and "[CHAT_ENCOURAGEMENT]" in override_prompt)
-        is_spontaneous = bool(override_prompt and "[SPONTANEOUS_REFLECTION]" in override_prompt)
         is_cast_question = bool(
             override_prompt
             and (

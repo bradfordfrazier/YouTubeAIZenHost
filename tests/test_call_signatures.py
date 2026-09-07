@@ -90,3 +90,67 @@ def test_cast_session_cap_is_enforced():
     src = (ROOT / "cast_engine.py").read_text(encoding="utf-8", errors="ignore")
     assert "cast_max_per_session" in src, "the configured cap must actually gate cast triggering"
     assert "total_cast_questions_served >= cap" in src
+
+
+def test_no_use_before_assignment_in_prompt_builders():
+    """
+    Guards UnboundLocalError in the prompt builders. A local read before its first assignment
+    raises only at runtime, and in _build_context_prompt that means every turn fails, the guard
+    swallows it, and the stream goes silent with nothing but the motto.
+    """
+    import ast as _ast
+
+    def first_lines(fn_node, name, ctx):
+        return [
+            n.lineno for n in _ast.walk(fn_node)
+            if isinstance(n, _ast.Name) and n.id == name and isinstance(n.ctx, ctx)
+        ]
+
+    tree = _ast.parse((ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore"))
+    checked = 0
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith(("_build_", "generate_")):
+            continue
+        params = {a.arg for a in node.args.args} | {a.arg for a in node.args.kwonlyargs}
+
+        # Comprehensions and generator expressions have their own scope, and their targets appear
+        # textually after the element expression, so skip anything bound inside one.
+        comp_targets = set()
+        comp_nodes = [
+            n for n in _ast.walk(node)
+            if isinstance(n, (_ast.ListComp, _ast.SetComp, _ast.DictComp, _ast.GeneratorExp))
+        ]
+        for comp in comp_nodes:
+            for gen in comp.generators:
+                for t in _ast.walk(gen.target):
+                    if isinstance(t, _ast.Name):
+                        comp_targets.add(t.id)
+
+        def _inside_comprehension(lineno):
+            return any(
+                c.lineno <= lineno <= (getattr(c, "end_lineno", c.lineno) or c.lineno)
+                for c in comp_nodes
+            )
+
+        assigned = {
+            n.id for n in _ast.walk(node)
+            if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Store)
+        } - comp_targets
+        for name in assigned:
+            if name in params:
+                continue
+            stores = first_lines(node, name, _ast.Store)
+            loads = [l for l in first_lines(node, name, _ast.Load) if not _inside_comprehension(l)]
+            if not stores or not loads:
+                continue
+            # Comprehension/loop targets legitimately load after storing in the same statement.
+            if min(loads) < min(stores):
+                raise AssertionError(
+                    f"{node.name}: '{name}' is read at line {min(loads)} but first assigned at "
+                    f"line {min(stores)} — UnboundLocalError at runtime."
+                )
+        checked += 1
+    assert checked >= 2, "expected to scan at least the prompt builder and the stream generator"
+

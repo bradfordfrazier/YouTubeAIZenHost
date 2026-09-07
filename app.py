@@ -1298,6 +1298,29 @@ class LocalCoHostApp:
                         self.visualizer.clear_pinned()
                         self.visualizer.clear_subtitle()
 
+            else:
+                # Degenerate turn: audio never played (pushed_chunks == 0) or the stream ended
+                # without usable text (empty clean_speech). The whole post-speech section above —
+                # including the motto transition and the unpin — used to be skipped silently, so
+                # the screen kept whatever was last displayed until some later turn changed it.
+                # That is why the motto occasionally failed to appear between reflections.
+                logger.warning(
+                    f"⚠️ [Degenerate Turn] '{event.event_type}' produced no usable output "
+                    f"(chunks={pushed_chunks}, text_len={len(clean_speech or '')}); "
+                    "skipping speech bookkeeping but still restoring the motto."
+                )
+                if len(self.comment_queue) > 0:
+                    logger.info("✨ [Direct Turn Transition] Comment queued; proceeding without motto.")
+                else:
+                    self.current_pinned_chat = None
+                    self.current_ai_subtitle = ""
+                    try:
+                        self.visualizer.clear_pinned()
+                        self.visualizer.clear_subtitle()
+                    except Exception as e:
+                        logger.debug(f"degenerate-turn visual reset note: {e}")
+                    logger.info("✨ [Motto Transition] Degenerate turn cleaned up; transitioning to motto.")
+
         except asyncio.CancelledError:
             logger.debug("Active AI turn was cancelled.")
             self.tts.clear_audio_buffer()

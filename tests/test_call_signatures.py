@@ -154,3 +154,33 @@ def test_no_use_before_assignment_in_prompt_builders():
         checked += 1
     assert checked >= 2, "expected to scan at least the prompt builder and the stream generator"
 
+
+def test_degenerate_turn_still_restores_the_motto():
+    """
+    The post-speech section (hold, unpin, motto transition, record_completed_turn) is gated behind
+    `pushed_chunks > 0 and clean_speech`. Without an else branch, a turn that produced no audio or
+    no usable text skipped all of it silently and the screen kept the previous state — which is why
+    the motto sometimes failed to appear between reflections.
+    """
+    import ast as _ast
+    src = (ROOT / "app.py").read_text(encoding="utf-8", errors="ignore")
+    tree = _ast.parse(src)
+
+    found = False
+    for node in _ast.walk(tree):
+        if not (isinstance(node, _ast.AsyncFunctionDef) and node.name == "_execute_ai_turn"):
+            continue
+        for sub in _ast.walk(node):
+            if not isinstance(sub, _ast.If):
+                continue
+            seg = _ast.get_source_segment(src, sub.test) or ""
+            if "pushed_chunks > 0" in seg and "clean_speech" in seg:
+                found = True
+                assert sub.orelse, (
+                    "the speech-bookkeeping guard has no else branch; a degenerate turn will "
+                    "leave the motto unset"
+                )
+    assert found, "could not locate the `pushed_chunks > 0 and clean_speech` guard"
+    assert "[Degenerate Turn]" in src, "the skip path must log, or it stays invisible"
+
+

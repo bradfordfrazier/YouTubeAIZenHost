@@ -63,7 +63,7 @@ def test_gpu_exclusivity_and_background_synthesis():
         tts.active_backend = "chatterbox"
         synth_calls = []
 
-        async def mock_synth(clean_text, exaggeration, is_live=True):
+        async def mock_synth(clean_text, exaggeration, cfg_weight=0.4, is_live=True):
             synth_calls.append((clean_text, is_live, time.time()))
             return np.ones((800, 2), dtype=np.float32)
 

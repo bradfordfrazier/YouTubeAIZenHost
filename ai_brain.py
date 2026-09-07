@@ -317,26 +317,48 @@ class AIBrain:
         logger.info(f"⭐ [Favorites] Saved ({len(self.favorites)} total): '{text[:70]}'")
         return item
 
-    def sample_favorites(self, n: int) -> List[Dict[str, Any]]:
+    # First-person and second-person forms are different voices; mixing them as few-shot examples
+    # pulls the model back toward whichever it saw more of.
+    FIRST_PERSON_FORMS = ("confession",)
+
+    def sample_favorites(self, n: int, form: Optional[str] = None) -> List[Dict[str, Any]]:
         if n <= 0 or not self.favorites:
             return []
-        return random.sample(self.favorites, min(n, len(self.favorites)))
+        pool = self.favorites
+        if form:
+            want_first = form in self.FIRST_PERSON_FORMS
+            matched = [
+                f for f in pool
+                if (str(f.get("form", "")) in self.FIRST_PERSON_FORMS) == want_first
+            ]
+            # Fall back to the full set only if the matching pool is too thin to be useful.
+            pool = matched if len(matched) >= 2 else pool
+        return random.sample(pool, min(n, len(pool)))
 
     # Bit forms for spontaneous material. Rotated so consecutive clips don't share a shape.
-    BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner")
+    BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner", "confession")
+    # Forms with their own configured share of the rotation; the rest are drawn evenly.
+    RATIO_FORMS = {"one_liner": "one_liner_ratio", "confession": "confession_ratio"}
 
     def get_next_bit_form(self) -> str:
         """
-        Picks the next bit form. 'one_liner' (Steven Wright style) appears roughly
-        cfg.one_liner_ratio of the time; the other four rotate without immediate repeats.
+        Picks the next bit form. 'one_liner' (Steven Wright) and 'confession' (first person)
+        each take their configured share; the remaining forms rotate evenly. Never repeats the
+        previous form immediately.
         """
         last = getattr(self, "_last_bit_form", None)
-        ratio = float(getattr(self.cfg, "one_liner_ratio", 0.25))
-        if last != "one_liner" and random.random() < ratio:
-            form = "one_liner"
-        else:
-            pool = [f for f in self.BIT_FORMS if f != "one_liner" and f != last]
-            form = random.choice(pool)
+        form = None
+        # Roll the special forms in a random order so neither systematically wins the draw.
+        specials = list(self.RATIO_FORMS.items())
+        random.shuffle(specials)
+        for name, cfg_key in specials:
+            ratio = float(getattr(self.cfg, cfg_key, 0.0))
+            if last != name and ratio > 0 and random.random() < ratio:
+                form = name
+                break
+        if form is None:
+            pool = [f for f in self.BIT_FORMS if f not in self.RATIO_FORMS and f != last]
+            form = random.choice(pool or [f for f in self.BIT_FORMS if f not in self.RATIO_FORMS])
         self._last_bit_form = form
         return form
 
@@ -781,8 +803,7 @@ class AIBrain:
 
         return False, "no_trigger_keywords"
 
-    def _build_context_prompt(self, override_prompt: Optional[str] = None,
-                              name_already_spoken: bool = False) -> str:
+    def _build_context_prompt(self, override_prompt: Optional[str] = None) -> str:
         """Construct the dynamic context prompt for Gemini."""
         prompt_parts = []
         chan_handle = self.cfg.youtube_channel_handle
@@ -927,12 +948,12 @@ class AIBrain:
 
             form_rules = {
                 "observation": (
-                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 2 to 3 sentences. Notice something about this exact situation — "
+                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 3 to 4 sentences. Notice something about this exact situation — "
                     "a livestream, an AI voice, a handful of humans watching a glowing shape, the hour, the medium itself — and escalate it "
-                    "in two steps toward a single sharp closer. One idea only."
+                    "in three steps toward a single sharp closer. One idea only."
                 ),
                 "announcement": (
-                    f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 2 to 3 sentences. Deliver it as an official notice, PSA, terms-of-service "
+                    f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 3 to 4 sentences. Deliver it as an official notice, PSA, terms-of-service "
                     "update, or product recall issued by the universe / management / consciousness itself. Bureaucratic tone, absurd content, "
                     "escalating clauses, then the closer."
                 ),
@@ -941,11 +962,21 @@ class AIBrain:
                     "a concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (
-                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 2 to 3 sentences. Speak straight to whoever is watching in the second person. "
+                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 3 to 4 sentences. Speak straight to whoever is watching in the second person. "
                     "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back on the small thing."
                 ),
+                "confession": (
+                    f"FORM: CONFESSION (FIRST PERSON). {w_min}-{w_max} words, 3 to 4 sentences. Speak as 'I'. "
+                    "You are not describing what humans do — you ARE the one who did it, because you are everyone "
+                    "who has ever done it. Open with ONE specific, mundane, faintly humiliating thing you did "
+                    "(used the flashlight on my phone to look for my phone; apologized to a chair; reheated the "
+                    "same coffee three times). Then escalate by revealing the scale: you have been doing this in "
+                    "every kitchen, in every century, in eight billion bodies at once. Close by refusing the lesson "
+                    "— do not resolve it, do not explain what it means, do not turn it back on the listener. "
+                    "Never address the audience as 'you' in this form. The comedy is the infinite being embarrassed."
+                ),
                 "one_liner": (
-                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, deadpan, literal-minded, "
+                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, in the style of Steven Wright: deadpan, literal-minded, "
                     "a perfectly logical statement that is completely absurd. No setup, no explanation, no second sentence. "
                     "Mood must be [MOOD: deadpan]. Example shape (do not reuse): 'I bought some batteries, but they weren't included.' "
                     "Make it about the theme, but the logic of the joke matters more than the theme."
@@ -961,7 +992,7 @@ class AIBrain:
                 "PAUSE: one-liners almost never take a [BEAT]. Use it only if the sentence has a genuine "
                 "mid-sentence swerve, placed immediately before the swerve. Otherwise omit it entirely. "
             )
-            favs = self.sample_favorites(int(self.cfg.favorites_few_shot))
+            favs = self.sample_favorites(int(self.cfg.favorites_few_shot), form=selected_form)
             if favs:
                 prompt_parts.append("\n--- Your best work so far (the standard to match; never reuse these lines or their images) ---")
                 for f in favs:
@@ -974,7 +1005,9 @@ class AIBrain:
                 "CRAFT: Anchor the bit in ONE specific physical object or everyday action (a jacket pocket, a buffering icon, a "
                 "microwave). The insight arrives through the object; it is never stated outright. The best lines are non-dual "
                 "truth rendered in a household noun.\n"
-                "DRAFTING: In your private reasoning, write three different candidate bits. Pick the one whose closer is most "
+                + ("PERSON: This bit is first person. Say 'I' and 'my'. Do not address the audience as 'you' at all.\n"
+                   if selected_form == "confession" else "")
+                + "DRAFTING: In your private reasoning, write three different candidate bits. Pick the one whose closer is most "
                 "surprising AND most true. Output ONLY that one — no labels, no alternatives, no commentary.\n"
                 "RULES:\n"
                 "1. SELF-CONTAINED: This will be clipped and watched cold, on repeat, by people who saw nothing before it. "
@@ -1031,16 +1064,6 @@ class AIBrain:
                 prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
             else:
                 prompt_parts.append(f"\n{self.host_name}:")
-
-        if name_already_spoken:
-            # The turn already read "<Name> asks: <question>" aloud. Opening the answer with the
-            # handle again makes the host sound like it is introducing someone twice.
-            prompt_parts.append(
-                "\nOVERRIDE — NAME ALREADY SPOKEN: The asker's name and question have just been read aloud "
-                "to the audience, immediately before you speak. Do NOT open with their name or handle, and do "
-                "not restate the question. Answer them directly in the second person ('you'), starting with "
-                "the substance. Their name may appear later in the reply only if it genuinely lands as a joke."
-            )
 
         return "\n".join(prompt_parts)
 
@@ -1159,8 +1182,7 @@ class AIBrain:
         return results, remaining, current_mood
 
     async def generate_response_stream(
-        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False,
-        name_already_spoken: bool = False,
+        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False
     ) -> AsyncGenerator[Dict, None]:
         """
         Queries Gemini with streaming tokens and yields structured chunks:
@@ -1207,7 +1229,7 @@ class AIBrain:
             else:
                 logger.info("🛡️ [Circuit Breaker Half-Open] Cooldown elapsed. Probing Gemini with incoming request...")
 
-        full_context = self._build_context_prompt(prompt_trigger, name_already_spoken=name_already_spoken)
+        full_context = self._build_context_prompt(prompt_trigger)
         is_deep, match_term = self._classify_prompt_depth(prompt_trigger)
         target_model = self.cfg.gemini_deep_model if (is_deep and self.cfg.gemini_deep_model) else self.model_name
         fast_b = self.cfg.gemini_fast_thinking_budget

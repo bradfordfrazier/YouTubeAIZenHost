@@ -226,6 +226,9 @@ class AppConfig:
     bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)
     # Fraction of spontaneous slots that get a Steven Wright style one-liner instead of a full bit
     one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
+    # Share of spontaneous slots delivered in first person ("I used the flashlight on my phone to look
+    # for my phone"): the infinite confessing to a mundane failure rather than roasting you for it.
+    confession_ratio: float = _get_float("CONFESSION_RATIO", 0.25)
     # Hard cap for one-liners (multi-line bits are capped at bit_words_max * 1.2)
     one_liner_words_max: int = _get_int("ONE_LINER_WORDS_MAX", 25)
     # Offline bit generation gets its own thinking budget and temperature (latency is irrelevant there)

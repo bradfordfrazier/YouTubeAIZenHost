@@ -803,7 +803,8 @@ class AIBrain:
 
         return False, "no_trigger_keywords"
 
-    def _build_context_prompt(self, override_prompt: Optional[str] = None) -> str:
+    def _build_context_prompt(self, override_prompt: Optional[str] = None,
+                              name_already_spoken: bool = False) -> str:
         """Construct the dynamic context prompt for Gemini."""
         prompt_parts = []
         chan_handle = self.cfg.youtube_channel_handle
@@ -981,7 +982,7 @@ class AIBrain:
                     "convention at its word and follow it exactly one step too far. No setup, no explanation, no "
                     "second sentence, no wordplay for its own sake. Mood must be [MOOD: deadpan]. "
                     "Shape (never reuse these): 'I bought some batteries, but they were not included.' / "
-                    "'I put a skylight in my apartment. The people upstairs are furious.' "
+                    "'I keep a spare key in case I ever lock myself out of a house I do not own.' "
                     "Make it about the theme, but the logic of the joke matters more than the theme."
                 ),
             }
@@ -1067,6 +1068,16 @@ class AIBrain:
                 prompt_parts.append(f"\nIncoming Event: {override_prompt}\n{self.host_name}:")
             else:
                 prompt_parts.append(f"\n{self.host_name}:")
+
+        if name_already_spoken:
+            # The turn already read "<Name> asks: <question>" aloud. Opening the answer with the
+            # handle again makes the host sound like it is introducing someone twice.
+            prompt_parts.append(
+                "\nOVERRIDE — NAME ALREADY SPOKEN: The asker's name and question have just been read aloud "
+                "to the audience, immediately before you speak. Do NOT open with their name or handle, and do "
+                "not restate the question. Answer them directly in the second person ('you'), starting with "
+                "the substance. Their name may appear later in the reply only if it genuinely lands as a joke."
+            )
 
         return "\n".join(prompt_parts)
 
@@ -1185,7 +1196,8 @@ class AIBrain:
         return results, remaining, current_mood
 
     async def generate_response_stream(
-        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False
+        self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False,
+        name_already_spoken: bool = False,
     ) -> AsyncGenerator[Dict, None]:
         """
         Queries Gemini with streaming tokens and yields structured chunks:
@@ -1232,7 +1244,7 @@ class AIBrain:
             else:
                 logger.info("🛡️ [Circuit Breaker Half-Open] Cooldown elapsed. Probing Gemini with incoming request...")
 
-        full_context = self._build_context_prompt(prompt_trigger)
+        full_context = self._build_context_prompt(prompt_trigger, name_already_spoken=name_already_spoken)
         is_deep, match_term = self._classify_prompt_depth(prompt_trigger)
         target_model = self.cfg.gemini_deep_model if (is_deep and self.cfg.gemini_deep_model) else self.model_name
         fast_b = self.cfg.gemini_fast_thinking_budget

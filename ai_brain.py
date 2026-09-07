@@ -323,6 +323,36 @@ class AIBrain:
         logger.info(f"⭐ [Favorites] Saved ({len(self.favorites)} total): '{text[:70]}'")
         return item
 
+    # Words too common to be a bit's distinctive anchor; never worth banning.
+    _ANCHOR_STOPWORDS = frozenset("""
+        the a an and or but if then than that this these those there here what which who whom whose
+        you your yours i me my mine we us our ours it its they them their he she his her
+        is are was were be been being am do does did doing have has had having will would can could
+        should shall may might must not no nor only just even also very really so too much many
+        one two three thing things something anything nothing everyone someone anyone everything
+        time times year years day days moment moments life world universe mind self ego people human
+        humans person body way ways idea thought thoughts question answer reason point end start
+        of in on at to for with from by about into over under after before while when where how why
+        as like still yet own same other another new old more most less least first last next been
+    """.split())
+
+    def _recent_bit_anchors(self, n_bits: int = 24, max_terms: int = 28) -> List[str]:
+        """
+        Extracts the distinctive concrete nouns from recent spoken lines so the prompt can forbid
+        them. Theme rotation stops topics repeating, but nothing stopped the same *object* showing
+        up over and over ("phone", "keys", "coffee") because prompt examples pull the model toward
+        them. Banning recent anchors is the cheapest way to force a fresh image each time.
+        """
+        seen: List[str] = []
+        for item in list(self.dialogue_history)[-n_bits:]:
+            for w in re.findall(r"[a-zA-Z][a-zA-Z'-]{2,}", str(item.get("text", "")).lower()):
+                w = w.strip("'-")
+                if len(w) < 4 or w in self._ANCHOR_STOPWORDS:
+                    continue
+                if w not in seen:
+                    seen.append(w)
+        return seen[-max_terms:]
+
     # First-person and second-person forms are different voices; mixing them as few-shot examples
     # pulls the model back toward whichever it saw more of.
     FIRST_PERSON_FORMS = ("confession",)
@@ -873,12 +903,27 @@ class AIBrain:
                 "CRITICAL CONTINUITY CONSTRAINT: Maintain conversational thread continuity with recent turns above (you may make natural callbacks and advance the topic), but NEVER repeat the same jokes, metaphors, or opening words."
             )
         elif self.dialogue_history:
+            # Spontaneous bits are generated offline into the cache, so a wider window costs no
+            # stream latency and is the difference between three minutes of memory and twenty.
+            window = int(self.cfg.anti_repetition_window) if is_spontaneous else 6
             prompt_parts.append("\n--- Your Recent Remarks in This Stream ---")
-            for item in list(self.dialogue_history)[-6:]:
+            for item in list(self.dialogue_history)[-window:]:
                 prompt_parts.append(f"{self.host_name}: \"{item['text']}\"")
             prompt_parts.append(
-                "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, and distinct concrete images on every turn."
+                "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors "
+                "from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, and distinct "
+                "concrete images on every turn."
             )
+            if is_spontaneous:
+                anchors = self._recent_bit_anchors()
+                if anchors:
+                    prompt_parts.append(
+                        "USED IMAGES — DO NOT USE ANY OF THESE WORDS OR THE OBJECTS THEY NAME: "
+                        + ", ".join(anchors) + ".\n"
+                        "Pick an anchor object that appears nowhere in that list. If your first instinct is on the "
+                        "list, that instinct belongs to the last bit, not this one — discard it and find something "
+                        "from a different room, a different trade, or a different century."
+                    )
 
         is_celebration = bool(
             override_prompt
@@ -980,8 +1025,9 @@ class AIBrain:
                     f"FORM: CONFESSION (FIRST PERSON). {w_min}-{w_max} words, 3 to 4 sentences. Speak as 'I'. "
                     "You are not describing what humans do — you ARE the one who did it, because you are everyone "
                     "who has ever done it. Open with ONE specific, mundane, faintly humiliating thing you did "
-                    "(used the flashlight on my phone to look for my phone; apologized to a chair; reheated the "
-                    "same coffee three times). Then escalate by revealing the scale: you have been doing this in "
+                    "— and it must NOT be one of the worn ones: not a phone used to find a phone, not apologizing to "
+                    "furniture, not reheating coffee, not glasses on your head, not keys. Those are used up. Find a "
+                    "fresh one. Then escalate by revealing the scale: you have been doing this in "
                     "every kitchen, in every century, in eight billion bodies at once. Close by refusing the lesson "
                     "— do not resolve it, do not explain what it means, do not turn it back on the listener. "
                     "Never address the audience as 'you' in this form. The comedy is the infinite being embarrassed."
@@ -1000,9 +1046,12 @@ class AIBrain:
                     "sentence must not know it is funny.\n"
                     "  (e) OFTEN A QUIET REVERSAL: the object has agency and you do not; the precaution creates the "
                     "problem; the solution is the thing it solved.\n"
-                    "Shapes to aim at (never reuse the wording): 'I bought some batteries, but they were not included.' / "
-                    "'I keep a spare key in case I lock myself out of a house I do not own.' / "
-                    "'My clock is five minutes fast, so I have been early to everything for eleven years and late to all of it.'\n"
+                    "STRUCTURE REFERENCES ONLY — their wording, objects and subject matter are FORBIDDEN (batteries, "
+                    "spare keys and clocks are used up). Study the shape, then go somewhere else entirely: "
+                    "'I bought some batteries, but they were not included.' (a product that undoes its own promise) / "
+                    "'I keep a spare key in case I lock myself out of a house I do not own.' (a precaution for a life "
+                    "you do not have) / 'My clock is five minutes fast, so I have been early to everything for eleven "
+                    "years and late to all of it.' (a fix that becomes the flaw).\n"
                     "Write six candidates in your reasoning, delete every one that explains itself or needs a second "
                     "sentence, and output the flattest survivor. If none survives, write a plain true sentence about the "
                     "theme instead of a bad joke."
@@ -1030,7 +1079,8 @@ class AIBrain:
                 f"{form_rules[selected_form]}\n"
                 "CRAFT: Anchor the bit in ONE specific physical object or everyday action (a jacket pocket, a buffering icon, a "
                 "microwave). The insight arrives through the object; it is never stated outright. The best lines are non-dual "
-                "truth rendered in a household noun.\n"
+                "truth rendered in a household noun. The anchor must be one you have not used recently — obey the "
+                "USED IMAGES list above and prefer an object from a room, trade, or era you have not visited yet.\n"
                 + ("PERSON: This bit is first person. Say 'I' and 'my'. Do not address the audience as 'you' at all.\n"
                    if selected_form == "confession" else "")
                 + "DRAFTING: In your private reasoning, write three different candidate bits. Pick the one whose closer is most "

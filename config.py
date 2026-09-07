@@ -223,6 +223,9 @@ class AppConfig:
     # Share of spontaneous slots delivered in first person ("I used the flashlight on my phone to look
     # for my phone"): the infinite confessing to a mundane failure rather than roasting you for it.
     confession_ratio: float = _get_float("CONFESSION_RATIO", 0.25)
+    # How many recent lines the bit generator sees for anti-repetition. Bits are pre-generated
+    # offline, so a wide window costs prompt tokens but no stream latency. 6 was ~3 minutes of memory.
+    anti_repetition_window: int = _get_int("ANTI_REPETITION_WINDOW", 20)
     # Hard cap for one-liners (multi-line bits are capped at bit_words_max * 1.2)
     one_liner_words_max: int = _get_int("ONE_LINER_WORDS_MAX", 25)
     # Offline bit generation gets its own thinking budget and temperature (latency is irrelevant there)

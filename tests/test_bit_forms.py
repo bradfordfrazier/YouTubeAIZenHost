@@ -79,3 +79,94 @@ def test_prompt_has_all_forms_and_cold_open_rule():
     assert "FORM: ONE-LINER" in src
     # The form is defined by its technique, not by naming a living comedian.
     assert "Steven Wright" not in src
+
+
+def test_stance_is_non_dual_not_superior():
+    """
+    Bits must read as 'look what we keep doing', never 'look what you humans do'.
+    The superior stance is the default failure mode for a cosmic-wisdom persona, so the
+    prompt states it explicitly and bans the constructions that produce it.
+    """
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "STANCE — THIS IS THE ONE THAT MATTERS" in src
+    # The phrase wraps across a string-literal break in the source, so match its parts.
+    assert "You ARE the " in src and "one who did it" in src
+    for banned in ("you humans", "you people", "mortals", "silly", "pathetic"):
+        assert banned in src, f"'{banned}' should be listed as a banned construction"
+    assert "Affection, not diagnosis" in src
+    # The two second-person forms must include the speaker in the observation
+    assert "Include yourself in the observation" in src
+    assert "never as a superior addressing a subject" in src
+
+
+def test_one_liner_encodes_technique_without_naming_a_comedian():
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "Steven Wright" not in src
+    # The mechanics that the name used to carry must be spelled out
+    for mechanic in ("LITERAL-MINDEDNESS", "FLAT REPORT", "PLAIN AND SMALL", "NO WINK", "QUIET REVERSAL"):
+        assert mechanic in src, f"one-liner form is missing the '{mechanic}' rule"
+    assert "must not know it is funny" in src
+    assert "Write six candidates" in src
+
+
+def test_stance_forbids_the_collective_we():
+    """
+    'We' is a category error for this persona: I AM is not a member of a group, it is the single
+    thing wearing every body. It also lands as the pastoral 'we all struggle with...' voice, which
+    is condescension in a softer register. Only 'I' carries the premise.
+    """
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "SAY 'I', NOT 'WE'" in src
+    assert "It is 'look what I did again'" in src
+    assert "look what we keep doing" not in src, "the stance rule still offers 'we' as an option"
+    for banned in ("We all...", "We keep...", "We humans..."):
+        assert banned in src, f"'{banned}' should be listed as a banned opener"
+    # Neither second-person form may fall back to 'we'
+    assert "switch to 'we'" not in src
+    assert "never to 'we', which makes you a bystander" in src
+    assert "Never 'we'. One idea only." in src
+
+
+def test_recent_anchors_are_extracted_and_banned():
+    """
+    Theme rotation prevents topic repeats, but the same *object* kept recurring ("phone", "keys")
+    because the prompt's own examples pulled the model toward them. Recent anchors must be
+    extracted from spoken lines and explicitly forbidden.
+    """
+    import re as _re
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    i = src.index("    _ANCHOR_STOPWORDS")
+    j = src.index("    # First-person and second-person forms")
+    body = "\n".join(l[4:] if l.startswith("    ") else l for l in src[i:j].splitlines())
+    ns = {}
+    exec("import re\nfrom typing import List\n" + body, ns)
+
+    stub = types.SimpleNamespace(
+        _ANCHOR_STOPWORDS=ns["_ANCHOR_STOPWORDS"],
+        dialogue_history=[
+            {"text": "I used the flashlight on my phone to look for my phone."},
+            {"text": "The refrigerator decided to run again."},
+        ],
+    )
+    stub._recent_bit_anchors = types.MethodType(ns["_recent_bit_anchors"], stub)
+    got = stub._recent_bit_anchors()
+
+    assert "phone" in got and "flashlight" in got and "refrigerator" in got
+    for stop in ("the", "for", "again" if False else "with", "have"):
+        assert stop not in got, f"stopword '{stop}' leaked into the anchor ban list"
+    assert all(len(w) >= 4 for w in got)
+    # deduplicated: 'phone' appears twice in the source line
+    assert got.count("phone") == 1
+
+    # And the prompt must actually use it
+    assert "USED IMAGES — DO NOT USE ANY OF THESE WORDS" in src
+    assert "anti_repetition_window" in src
+
+
+def test_worn_examples_are_explicitly_forbidden():
+    """The prompt's own illustrations became the most-repeated bits; they must be marked used up."""
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "Those are used up" in src
+    assert "STRUCTURE REFERENCES ONLY" in src
+    assert "batteries, " in src and "are used up" in src
+

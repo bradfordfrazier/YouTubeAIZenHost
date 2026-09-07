@@ -917,7 +917,7 @@ class AIBrain:
                 "A viewer is commenting for the very first time in today's live stream.\n"
                 "1. ADDRESS BY NAME FIRST: Start with '@Author' (e.g. '@CyberGamer, ...').\n"
                 "2. GREET & POINT: Give a sharp, warm greeting acknowledging their arrival; address their comment with insight or playful judo.\n"
-                "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-50 words).\n"
+                "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-30 words). A greeting is the shortest thing you say.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: hyped], [MOOD: snarky], [MOOD: chill], [MOOD: curious], or [MOOD: laughing].\n"
                 "5. Spoken live on air — NO markdown formatting.\n"
             )
@@ -928,7 +928,7 @@ class AIBrain:
                 f"A new traveler just tuned in to the live broadcast on {self.channel_handle}.\n"
                 "1. WELCOME TO THE STREAM: Give a fast, warm, and charismatic welcome to the new traveler tuning in.\n"
                 "2. INVITE DIALOGUE: Invite them to participate ('A traveler arrives — ask whatever is on your mind, serious or strange.').\n"
-                "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-50 words). Spoken live on air — NO markdown.\n"
+                "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-30 words). A welcome should land before they finish reading the chat.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: chill], [MOOD: curious], [MOOD: transcendent], or [MOOD: thoughtful].\n"
                 "5. Spoken live on air — NO markdown formatting.\n"
             )

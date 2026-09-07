@@ -342,7 +342,7 @@ class AIBrain:
 
     def get_next_bit_form(self) -> str:
         """
-        Picks the next bit form. 'one_liner' (Steven Wright) and 'confession' (first person)
+        Picks the next bit form. 'one_liner' (single deadpan sentence) and 'confession' (first person)
         each take their configured share; the remaining forms rotate evenly. Never repeats the
         previous form immediately.
         """
@@ -976,9 +976,12 @@ class AIBrain:
                     "Never address the audience as 'you' in this form. The comedy is the infinite being embarrassed."
                 ),
                 "one_liner": (
-                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, in the style of Steven Wright: deadpan, literal-minded, "
-                    "a perfectly logical statement that is completely absurd. No setup, no explanation, no second sentence. "
-                    "Mood must be [MOOD: deadpan]. Example shape (do not reuse): 'I bought some batteries, but they weren't included.' "
+                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words. Deadpan and literal-minded: a statement "
+                    "whose internal logic is airtight and whose conclusion is absurd. Take an idiom, a rule, or a "
+                    "convention at its word and follow it exactly one step too far. No setup, no explanation, no "
+                    "second sentence, no wordplay for its own sake. Mood must be [MOOD: deadpan]. "
+                    "Shape (never reuse these): 'I bought some batteries, but they were not included.' / "
+                    "'I put a skylight in my apartment. The people upstairs are furious.' "
                     "Make it about the theme, but the logic of the joke matters more than the theme."
                 ),
             }

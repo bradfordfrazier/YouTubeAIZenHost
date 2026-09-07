@@ -73,6 +73,9 @@ def test_complete_event_carries_raw_text_and_cached_path_uses_it():
 
 def test_prompt_has_all_forms_and_cold_open_rule():
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    for f in ("observation", "announcement", "story", "address", "one_liner", "confession"):
+    for f in ("observation", "announcement", "story", "address", "one_liner"):
         assert f'"{f}": (' in src
-    assert "SELF-CONTAINED" in src and "Steven Wright" in src
+    assert "SELF-CONTAINED" in src
+    assert "FORM: ONE-LINER" in src
+    # The form is defined by its technique, not by naming a living comedian.
+    assert "Steven Wright" not in src

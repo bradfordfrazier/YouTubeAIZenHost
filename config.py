@@ -224,7 +224,7 @@ class AppConfig:
     # Spontaneous bit generator: word budget for multi-line bits (~2.7 words/s -> 65-85 words = 25-32 s)
     bit_words_min: int = _get_int("BIT_WORDS_MIN", 65)
     bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)
-    # Fraction of spontaneous slots that get a Steven Wright style one-liner instead of a full bit
+    # Fraction of spontaneous slots that get a single deadpan one-liner instead of a full bit
     one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
     # Share of spontaneous slots delivered in first person ("I used the flashlight on my phone to look
     # for my phone"): the infinite confessing to a mundane failure rather than roasting you for it.
@@ -270,7 +270,7 @@ class AppConfig:
     tts_cfg_weight: float = _get_float("TTS_CFG_WEIGHT", 0.4)
     tts_mood_cfg_weight_map: Dict[str, float] = field(
         default_factory=lambda: {
-            "deadpan": 0.30,       # slowest: the flat setup and the Steven Wright one-liners
+            "deadpan": 0.30,       # slowest: flat setups and the single-sentence one-liners
             "thoughtful": 0.35,
             "mysterious": 0.35,
             "transcendent": 0.35,

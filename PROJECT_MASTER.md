@@ -146,8 +146,8 @@ Gemini stream ─► sentence splitter ─► per-sentence synth (serial, gpu_lo
 - The avatar colour does **not** change on the closer (chunks are pushed ahead of playback).
 
 ### Spontaneous bits (`reflection_cache.py` + the SPONTANEOUS BIT prompt in `ai_brain.py`)
-- Forms rotate with no immediate repeats: `observation`, `announcement`, `story`, `address`, and
-  `one_liner` (Steven Wright style, one sentence, 10–22 words) at `ONE_LINER_RATIO`.
+- Forms rotate with no immediate repeats: `observation`, `announcement`, `story`, `address`, `confession`, and
+  `one_liner` (one sentence, 10–22 words) at `ONE_LINER_RATIO`.
 - Multi-line forms are generated to `BIT_WORDS_MIN..MAX`; anything over MAX × 1.2 (or a one-liner over
   `ONE_LINER_WORDS_MAX`) is rejected before caching (`[Bit Rejected]`).
 - The cache stores `raw_text` (markers preserved) so cached bits keep their beat and mood switch.

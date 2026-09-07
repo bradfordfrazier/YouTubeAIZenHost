@@ -70,7 +70,6 @@ class AppConfig:
     # 1. Channel Identity
     # --------------------------------------------------------------------------
     youtube_channel_handle: str = os.getenv("YOUTUBE_CHANNEL_HANDLE", "@MassiveGodComplex")
-    youtube_channel_id: str = os.getenv("YOUTUBE_CHANNEL_ID", "")
     channel_handles: List[str] = field(
         default_factory=lambda: [
             h.strip().lstrip("@").lower()
@@ -153,11 +152,6 @@ class AppConfig:
             if w.strip()
         ]
     )
-    celebrate_aliases: List[str] = field(
-        default_factory=lambda: ["celebrate!", "celebrate", "!celebrate", "party!", "let's celebrate", "lets celebrate"]
-    )
-    min_interjection_interval_sec: float = _get_float("MIN_INTERJECTION_INTERVAL_SEC", 5.0)
-    auto_chat_response_probability: float = _get_float("AUTO_CHAT_RESPONSE_PROB", 0.60)
     chat_sampling_viewer_threshold: int = _get_int("CHAT_SAMPLING_VIEWER_THRESHOLD", 25)
     # At or below this many concurrent viewers, every real (non-peer-reply) chat message gets a
     # response regardless of keywords. 0 disables the rule.
@@ -322,19 +316,12 @@ class AppConfig:
         "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
         _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),
     )
-    reflection_to_chat_delay_sec: float = _get_float(
-        "REFLECTION_POST_SPEECH_CHAT_DELAY_SEC",
-        _get_float("REFLECTION_TO_CHAT_DELAY_SEC", _get_float("REFLECTION_CHAT_DELAY_SEC", 3.0)),
-    )
     # Simplified Question Display & Transition Timings
     question_fade_in_sec: float = _get_float("QUESTION_FADE_IN_SEC", 0.80)
     question_fade_out_sec: float = _get_float("QUESTION_FADE_OUT_SEC", 0.80)
     question_min_display_sec: float = _get_float("QUESTION_MIN_DISPLAY_SEC", _get_float("QUESTION_READ_MIN_SEC", 2.0))
-    question_read_min_sec: float = _get_float("QUESTION_MIN_DISPLAY_SEC", _get_float("QUESTION_READ_MIN_SEC", 2.0))
     question_read_word_rate_sec: float = _get_float("QUESTION_READ_WORD_RATE_SEC", 0.25)
     motto_pre_fade_in_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_DELAY_SEC", _get_float("MOTTO_PAUSE_SEC", 0.0)))
-    motto_delay_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_DELAY_SEC", _get_float("MOTTO_PAUSE_SEC", 0.0)))
-    motto_pause_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_PAUSE_SEC", _get_float("MOTTO_DELAY_SEC", 0.0)))
     motto_fade_in_sec: float = _get_float("MOTTO_FADE_IN_SEC", 1.4)
     motto_fade_out_sec: float = _get_float("MOTTO_FADE_OUT_SEC", 0.6)
     turn_max_sec: float = _get_float("TURN_MAX_SEC", 75.0)
@@ -408,6 +395,8 @@ class AppConfig:
     promo_sub_min_interval_sec: float = float(os.getenv("PROMO_SUB_MIN_INTERVAL_SEC", "120.0"))
     # Timer mode: period between promos. Event mode: MINIMUM gap between any two promos of any type.
     promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "90.0"))
+    # How long a promo card stays on screen once shown. Read by visualizer.Visualizer.
+    promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))
     # Event mode: show 'Like & Subscribe' during a lull only if none has completed for this long (0 = never)
     promo_sub_idle_fallback_sec: float = float(os.getenv("PROMO_SUB_IDLE_FALLBACK_SEC", "600.0"))
     promo_overlay_entrance_sec: float = float(os.getenv("PROMO_OVERLAY_ENTRANCE_SEC", "0.9"))

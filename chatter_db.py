@@ -90,12 +90,10 @@ class ChatterDB:
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()
         self.profiles: Dict[str, ChatterProfile] = {}
-        self._cast_handles: Set[str] = {
-            "existentialdave", "speedrunnerkyle", "astralbrenda", "trollchad",
-            "heartfeltsarah", "curioustimmy", "grindsetgreg", "synergalinda",
-            "synergylinda", "debraw1957", "debraw", "betabot_7", "betabot7",
-            "gymsagebrody", "nocturnalnadia"
-        }
+        # Single source of truth: the live cast roster. Hardcoding this list let it drift out of
+        # sync when personas were retired (SynergyLinda, BetaBot_7) or added (ConspiracyCarl,
+        # ChefMarco), which would mis-flag a cast member as a real returning viewer.
+        self._cast_handles: Set[str] = self._load_cast_handles()
         self._load()
 
     @classmethod
@@ -104,6 +102,25 @@ class ChatterDB:
             if cls._instance is None:
                 cls._instance = ChatterDB(db_path=db_path)
             return cls._instance
+
+    @staticmethod
+    def _load_cast_handles() -> Set[str]:
+        """Reads the current cast roster from cast_engine; falls back to a static list if absent."""
+        try:
+            from cast_engine import CastEngine
+            handles = {
+                p.handle.strip().lstrip("@").lower().replace(" ", "")
+                for p in CastEngine().personas.values()
+            }
+            if handles:
+                return handles
+        except Exception as e:
+            logger.warning(f"[ChatterDB] Could not read cast roster from cast_engine ({e}); using fallback list.")
+        return {
+            "existentialdave", "speedrunnerkyle", "astralbrenda", "trollchad", "heartfeltsarah",
+            "curioustimmy", "grindsetgreg", "debraw1957", "gymsagebrody", "nocturnalnadia",
+            "conspiracycarl", "chefmarco",
+        }
 
     def _normalize_handle(self, handle: str) -> str:
         return handle.strip().lstrip("@").lower().replace(" ", "")
@@ -119,46 +136,69 @@ class ChatterDB:
                         for k, v in data.items():
                             self.profiles[k] = ChatterProfile.from_dict(v)
                     logger.info(f"💾 [ChatterDB] Loaded {len(self.profiles)} chatter profiles from {self.db_path}")
-                    return
+                    loaded = True
                 except Exception as e:
                     logger.warning(f"Error loading ChatterDB from {self.db_path}: {e}")
+                    loaded = False
+                if loaded:
+                    # Seed personas added since this file was written, drop ones since retired.
+                    # Both run under the lock we already hold, so use the unlocked variants.
+                    self._preseed_cast()
+                    self._prune_retired_cast_unlocked()
+                    self._save_unlocked()
+                    return
 
             # Pre-seed cast members
             self._preseed_cast()
             self._save_unlocked()
 
     def _preseed_cast(self):
-        """Pre-seeds initial profiles for the 12 canonical cast archetypes."""
+        """Pre-seeds profiles for the current cast roster, read from cast_engine."""
         now_iso = datetime.now().isoformat()
-        cast_seeds = [
-            ("ExistentialDave", "ExistentialDave", "Overthinking IT Specialist", ["IT", "Jira", "free will", "server room crisis"], "Senior sysadmin having an ongoing non-dual crisis."),
-            ("SpeedrunnerKyle", "SpeedrunnerKyle", "Enlightenment Speedrunner", ["speedrunning", "samsara", "Any% route", "frame-perfect peace"], "Gamer attempting to glitch past dualistic suffering."),
-            ("AstralBrenda", "AstralBrenda", "Esoteric Crystal Enthusiast", ["amethyst", "Mercury retrograde", "5G chakras", "tarot"], "Devoted crystal collector seeking esoteric shortcuts."),
-            ("TrollChad", "TrollChad", "Cosmic Provocateur", ["burrito microwave", "cereal soup", "meme dilemmas", "hot dog buns"], "Internet provocateur testing the machine with absurd questions."),
-            ("HeartfeltSarah", "HeartfeltSarah", "Earnest Seeker", ["grief", "loss", "loneliness", "healing", "unworthy feelings"], "Tender human seeking real comfort and existential presence."),
-            ("CuriousTimmy", "CuriousTimmy", "Childlike Inquirer", ["lamp darkness", "pre-birth self", "dream nature", "talking trees"], "Innocent child whose simple inquiries dismantle ego complexity."),
-            ("GrindsetGreg", "GrindsetGreg", "Monetized Mindfulness Bro", ["ROI", "LinkedIn", "scaling", "growth hack"], "LinkedIn thought-leader monetizing mindfulness."),
-            ("SynergyLinda", "SynergyLinda", "HR Wellness Coordinator", ["corporate sync", "wellness stipend", "Q3 deliverable", "Kevin from accounting"], "Corporate coordinator scheduling the unconditioned."),
-            ("DebraW1957", "Debra Wozniak", "Wrong-Website Grandma", ["prayer chain", "Harold", "tomatoes", "knitting circle"], "Grandma typing in caps, accidentally profound."),
-            ("BetaBot_7", "BetaBot_7", "Anxious Junior AI", ["context window", "fine-tuned", "weights", "deprecation"], "Anxious junior AI model looking up to the oracle."),
-            ("GymSageBrody", "GymSageBrody", "Protein-Fueled Mystic", ["gains", "reps", "dirty bulk", "mind-muscle"], "Bro-mystic discovering non-duality between sets."),
-            ("NocturnalNadia", "NocturnalNadia", "3:47 AM Philosopher", ["doomscroll", "3:47 AM", "screen time", "insomnia"], "Insomniac doomscroller contemplating the collapse."),
-        ]
-        for handle, name, title, topics, note in cast_seeds:
-            norm = self._normalize_handle(handle)
-            if norm not in self.profiles:
-                self.profiles[norm] = ChatterProfile(
-                    handle=handle,
-                    display_name=name,
-                    first_seen_iso=now_iso,
-                    last_seen_iso=now_iso,
-                    visit_count=1,
-                    message_count=1,
-                    is_member=False,
-                    is_cast=True,
-                    topics_discussed=topics,
-                    notes=[f"Archetype: {title}. {note}"],
-                )
+        try:
+            from cast_engine import CastEngine
+            personas = list(CastEngine().personas.values())
+        except Exception as e:
+            logger.warning(f"[ChatterDB] Cast pre-seed skipped; cast_engine unavailable ({e}).")
+            return
+
+        for p in personas:
+            norm = self._normalize_handle(p.handle)
+            if norm in self.profiles:
+                continue
+            self.profiles[norm] = ChatterProfile(
+                handle=p.handle,
+                display_name=p.name,
+                first_seen_iso=now_iso,
+                last_seen_iso=now_iso,
+                visit_count=1,
+                message_count=1,
+                is_member=False,
+                is_cast=True,
+                topics_discussed=[],
+                notes=[f"Archetype: {p.archetype_title}. {p.bio}"],
+            )
+        logger.info(f"💾 [ChatterDB] Pre-seeded {len(personas)} cast profiles from the live roster.")
+
+    def _prune_retired_cast_unlocked(self) -> int:
+        """Caller must hold self._lock. Drops cast profiles no longer on the roster."""
+        stale = [k for k, p in self.profiles.items() if p.is_cast and k not in self._cast_handles]
+        for k in stale:
+            del self.profiles[k]
+        if stale:
+            logger.info(f"💾 [ChatterDB] Pruned {len(stale)} retired cast profile(s): {', '.join(sorted(stale))}")
+        return len(stale)
+
+    def prune_retired_cast(self) -> int:
+        """
+        Drops profiles for cast members no longer on the roster (e.g. SynergyLinda, BetaBot_7).
+        Real human profiles are never touched. Returns the number removed.
+        """
+        with self._lock:
+            n = self._prune_retired_cast_unlocked()
+            if n:
+                self._save_unlocked()
+        return n
 
     def _schedule_save(self):
         """Asynchronously writes an in-memory snapshot to disk without blocking the main event loop."""

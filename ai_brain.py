@@ -192,6 +192,12 @@ class AIBrain:
         # Long-Term Memory & Chatter Relationships (C3, C4, D2)
         self.chatter_db = ChatterDB.get_instance()
         self.memory_mgr = MemoryManager.get_instance()
+        # Keep the cast-roster lore line in step with cast_engine; retiring or adding a persona
+        # would otherwise leave the prompt naming characters that no longer exist.
+        try:
+            self.memory_mgr.refresh_cast_lore()
+        except Exception as e:
+            logger.debug(f"cast lore refresh note: {e}")
         self.reflection_cache = ReflectionCache.get_instance(max_size=self.cfg.reflection_cache_size)
 
         # State & Rate Limiting tracking

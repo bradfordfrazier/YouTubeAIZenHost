@@ -24,6 +24,8 @@ import random
 import time
 from typing import Dict, List, Optional, Tuple
 
+from config import config
+
 logger = logging.getLogger("cast_engine")
 
 # How many distinct personas must appear before one can repeat.
@@ -69,6 +71,7 @@ class CastEngine:
     """Manages the synthetic cast ensemble, pacing, tone rhythm, and continuity."""
 
     def __init__(self):
+        self.cfg = config
         self.personas: Dict[str, CastPersona] = self._init_personas()
         self.last_cast_time: float = 0.0
         self.total_cast_questions_served: int = 0
@@ -449,14 +452,25 @@ class CastEngine:
         quiet_threshold_sec: float = 45.0,
         min_interval_sec: float = 75.0,
         is_ai_busy: bool = False,
+        max_per_session: Optional[int] = None,
     ) -> bool:
         """
         Evaluates whether a synthetic cast question should be injected.
         Only triggers if:
-        1. Comment queue is not saturated (is_ai_busy=False)
-        2. Real chat has been quiet >= quiet_threshold_sec
-        3. Sufficient cooldown has elapsed since the last cast question
+        1. The per-session cast budget is not exhausted (max_per_session)
+        2. Comment queue is not saturated (is_ai_busy=False)
+        3. Real chat has been quiet >= quiet_threshold_sec
+        4. Sufficient cooldown has elapsed since the last cast question
         """
+        cap = self.cfg.cast_max_per_session if max_per_session is None else max_per_session
+        if cap and cap > 0 and self.total_cast_questions_served >= cap:
+            if not getattr(self, "_cap_logged", False):
+                logger.info(
+                    f"🎭 [Cast Engine] Session cast budget reached "
+                    f"({self.total_cast_questions_served}/{cap}); no further cast questions this session."
+                )
+                self._cap_logged = True
+            return False
         if is_ai_busy:
             return False
         if time_since_last_chat < quiet_threshold_sec:

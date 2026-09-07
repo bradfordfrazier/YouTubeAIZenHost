@@ -63,3 +63,30 @@ def test_read_aloud_override_present_when_app_uses_it():
     brain_src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     if "name_already_spoken" in app_src:
         assert "NAME ALREADY SPOKEN" in brain_src, "brain accepts the flag but ignores it"
+
+
+def test_cast_roster_is_single_sourced():
+    """
+    chatter_db and memory_manager must derive the cast roster from cast_engine, not hardcode it.
+    A hardcoded list drifted out of sync when SynergyLinda and BetaBot_7 were retired and
+    ConspiracyCarl and ChefMarco were added, mis-flagging cast members as real returning viewers.
+    """
+    db = (ROOT / "chatter_db.py").read_text(encoding="utf-8", errors="ignore")
+    mm = (ROOT / "memory_manager.py").read_text(encoding="utf-8", errors="ignore")
+    assert "from cast_engine import CastEngine" in db
+    assert "_load_cast_handles" in db and "_prune_retired_cast_unlocked" in db
+    assert "from cast_engine import CastEngine" in mm
+    assert "refresh_cast_lore" in mm
+    # Retired personas must not appear in the fallback roster (comments explaining the history are fine)
+    fb = db[db.index("return {", db.index("_load_cast_handles")):]
+    fb = fb[:fb.index("}") + 1].lower()
+    for retired in ("synergylinda", "betabot_7", "betabot7", "synergalinda"):
+        assert retired not in fb, f"{retired} still listed in the fallback cast roster"
+    for current in ("conspiracycarl", "chefmarco"):
+        assert current in fb, f"{current} missing from the fallback cast roster"
+
+
+def test_cast_session_cap_is_enforced():
+    src = (ROOT / "cast_engine.py").read_text(encoding="utf-8", errors="ignore")
+    assert "cast_max_per_session" in src, "the configured cap must actually gate cast triggering"
+    assert "total_cast_questions_served >= cap" in src

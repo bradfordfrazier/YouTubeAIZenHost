@@ -410,7 +410,6 @@ class AppConfig:
     promo_overlay_interval_sec: float = float(os.getenv("PROMO_OVERLAY_INTERVAL_SEC", "90.0"))
     # Event mode: show 'Like & Subscribe' during a lull only if none has completed for this long (0 = never)
     promo_sub_idle_fallback_sec: float = float(os.getenv("PROMO_SUB_IDLE_FALLBACK_SEC", "600.0"))
-    promo_overlay_duration_sec: float = float(os.getenv("PROMO_OVERLAY_DURATION_SEC", "10.0"))
     promo_overlay_entrance_sec: float = float(os.getenv("PROMO_OVERLAY_ENTRANCE_SEC", "0.9"))
     promo_overlay_exit_sec: float = float(os.getenv("PROMO_OVERLAY_EXIT_SEC", "1.15"))
     promo_overlay_hover_amp: float = float(os.getenv("PROMO_OVERLAY_HOVER_AMP", "4.5"))

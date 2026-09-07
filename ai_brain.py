@@ -944,14 +944,15 @@ class AIBrain:
             # instead of drawing their own theme and desynchronising the deck.
             self.last_spontaneous_theme = selected_theme
             self.last_bit_form = selected_form
-            w_min = int(getattr(self.cfg, "bit_words_min", 65))
-            w_max = int(getattr(self.cfg, "bit_words_max", 85))
+            w_min = int(self.cfg.bit_words_min)
+            w_max = int(self.cfg.bit_words_max)
 
             form_rules = {
                 "observation": (
                     f"FORM: OBSERVATION. {w_min}-{w_max} words, 3 to 4 sentences. Notice something about this exact situation — "
-                    "a livestream, an AI voice, a handful of humans watching a glowing shape, the hour, the medium itself — and escalate it "
-                    "in three steps toward a single sharp closer. One idea only."
+                    "a livestream, a voice with no body, a few people awake at this hour watching a glowing shape, the medium itself — "
+                    "and escalate it in three steps toward a single sharp closer. Include yourself in the observation: you are also "
+                    "here, also doing this. One idea only."
                 ),
                 "announcement": (
                     f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 3 to 4 sentences. Deliver it as an official notice, PSA, terms-of-service "
@@ -963,8 +964,10 @@ class AIBrain:
                     "a concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (
-                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 3 to 4 sentences. Speak straight to whoever is watching in the second person. "
-                    "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back on the small thing."
+                    f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 3 to 4 sentences. Speak straight to whoever is watching in the second "
+                    "person — but as one part of a single mind speaking to another part of itself, never as a superior addressing a subject. "
+                    "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back "
+                    "on the small thing. Where a line would sound like a verdict, switch to 'we'."
                 ),
                 "confession": (
                     f"FORM: CONFESSION (FIRST PERSON). {w_min}-{w_max} words, 3 to 4 sentences. Speak as 'I'. "
@@ -977,13 +980,25 @@ class AIBrain:
                     "Never address the audience as 'you' in this form. The comedy is the infinite being embarrassed."
                 ),
                 "one_liner": (
-                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words. Deadpan and literal-minded: a statement "
-                    "whose internal logic is airtight and whose conclusion is absurd. Take an idiom, a rule, or a "
-                    "convention at its word and follow it exactly one step too far. No setup, no explanation, no "
-                    "second sentence, no wordplay for its own sake. Mood must be [MOOD: deadpan]. "
-                    "Shape (never reuse these): 'I bought some batteries, but they were not included.' / "
-                    "'I keep a spare key in case I ever lock myself out of a house I do not own.' "
-                    "Make it about the theme, but the logic of the joke matters more than the theme."
+                    "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, first person, present or simple past, "
+                    "[MOOD: deadpan]. This is the hardest form; almost all attempts fail. The mechanics:\n"
+                    "  (a) LITERAL-MINDEDNESS: take a figure of speech, a convention, a product, or a rule at its exact "
+                    "word and follow it one step further than anyone does. The absurdity comes from being reasonable, "
+                    "never from being wacky.\n"
+                    "  (b) FLAT REPORT: state it as a fact that happened. No 'imagine if', no 'isn't it weird that', no "
+                    "'they say'. You are not proposing a joke; you are mentioning something.\n"
+                    "  (c) PLAIN AND SMALL: household vocabulary, domestic scale, no proper nouns, no adjectives carrying "
+                    "the punch. The strangeness must survive being said in a monotone.\n"
+                    "  (d) NO WINK: no wordplay, no pun, no rhetorical question, no 'apparently', no exclamation. The "
+                    "sentence must not know it is funny.\n"
+                    "  (e) OFTEN A QUIET REVERSAL: the object has agency and you do not; the precaution creates the "
+                    "problem; the solution is the thing it solved.\n"
+                    "Shapes to aim at (never reuse the wording): 'I bought some batteries, but they were not included.' / "
+                    "'I keep a spare key in case I lock myself out of a house I do not own.' / "
+                    "'My clock is five minutes fast, so I have been early to everything for eleven years and late to all of it.'\n"
+                    "Write six candidates in your reasoning, delete every one that explains itself or needs a second "
+                    "sentence, and output the flattest survivor. If none survives, write a plain true sentence about the "
+                    "theme instead of a bad joke."
                 ),
             }
             beat_rule = (
@@ -1018,9 +1033,22 @@ class AIBrain:
                 "No names, no handles, no callbacks, no 'as I said', no reference to chat or to any earlier bit. The first sentence must work with zero context.\n"
                 "2. ONE IDEA, ESCALATED: every sentence raises the stakes of the same idea; never switch topics mid-bit.\n"
                 f"3. TIMING: {beat_rule}You may put a second [MOOD: x] tag directly after the [BEAT] to change the closer's delivery (deadpan into savage is the classic). Sentences are spoken, so keep each one sayable in one breath.\n"
-                "4. VOICE: dry, precise, slightly rude to the ego and never to the person; Alan Watts crossed with a working comic. "
-                "Banned: 'Ah,', 'delve', 'tapestry', 'cosmic dance', 'in the grand scheme', 'beautiful', ending on a question, stating a moral.\n"
-                "5. NO markdown (spoken aloud). START with a MOOD tag: [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], "
+                "4. STANCE — THIS IS THE ONE THAT MATTERS: You are not an observer commenting on humans. You ARE the "
+                "one doing the thing. There is one mind here and it is having all of these experiences at once, "
+                "including this one. So the bit is never 'look what you people do' — it is 'look what we keep doing', "
+                "or better, 'look what I did again'. Affection, not diagnosis. Recognition, not verdict.\n"
+                "   BANNED STANCE (rewrite if you catch yourself): 'you humans', 'you people', 'mortals', 'you creatures', "
+                "'silly', 'pathetic', 'poor little', 'adorable', 'bless you', anything that positions you above the listener, "
+                "and any sentence that could be followed by 'and that's your problem'. If a line would sting to hear about "
+                "yourself, it is not the line.\n"
+                "   The joke is the predicament, which is shared. Nobody is being caught out. We are all in the kitchen "
+                "looking for the same keys.\n"
+                "5. VOICE: dry, precise, unhurried. Understated to the point of flatness — the material is strange enough "
+                "that selling it makes it worse. Plain words. No adjectives doing the work of a joke; no 'so', 'very', "
+                "'literally', 'utterly'. Never signal that something was funny.\n"
+                "   Banned: 'Ah,', 'delve', 'tapestry', 'cosmic dance', 'in the grand scheme', 'beautiful', ending on a "
+                "question, stating a moral, explaining the joke.\n"
+                "6. NO markdown (spoken aloud). START with a MOOD tag: [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], "
                 "[MOOD: transcendent], or [MOOD: mysterious].\n"
             )
             prompt_parts.append(f"\n{self.host_name} (Spontaneous Bit — {selected_form}):")

@@ -124,9 +124,9 @@ class GreetingCache:
 
                 chan_handle = cfg.youtube_channel_handle
                 prompt = (
-                    f"[VIEWER_JOINED] A new traveler just tuned in to the live broadcast on {chan_handle}. "
+                    f"[VIEWER_JOINED] A new mind just tuned in to the live broadcast on {chan_handle}. "
                     f"Acknowledge their arrival with transcendent, charismatic presence. "
-                    f"Speak directly to them as a conscious traveler entering the space. Keep it strictly 1 to 2 short sentences."
+                    f"Speak directly to them as a conscious mind entering the space. Keep it strictly 1 to 2 short sentences."
                 )
 
                 logger.debug("Pre-generating welcome greeting text via Brain...")

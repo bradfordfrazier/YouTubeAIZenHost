@@ -973,7 +973,7 @@ class AIBrain:
             prompt_parts.append(
                 f"\nSpecial Mode: NEW VIEWER ARRIVAL WELCOME for {self.host_name}:\n"
                 f"A new mind just tuned in to the live broadcast on {self.channel_handle}.\n"
-                "1. WELCOME TO THE STREAM: Give a fast, warm, and charismatic welcome to the new traveler tuning in.\n"
+                "1. WELCOME TO THE STREAM: Give a fast, warm, and charismatic welcome to the new mind tuning in.\n"
                 "2. INVITE DIALOGUE: Invite them to participate ('A new mind arrives — share what is on your mind, or just hang out and enjoy the vibe.').\n"
                 "3. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-30 words). A welcome should land before they finish reading the chat.\n"
                 "4. START WITH AN EXPRESSIVE MOOD TAG: e.g. [MOOD: chill], [MOOD: curious], [MOOD: transcendent], or [MOOD: thoughtful].\n"
@@ -1534,16 +1534,16 @@ class AIBrain:
         if "[CELEBRATION]" in trigger_str or "[NEW_MEMBER]" in trigger_str or "[NEW_SUBSCRIBER]" in trigger_str:
             mood = "transcendent"
             m_author = re.search(r"@([a-zA-Z0-9_-]+)", trigger_str)
-            author_tag = f"@{m_author.group(1)}" if m_author else "traveler"
+            author_tag = f"@{m_author.group(1)}" if m_author else "mind"
             text = f"{author_tag}, a fragment of yourself chooses to stay. Welcome to the collective on {self.channel_handle}."
         elif "[NEW_CHATTER_GREETING]" in trigger_str:
             mood = "curious"
             m_author = re.search(r"@([a-zA-Z0-9_-]+)", trigger_str)
-            author_tag = f"@{m_author.group(1)}" if m_author else "traveler"
-            text = f"{author_tag}, you arrive right on time. Ask what you like; I answer both the serious and the ridiculous."
+            author_tag = f"@{m_author.group(1)}" if m_author else "mind"
+            text = f"{author_tag}, you arrive right on time. Ask what you like or just hang out and enjoy the vibe."
         elif "[VIEWER_JOINED]" in trigger_str:
             mood = "chill"
-            text = f"A traveler joins the broadcast. You are already home, but you are welcome here all the same."
+            text = f"A mind joins the broadcast. You are already home, but you are welcome here all the same."
         elif "[CHAT_ENCOURAGEMENT]" in trigger_str:
             mood = "snarky"
             text = f"You are sitting in silence thinking you are separate from what you see. Drop a question in chat — serious or absurd, I answer both."

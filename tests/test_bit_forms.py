@@ -178,10 +178,9 @@ def test_closer_must_stay_concrete_and_cliches_are_banned():
     """Overreach is an abstract noun in the last line; staleness is the genre's stock imagery."""
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "CLOSER MUST STAY CONCRETE" in src
-    for noun in ("universe", "consciousness", "eternity", "oneness", "enlightenment"):
-        assert noun in src.split("CLOSER MUST STAY CONCRETE")[1][:600], f"{noun} missing from the closer ban"
+    assert "Overreach is always an abstract noun" in src
     assert "BANNED IMAGES" in src
-    for cliche in ("ocean and wave", "mirror", "hologram", "NPC", "dream and dreamer"):
+    for cliche in ("ocean and wave", "mask", "hologram", "NPC", "puppet and strings"):
         assert cliche in src
     # The drafting pass must reject, not merely prefer
     assert "REJECT any that fails" in src

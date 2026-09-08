@@ -106,7 +106,7 @@ def test_one_liner_encodes_technique_without_naming_a_comedian():
     for mechanic in ("LITERAL-MINDEDNESS", "FLAT REPORT", "PLAIN AND SMALL", "NO WINK", "QUIET REVERSAL"):
         assert mechanic in src, f"one-liner form is missing the '{mechanic}' rule"
     assert "must not know it is funny" in src
-    assert "Write six candidates" in src
+    assert "candidates in your reasoning" in src
 
 
 def test_stance_forbids_the_collective_we():
@@ -166,7 +166,7 @@ def test_recent_anchors_are_extracted_and_banned():
 def test_worn_examples_are_explicitly_forbidden():
     """The prompt's own illustrations became the most-repeated bits; they must be marked used up."""
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "Those are used up" in src
+    assert "Find a fresh one" in src
     assert "STRUCTURE REFERENCES ONLY" in src
     assert "batteries, " in src and "are used up" in src
 

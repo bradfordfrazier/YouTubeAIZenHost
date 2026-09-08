@@ -2732,7 +2732,7 @@ class LocalCoHostApp:
         self.loop = asyncio.get_running_loop()
 
         logger.info("=" * 65)
-        logger.info("ALL-LOCAL AI LIVE STREAM CO-HOST INITIALIZING (OBS HOST PC)")
+        logger.info("ALL-LOCAL AI LIVE STREAM HOST INITIALIZING (OBS HOST PC)")
         logger.info(f"NDI Broadcast Feed: '{self.cfg.ndi_stream_name}' ({self.visualizer.width}x{self.visualizer.height} @ 60fps)")
         tts_backend_name = self.cfg.tts_backend
         logger.info(f"TTS Backend: {tts_backend_name} ({self.cfg.tts_voice}) @ 48kHz Stereo")

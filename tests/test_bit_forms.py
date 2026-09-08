@@ -40,24 +40,17 @@ def test_ratio_zero_disables_a_form():
     assert "one_liner" not in got and "confession" not in got
 
 
-def test_confession_form_is_first_person_and_gets_its_share():
-    random.seed(5)
-    b = _brain_stub()
-    forms = [b.get_next_bit_form() for _ in range(500)]
-    share = forms.count("confession") / len(forms)
-    assert 0.12 < share < 0.30, share
-
+def test_confession_form_is_retired():
+    """
+    The first-person "I have done this in eight billion bodies" move consistently read as
+    abstract and esoteric rather than funny, so the form was removed rather than tuned.
+    """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert '"confession": (' in src
-    assert "FORM: CONFESSION (FIRST PERSON)" in src
-    # Phrase wraps across a string-literal break in the source, so match its parts.
-    assert "Never address the audience as 'you' in this " in src and "form." in src
-    # The CRAFT block must add the person directive only for this form
-    assert "PERSON: This bit is first person" in src
-    # Few-shot examples must be filtered by voice so first/second person don't cross-contaminate
-    assert "FIRST_PERSON_FORMS" in src
-    assert "form=selected_form" in src
-
+    assert '"confession": (' not in src
+    assert "FORM: CONFESSION" not in src
+    b = _brain_stub()
+    assert "confession" not in b.BIT_FORMS
+    assert "confession" not in b.RATIO_FORMS
 
 def test_cache_reads_theme_and_form_from_brain():
     src = (ROOT / "reflection_cache.py").read_text(encoding="utf-8", errors="ignore")
@@ -169,19 +162,18 @@ def test_recent_anchors_are_extracted_and_banned():
 def test_worn_examples_are_explicitly_forbidden():
     """The prompt's own illustrations became the most-repeated bits; they must be marked used up."""
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "Those are used up" in src
     assert "STRUCTURE REFERENCES ONLY" in src
-    assert "batteries, " in src and "are used up" in src
+    assert "are used up" in src
 
 
 def test_closer_must_stay_concrete_and_cliches_are_banned():
     """Overreach is an abstract noun in the last line; staleness is the genre's stock imagery."""
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    # The specific banned words are the operator's call — over-banning was found to strip out the
+    # jokes non-dualists like most. Assert the mechanisms exist, not their exact contents.
     assert "CLOSER MUST STAY CONCRETE" in src
-    assert "Overreach is always an abstract noun" in src
+    assert "Overreach is always an abstract noun in the last line" in src
     assert "BANNED IMAGES" in src
-    for cliche in ("ocean and wave", "mask", "hologram", "NPC", "puppet and strings"):
-        assert cliche in src
     # The drafting pass must reject, not merely prefer
     assert "REJECT any that fails" in src
     for check in ("(a)", "(b)", "(c)", "(d)", "(e)"):

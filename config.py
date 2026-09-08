@@ -220,9 +220,8 @@ class AppConfig:
     bit_words_max: int = _get_int("BIT_WORDS_MAX", 85)
     # Fraction of spontaneous slots that get a single deadpan one-liner instead of a full bit
     one_liner_ratio: float = _get_float("ONE_LINER_RATIO", 0.25)
-    # Share of spontaneous slots delivered in first person ("I used the flashlight on my phone to look
-    # for my phone"): the infinite confessing to a mundane failure rather than roasting you for it.
-    confession_ratio: float = _get_float("CONFESSION_RATIO", 0.25)
+    # confession_ratio removed: the first-person "I have done this in eight billion bodies" move
+    # consistently read as abstract and esoteric rather than funny. Kept out of BIT_FORMS entirely.
     # How many recent lines the bit generator sees for anti-repetition. Bits are pre-generated
     # offline, so a wide window costs prompt tokens but no stream latency. 6 was ~3 minutes of memory.
     anti_repetition_window: int = _get_int("ANTI_REPETITION_WINDOW", 20)

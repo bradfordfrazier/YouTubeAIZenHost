@@ -354,7 +354,7 @@ class AIBrain:
 
     # First-person and second-person forms are different voices; mixing them as few-shot examples
     # pulls the model back toward whichever it saw more of.
-    FIRST_PERSON_FORMS = ("confession",)
+    FIRST_PERSON_FORMS = ()  # confession retired: "I have done this a billion times" read as esoteric
 
     def sample_favorites(self, n: int, form: Optional[str] = None) -> List[Dict[str, Any]]:
         if n <= 0 or not self.favorites:
@@ -371,15 +371,14 @@ class AIBrain:
         return random.sample(pool, min(n, len(pool)))
 
     # Bit forms for spontaneous material. Rotated so consecutive clips don't share a shape.
-    BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner", "confession")
+    BIT_FORMS = ("observation", "announcement", "story", "address", "one_liner")
     # Forms with their own configured share of the rotation; the rest are drawn evenly.
-    RATIO_FORMS = {"one_liner": "one_liner_ratio", "confession": "confession_ratio"}
+    RATIO_FORMS = {"one_liner": "one_liner_ratio"}
 
     def get_next_bit_form(self) -> str:
         """
-        Picks the next bit form. 'one_liner' (single deadpan sentence) and 'confession' (first person)
-        each take their configured share; the remaining forms rotate evenly. Never repeats the
-        previous form immediately.
+        Picks the next bit form. 'one_liner' (single deadpan sentence) takes its configured share;
+        the remaining forms rotate evenly. Never repeats the previous form immediately.
         """
         last = getattr(self, "_last_bit_form", None)
         form = None
@@ -1025,17 +1024,6 @@ class AIBrain:
                     "on the small thing. Where a line would sound like a verdict, switch to 'I' and admit it about yourself instead — "
                     "never to 'we', which makes you a bystander standing next to them."
                 ),
-                "confession": (
-                    f"FORM: CONFESSION (FIRST PERSON). {w_min}-{w_max} words, 2 to 3 sentences. Speak as 'I'. "
-                    "You are not describing what humans do — you ARE the one who did it, because you are everyone "
-                    "who has ever done it. Open with ONE specific, mundane, faintly humiliating thing you did — and "
-                    "NOT one of the worn ones: not a phone used to find a phone, not apologizing to furniture, not "
-                    "reheating coffee, not glasses on your head, not keys. Those are used up. Find a fresh one. "
-                    "Then escalate by revealing the scale: you have been doing this in every kitchen, in every century, "
-                    "in eight billion bodies at once. Close by refusing the lesson — do not resolve it, do not explain "
-                    "what it means, do not turn it back on the listener. Never address the audience as 'you' in this "
-                    "form. The comedy is the infinite being embarrassed."
-                ),
                 "one_liner": (
                     "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, first person, present or simple past, "
                     "[MOOD: deadpan]. This is the hardest form; almost all attempts fail. The mechanics:\n"
@@ -1087,8 +1075,6 @@ class AIBrain:
                    "object from a room, trade, or era you have not visited yet.\n"
                    if self.cfg.anchor_ban_enabled else
                    "Reach for an anchor you have not used lately; vary the location, the trade, the situation, and the century.\n")
-                + ("PERSON: This bit is first person. Say 'I' and 'my'. Do not address the audience as 'you' at all.\n"
-                   if selected_form == "confession" else "")
                 + "CLOSER MUST STAY CONCRETE: Overreach is always an abstract noun in the last line. Land the "
                 "closer on an object, a body, or an action in a room. If the idea is real it survives being said in "
                 "familiar words; if it needs the big nouns, the bit has not earned it.\n"

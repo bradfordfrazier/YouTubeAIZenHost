@@ -184,3 +184,32 @@ def test_degenerate_turn_still_restores_the_motto():
     assert "[Degenerate Turn]" in src, "the skip path must log, or it stays invisible"
 
 
+def test_cast_roster_has_range_and_depth():
+    """
+    The cast is the only chat traffic until real viewers arrive, so it needs enough questions to
+    avoid cycling in a long session, and enough tonal range that consecutive questions do not all
+    read as 'earnest seeker asks about the self'.
+    """
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from cast_engine import CastEngine
+
+    ce = CastEngine()
+    assert len(ce.personas) >= 18, f"only {len(ce.personas)} personas"
+    total = sum(len(p.questions) for p in ce.personas.values())
+    assert total >= 200, f"only {total} cast questions"
+    assert min(len(p.questions) for p in ce.personas.values()) >= 8
+
+    # No question may repeat inside a long session
+    seen = {}
+    for _ in range(120):
+        _, q = ce.next_cast_question()
+        seen[q] = seen.get(q, 0) + 1
+    assert not [q for q, c in seen.items() if c > 1], "cast question repeated within 120 picks"
+
+    # Card-readable: the pinned question must fit on screen
+    long_qs = [q for p in ce.personas.values() for q in p.questions if len(q.split()) > 24]
+    assert not long_qs, f"questions too long for the pinned card: {long_qs[:2]}"
+
+
+

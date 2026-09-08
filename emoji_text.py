@@ -99,23 +99,148 @@ def normalize_chat_text(text: Optional[str], keep_unknown: bool = False) -> str:
     return _WS_RE.sub(" ", out).strip()
 
 
+# Codepoint ranges that an emoji font should handle. Kept broad but not greedy: plain punctuation
+# and Latin text must never be routed to the emoji font.
+_EMOJI_RE = re.compile(
+    "[" 
+    "\U0001F000-\U0001FAFF"   # pictographs, emoticons, symbols, supplemental
+    "\U00002600-\U000027BF"   # misc symbols and dingbats
+    "\U00002190-\U000021FF"   # arrows
+    "\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF"   # regional indicators (flags)
+    "\U0000FE0F\U0000200D\U000020E3"  # variation selector, ZWJ, keycap
+    "]"
+)
+
+
+def contains_emoji(text: str) -> bool:
+    return bool(text) and bool(_EMOJI_RE.search(text))
+
+
+def split_emoji_runs(text: str):
+    """Yields (is_emoji, chunk) runs so each can be drawn with the font that can draw it."""
+    if not text:
+        return
+    runs, cur, cur_is = [], [], None
+    for ch in text:
+        is_e = bool(_EMOJI_RE.match(ch))
+        if cur_is is None or is_e == cur_is:
+            cur.append(ch)
+            cur_is = is_e
+        else:
+            runs.append((cur_is, "".join(cur)))
+            cur, cur_is = [ch], is_e
+    if cur:
+        runs.append((cur_is, "".join(cur)))
+    for r in runs:
+        yield r
+
+
+def font_can_draw(font, ch: str) -> bool:
+    """
+    True if `font` draws a real glyph for `ch`.
+
+    font.metrics() is not usable here: a color emoji font reports None for characters it renders
+    perfectly well. Instead render the character and compare it against an unassigned codepoint —
+    if the pixels are identical, the font is drawing a tofu box.
+    """
+    if font is None or not ch:
+        return False
+    try:
+        import pygame
+        a = font.render(ch, True, (255, 255, 255))
+        b = font.render("\uFFFF", True, (255, 255, 255))
+        if a.get_size() != b.get_size():
+            return True
+        return pygame.image.tostring(a, "RGBA") != pygame.image.tostring(b, "RGBA")
+    except Exception:
+        return True
+
+
 def strip_unrenderable(text: str, font) -> str:
     """
-    Drops characters the given pygame font cannot draw. A missing glyph renders as a tofu box,
-    which looks like a bug on stream; dropping it just looks like the viewer typed less.
-
-    Falls back to returning the text unchanged if the font cannot be queried.
+    Drops characters the font draws as a tofu box. Used only when no emoji font is available;
+    the preferred path is render_mixed(), which draws them properly instead.
     """
     if not text or font is None:
         return text or ""
-    try:
-        metrics = font.metrics(text)
-    except Exception:
-        return text
-    if not metrics or len(metrics) != len(text):
-        return text
-    kept = "".join(ch for ch, m in zip(text, metrics) if m is not None)
+    kept = "".join(ch for ch in text if not _EMOJI_RE.match(ch) or font_can_draw(font, ch))
     return _WS_RE.sub(" ", kept).strip()
+
+
+def load_emoji_font(size: int):
+    """
+    Finds a font that can actually draw emoji, at the requested size.
+    Tries the platform's emoji font by name, then known file paths. Returns None if none works.
+    """
+    try:
+        import pygame
+    except Exception:
+        return None
+
+    for name in ("Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji",
+                 "Twemoji Mozilla", "Segoe UI Symbol", "Symbola"):
+        try:
+            f = pygame.font.SysFont(name, size)
+            if f and font_can_draw(f, "\U0001F602"):
+                return f
+        except Exception:
+            pass
+
+    for path in ("C:/Windows/Fonts/seguiemj.ttf",
+                 "/System/Library/Fonts/Apple Color Emoji.ttc",
+                 "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"):
+        try:
+            f = pygame.font.Font(path, size)
+            if f and font_can_draw(f, "\U0001F602"):
+                return f
+        except Exception:
+            pass
+    return None
+
+
+def render_mixed(text: str, font, emoji_font, color):
+    """
+    Renders `text` as one surface, drawing emoji with `emoji_font` and everything else with
+    `font`. Emoji surfaces are scaled to the text line height and baseline-aligned, because
+    bitmap color fonts render at a fixed (large) size regardless of the size requested.
+
+    Returns None when no emoji handling is needed, so the caller can use its normal fast path.
+    """
+    import pygame
+
+    if not text or emoji_font is None or not contains_emoji(text):
+        return None
+
+    line_h = font.get_height()
+    ascent = font.get_ascent()
+    parts = []
+    for is_emoji, chunk in split_emoji_runs(text):
+        if not chunk:
+            continue
+        if is_emoji:
+            surf = emoji_font.render(chunk, True, color)
+            if surf.get_height() != line_h and surf.get_height() > 0:
+                scale = line_h / surf.get_height()
+                surf = pygame.transform.smoothscale(
+                    surf, (max(1, int(surf.get_width() * scale)), line_h)
+                )
+            parts.append((surf, True))
+        else:
+            parts.append((font.render(chunk, True, color), False))
+
+    if not parts:
+        return None
+
+    width = sum(p.get_width() for p, _ in parts)
+    out = pygame.Surface((max(1, width), line_h), pygame.SRCALPHA)
+    x = 0
+    for surf, is_emoji in parts:
+        # Text runs sit on the baseline; scaled emoji already fill the line box.
+        y = 0 if is_emoji else max(0, ascent - font.get_ascent())
+        out.blit(surf, (x, y))
+        x += surf.get_width()
+    return out
 
 
 def has_renderable_content(text: str) -> bool:

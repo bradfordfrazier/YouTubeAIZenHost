@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pygame
 
-from emoji_text import strip_unrenderable
+from emoji_text import contains_emoji, load_emoji_font, render_mixed, strip_unrenderable
 
 from config import config
 
@@ -551,17 +551,45 @@ class Visualizer:
         self._cached_chat_messages: List[Dict] = []
         self._load_cached_chat()
 
+    def _get_emoji_font(self, font: "pygame.font.Font"):
+        """
+        Returns an emoji-capable font matched to `font`'s size, loading it once per size.
+        None means the machine has no emoji font, and emoji get dropped rather than tofu-boxed.
+        """
+        if not hasattr(self, "_emoji_fonts"):
+            self._emoji_fonts = {}
+        size = font.get_height()
+        if size not in self._emoji_fonts:
+            ef = load_emoji_font(size)
+            self._emoji_fonts[size] = ef
+            logger.info(
+                f"😀 [Emoji Font] {'loaded for size ' + str(size) if ef else 'none available; emoji will be omitted'}"
+            )
+        return self._emoji_fonts[size]
+
     def _render_text(self, font: pygame.font.Font, text: str, color: Any) -> pygame.Surface:
         """Cached font rendering helper to eliminate redundant surface allocations per frame."""
         c_tuple = tuple(int(x) for x in color[:3]) if isinstance(color, (list, tuple, np.ndarray)) else color
         key = (id(font), text, c_tuple)
         surf = self._text_cache.get(key)
         if surf is None:
-            # A font without a glyph draws a tofu box, which reads as a rendering bug on stream.
-            # Emoji arrive here after shortcode normalization, so this only removes what the
-            # chosen font genuinely cannot draw. Cached on the ORIGINAL key so the filter runs once.
-            draw_text = strip_unrenderable(text, font) if text else text
-            surf = font.render(draw_text, True, color)
+            # Emoji arrive here as real characters (shortcodes are normalized at ingestion), but
+            # UI fonts cannot draw them and produce a tofu box. Draw those runs with a dedicated
+            # emoji font instead; only if no such font exists do we drop them, which is still
+            # better than a box. Cached on the original key so this work happens once per string.
+            surf = None
+            if text and contains_emoji(text):
+                emoji_font = self._get_emoji_font(font)
+                if emoji_font is not None:
+                    try:
+                        surf = render_mixed(text, font, emoji_font, color)
+                    except Exception as e:
+                        logger.debug(f"mixed emoji render failed, falling back: {e}")
+                        surf = None
+                if surf is None:
+                    surf = font.render(strip_unrenderable(text, font), True, color)
+            if surf is None:
+                surf = font.render(text, True, color)
             if len(self._text_cache) > 2000:
                 self._text_cache.clear()
             self._text_cache[key] = surf

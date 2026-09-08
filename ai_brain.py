@@ -329,9 +329,8 @@ class AIBrain:
         you your yours i me my mine we us our ours it its they them their he she his her
         is are was were be been being am do does did doing have has had having will would can could
         should shall may might must not no nor only just even also very really so too much many
-        one two three thing things something anything nothing everyone someone anyone everything
-        time times year years day days moment moments life world universe mind self ego people human
-        humans person body way ways idea thought thoughts question answer reason point end start
+        one two three
+        time times year years day days way ways question answer point end start
         of in on at to for with from by about into over under after before while when where how why
         as like still yet own same other another new old more most less least first last next been
     """.split())

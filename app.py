@@ -29,6 +29,7 @@ import numpy as np
 from ai_brain import AIBrain
 from cast_engine import CastEngine
 from config import config
+from emoji_text import normalize_chat_text
 from greeting_cache import GreetingCache
 from ndi_streamer import NDIStreamer
 from render_worker import VisualizerProxy
@@ -1839,7 +1840,10 @@ class LocalCoHostApp:
                         is_superchat = bool(item.amountValue and item.amountValue > 0)
                         author_name = item.author.name
                         author_type = str(getattr(item.author, "type", "viewer")).lower()
-                        msg = item.message
+                        # pytchat delivers emoji as :shortcode: text. Normalizing here — before
+                        # the prompt, the chat card, and the chatter DB all see it — keeps the
+                        # descriptive label out of every downstream consumer.
+                        msg = normalize_chat_text(item.message)
                         msg_lower = msg.lower().strip()
 
                         author_clean = author_name.lower().strip().lstrip("@")

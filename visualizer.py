@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pygame
 
+from emoji_text import strip_unrenderable
+
 from config import config
 
 logger = logging.getLogger("AI-BRAIN")
@@ -555,7 +557,11 @@ class Visualizer:
         key = (id(font), text, c_tuple)
         surf = self._text_cache.get(key)
         if surf is None:
-            surf = font.render(text, True, color)
+            # A font without a glyph draws a tofu box, which reads as a rendering bug on stream.
+            # Emoji arrive here after shortcode normalization, so this only removes what the
+            # chosen font genuinely cannot draw. Cached on the ORIGINAL key so the filter runs once.
+            draw_text = strip_unrenderable(text, font) if text else text
+            surf = font.render(draw_text, True, color)
             if len(self._text_cache) > 2000:
                 self._text_cache.clear()
             self._text_cache[key] = surf

@@ -303,6 +303,57 @@ class AIBrain:
             logger.warning(f"[Favorites] could not load {self.favorites_path}: {e}")
         return []
 
+    # Laughter markers. Deliberately narrow: "haha" and emoji are unambiguous, whereas a bare
+    # "lol" is punctuation for many chatters and would inflate every score equally.
+    _LAUGH_RE = re.compile(
+        r"(\bl+o+l+\b|\bl+m+f?a+o+\b|\brofl\b|\bha(?:ha)+h?\b|\bhehe\b|\bdead\b|\bcrying\b|"
+        r"[\U0001F602\U0001F923\U0001F480\U0001F62D\U0001F621\U0001F44F\U0001F525]|:\s?\))",
+        re.IGNORECASE,
+    )
+
+    def score_reaction(self, message: str, seconds_since_line: float) -> int:
+        """
+        Returns the laughter weight of a chat message arriving `seconds_since_line` after the
+        host finished a line. Reactions decay: a laugh 5s later is about the line, a laugh 40s
+        later is probably about something else.
+        """
+        window = float(self.cfg.reaction_window_sec)
+        if seconds_since_line < 0 or seconds_since_line > window:
+            return 0
+        hits = len(self._LAUGH_RE.findall(message or ""))
+        if not hits:
+            return 0
+        decay = 1.0 if seconds_since_line <= window * 0.5 else 0.5
+        return max(1, int(round(min(hits, 3) * decay)))
+
+    def credit_reaction(self, message: str) -> int:
+        """
+        Attributes a chat reaction to the most recent spoken line and promotes that line to
+        favourites once it crosses reaction_promote_score. This is the only part of the system
+        that learns what THIS audience finds funny, rather than what the prompt was told to like.
+        """
+        bit = self.last_played_bit
+        if not bit or not bit.get("text"):
+            return 0
+        elapsed = time.time() - float(bit.get("played_at", 0) or 0)
+        pts = self.score_reaction(message, elapsed)
+        if pts <= 0:
+            return 0
+        bit["reaction_score"] = int(bit.get("reaction_score", 0)) + pts
+        total = bit["reaction_score"]
+        logger.info(
+            f"😂 [Reaction] +{pts} ({total} total, {elapsed:.0f}s after the line) "
+            f"-> '{bit.get('text','')[:55]}'"
+        )
+        threshold = int(self.cfg.reaction_promote_score)
+        if threshold > 0 and total >= threshold and not bit.get("_promoted"):
+            bit["_promoted"] = True
+            bit["source"] = "reaction"
+            saved = self.add_favorite(bit)
+            if saved:
+                logger.info(f"⭐ [Auto-Favorite] Chat laughed at this one ({total} pts); saved as an exemplar.")
+        return pts
+
     def add_favorite(self, bit: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Saves `bit` (default: the last bit that played) to the favourites file. Returns the saved item."""
         item = dict(bit or self.last_played_bit or {})

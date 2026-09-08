@@ -1985,6 +1985,14 @@ class LocalCoHostApp:
 
                         logger.info(f"💬 [YT Live Chat] @{author_name}: {msg} {f'({item.amountString})' if is_superchat else ''}")
 
+                        # Credit laughter to the line that just aired. This is the only signal in
+                        # the system that reflects what this audience actually finds funny, so it
+                        # runs before any trigger/skip decision and regardless of what follows.
+                        try:
+                            self.brain.credit_reaction(msg)
+                        except Exception as e:
+                            logger.debug(f"reaction scoring note: {e}")
+
                         if is_celebrate_cmd:
                             pass
                         elif is_own_handle:

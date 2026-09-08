@@ -1,6 +1,6 @@
 """Favourites store + bit generation settings (source-level and behavioural)."""
 from pathlib import Path
-import json, random, sys, types, time, logging
+import json, random, re, sys, types, time, logging
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -10,7 +10,7 @@ def _fav_stub(tmp_path):
     start = src.index("    def _load_favorites(self)")
     end = src.index("    # Bit forms for spontaneous material.")
     body = "\n".join(l[4:] if l.startswith("    ") else l for l in src[start:end].splitlines())
-    ns = {"json": json, "random": random, "time": time, "logger": logging.getLogger("t"),
+    ns = {"json": json, "random": random, "re": re, "time": time, "logger": logging.getLogger("t"),
           "List": list, "Dict": dict, "Any": object, "Optional": object}
     exec("from typing import List, Dict, Any, Optional\n" + body, ns)
     stub = types.SimpleNamespace(favorites_path=tmp_path / "favs.jsonl", favorites=[], last_played_bit=None)

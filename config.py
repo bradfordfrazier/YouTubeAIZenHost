@@ -237,6 +237,11 @@ class AppConfig:
     # Operator-curated favourite bits used as few-shot examples for new bits
     favorites_path: str = os.getenv("FAVORITES_PATH", "data/favorite_bits.jsonl")
     favorites_few_shot: int = _get_int("FAVORITES_FEW_SHOT", 5)
+    # Reaction feedback: a chat laugh arriving within this window is credited to the line that
+    # just aired. Lines crossing reaction_promote_score are auto-saved as few-shot exemplars, so
+    # the host learns what THIS audience laughs at rather than what the prompt was told to like.
+    reaction_window_sec: float = _get_float("REACTION_WINDOW_SEC", 25.0)
+    reaction_promote_score: int = _get_int("REACTION_PROMOTE_SCORE", 2)
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)

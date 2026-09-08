@@ -305,11 +305,44 @@ class AIBrain:
 
     # Laughter markers. Deliberately narrow: "haha" and emoji are unambiguous, whereas a bare
     # "lol" is punctuation for many chatters and would inflate every score equally.
+    # NOTE: pytchat delivers emoji as :shortcode: text, not codepoints — a live message reads
+    # ":face_with_tears_of_joy::face_with_tears_of_joy:". Matching only codepoints silently
+    # scored zero on every real reaction, so both forms are matched here.
+    _LAUGH_SHORTCODES = (
+        "face_with_tears_of_joy", "rolling_on_the_floor_laughing", "skull", "loudly_crying_face",
+        "grinning_squinting_face", "grinning_face_with_sweat", "smiling_face_with_tear",
+        "clapping_hands", "fire", "joy", "rofl", "sob", "laughing", "smiling_face_with_open_hands",
+    )
     _LAUGH_RE = re.compile(
-        r"(\bl+o+l+\b|\bl+m+f?a+o+\b|\brofl\b|\bha(?:ha)+h?\b|\bhehe\b|\bdead\b|\bcrying\b|"
-        r"[\U0001F602\U0001F923\U0001F480\U0001F62D\U0001F621\U0001F44F\U0001F525]|:\s?\))",
+        r"(\bl+o+l+\b|\bl+m+f?a+o+\b|\brofl\b|\bha(?:ha)+h?\b|\bhehe\b|\bheh\b|\bdead\b|"
+        r"\bcrying\b|\bdying\b|\bwheez\w*\b|\bbruh\b|"
+        r"[\U0001F602\U0001F923\U0001F480\U0001F62D\U0001F621\U0001F44F\U0001F525]|:\s?\)|"
+        r":(?:" + "|".join(_LAUGH_SHORTCODES) + r"):)",
         re.IGNORECASE,
     )
+
+    # A message that is ONLY laughter/emoji is a reaction, not a question. Answering it produces
+    # a considered reply to "lmao", which is the wrong beat and burns a turn.
+    _REACTION_ONLY_RE = re.compile(
+        r"^[\s\W_]*(?:(?:" + "|".join([
+            r"l+o+l+", r"l+m+f?a+o+", r"rofl", r"ha(?:ha)+h?", r"hehe+", r"heh", r"lmfao",
+            r"dead", r"crying", r"dying", r"bruh", r"same", r"facts", r"true", r"yes+", r"no+",
+            r"wow", r"oof", r"damn", r"ok+", r"okay",
+        ]) + r")[\s\W_]*)+$",
+        re.IGNORECASE,
+    )
+
+    def is_reaction_only(self, text: str) -> bool:
+        """True when a message carries no content beyond laughter, emoji, or filler."""
+        t = (text or "").strip()
+        if not t:
+            return False
+        # Strip emoji shortcodes and unicode emoji, then see if anything meaningful is left.
+        stripped = re.sub(r":[a-z0-9_+-]+:", " ", t, flags=re.IGNORECASE)
+        stripped = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", " ", stripped)
+        if not stripped.strip(" \t\n.,!?~*-_"):
+            return True   # emoji only
+        return bool(self._REACTION_ONLY_RE.match(stripped))
 
     def score_reaction(self, message: str, seconds_since_line: float) -> int:
         """
@@ -701,14 +734,18 @@ class AIBrain:
         }
         self.recent_qa_threads.append(entry)
         self.dialogue_history.append({"text": clean_text, "timestamp": time.time()})
-        if "[SPONTANEOUS_REFLECTION]" in (trigger or ""):
-            self.last_played_bit = {
-                "text": clean_text,
-                "mood": mood,
-                "theme": getattr(self, "_last_played_theme", "") or self.last_spontaneous_theme,
-                "form": getattr(self, "_last_played_form", "") or self.last_bit_form,
-                "played_at": time.time(),
-            }
+        # Every spoken line is creditable, not just spontaneous bits: a laugh most often follows
+        # a cast or chat answer, and scoring only bits meant real reactions were silently dropped.
+        is_bit = "[SPONTANEOUS_REFLECTION]" in (trigger or "")
+        self.last_played_bit = {
+            "text": clean_text,
+            "mood": mood,
+            "theme": (getattr(self, "_last_played_theme", "") or self.last_spontaneous_theme) if is_bit else "",
+            "form": (getattr(self, "_last_played_form", "") or self.last_bit_form) if is_bit else "reply",
+            "kind": "bit" if is_bit else "reply",
+            "author": author,
+            "played_at": time.time(),
+        }
         logger.debug(f"Recorded QA thread turn: [{author}] -> [{mood.upper()}] {clean_text[:40]}...")
 
     def is_member_reply(self, text: str) -> Tuple[bool, str]:
@@ -776,6 +813,11 @@ class AIBrain:
 
         text_clean = text.strip()
         text_lower = text_clean.lower()
+
+        # Laughter is feedback, not a question. Answering "lmao" with a considered reply is the
+        # wrong beat and spends a turn; the reaction is still scored by credit_reaction().
+        if self.is_reaction_only(text_clean) and not is_superchat:
+            return False, "reaction_only (laughter scored, no reply)"
 
         # 0. Superchats and new chatter greetings have immediate high priority (never sampled out,
         #    and exempt from the per-minute rate limiter: a viewer's first message is worth a reply).

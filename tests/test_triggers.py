@@ -23,7 +23,7 @@ def test_trigger_hygiene_no_trigger_on_common_words():
     for word in ["w", "l", "gg", "lol", "real", "game", "play", "win", "lose", "again lol", "god that game was trash", "the bot died"]:
         trig, reason = brain.should_trigger_response(word)
         assert not trig, f"Expected '{word}' not to trigger, but triggered with reason: {reason}"
-        assert reason == "no_trigger_keywords"
+        assert reason in ("no_trigger_keywords", "reaction_only (laughter scored, no reply)")
 
 
 def test_trigger_hygiene_direct_mention():

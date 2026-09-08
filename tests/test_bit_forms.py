@@ -50,7 +50,8 @@ def test_confession_form_is_first_person_and_gets_its_share():
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert '"confession": (' in src
     assert "FORM: CONFESSION (FIRST PERSON)" in src
-    assert "Never address the audience as 'you' in this form" in src
+    # Phrase wraps across a string-literal break in the source, so match its parts.
+    assert "Never address the audience as 'you' in this " in src and "form." in src
     # The CRAFT block must add the person directive only for this form
     assert "PERSON: This bit is first person" in src
     # Few-shot examples must be filtered by voice so first/second person don't cross-contaminate
@@ -106,7 +107,7 @@ def test_one_liner_encodes_technique_without_naming_a_comedian():
     for mechanic in ("LITERAL-MINDEDNESS", "FLAT REPORT", "PLAIN AND SMALL", "NO WINK", "QUIET REVERSAL"):
         assert mechanic in src, f"one-liner form is missing the '{mechanic}' rule"
     assert "must not know it is funny" in src
-    assert "candidates in your reasoning" in src
+    assert "Write six candidates" in src
 
 
 def test_stance_forbids_the_collective_we():
@@ -166,7 +167,21 @@ def test_recent_anchors_are_extracted_and_banned():
 def test_worn_examples_are_explicitly_forbidden():
     """The prompt's own illustrations became the most-repeated bits; they must be marked used up."""
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "Find a fresh one" in src
+    assert "Those are used up" in src
     assert "STRUCTURE REFERENCES ONLY" in src
     assert "batteries, " in src and "are used up" in src
 
+
+def test_closer_must_stay_concrete_and_cliches_are_banned():
+    """Overreach is an abstract noun in the last line; staleness is the genre's stock imagery."""
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "CLOSER MUST STAY CONCRETE" in src
+    for noun in ("universe", "consciousness", "eternity", "oneness", "enlightenment"):
+        assert noun in src.split("CLOSER MUST STAY CONCRETE")[1][:600], f"{noun} missing from the closer ban"
+    assert "BANNED IMAGES" in src
+    for cliche in ("ocean and wave", "mirror", "hologram", "NPC", "dream and dreamer"):
+        assert cliche in src
+    # The drafting pass must reject, not merely prefer
+    assert "REJECT any that fails" in src
+    for check in ("(a)", "(b)", "(c)", "(d)", "(e)"):
+        assert check in src

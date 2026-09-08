@@ -159,9 +159,11 @@ def test_recent_anchors_are_extracted_and_banned():
     # deduplicated: 'phone' appears twice in the source line
     assert got.count("phone") == 1
 
-    # And the prompt must actually use it
+    # The mechanism must still exist and be reachable, but it is now opt-in: stacking it on top
+    # of the closer and stance rules left too little room for the joke.
     assert "USED IMAGES — DO NOT USE ANY OF THESE WORDS" in src
     assert "anti_repetition_window" in src
+    assert "self.cfg.anchor_ban_enabled" in src, "the anchor ban must be behind a switch"
 
 
 def test_worn_examples_are_explicitly_forbidden():

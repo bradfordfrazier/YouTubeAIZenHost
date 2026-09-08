@@ -226,6 +226,10 @@ class AppConfig:
     # How many recent lines the bit generator sees for anti-repetition. Bits are pre-generated
     # offline, so a wide window costs prompt tokens but no stream latency. 6 was ~3 minutes of memory.
     anti_repetition_window: int = _get_int("ANTI_REPETITION_WINDOW", 20)
+    # Forbid every distinctive noun from recent bits by name. Effective against object repetition,
+    # but it is a heavy prohibition stacked on the closer and stance rules, and constraints crowd
+    # out jokes. Disabled by default; set true to compare.
+    anchor_ban_enabled: bool = os.getenv("ANCHOR_BAN_ENABLED", "false").strip().lower() in ("true", "1", "yes")
     # Hard cap for one-liners (multi-line bits are capped at bit_words_max * 1.2)
     one_liner_words_max: int = _get_int("ONE_LINER_WORDS_MAX", 25)
     # Offline bit generation gets its own thinking budget and temperature (latency is irrelevant there)

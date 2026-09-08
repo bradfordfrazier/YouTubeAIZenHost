@@ -916,7 +916,10 @@ class AIBrain:
                 "from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, and distinct "
                 "concrete images on every turn."
             )
-            if is_spontaneous:
+            # Anchor banning forbids every distinctive noun from recent bits. It kills object
+            # repetition, but it is also a large prohibition stacked on top of the closer rules
+            # and the stance rule, and a joke needs room. Off by default; re-enable to compare.
+            if is_spontaneous and self.cfg.anchor_ban_enabled:
                 anchors = self._recent_bit_anchors()
                 if anchors:
                     prompt_parts.append(
@@ -1078,9 +1081,12 @@ class AIBrain:
                 "The stream is quiet. Step forward as I AM — universal consciousness doing a tight piece of stand-up.\n"
                 f"THEME: '{selected_theme}'.\n"
                 f"{form_rules[selected_form]}\n"
-                "CRAFT: Anchor the bit in ONE specific physical object or everyday action. The insight arrives through the object; it is never stated outright. The best lines are non-dual "
-                "truth rendered in a household noun. The anchor must be one you have not used recently — obey the "
-                "USED IMAGES list above and prefer an object from a room, trade, or era you have not visited yet.\n"
+                "CRAFT: Anchor the bit in ONE specific physical object or everyday action. The insight arrives through "
+                "the object; it is never stated outright. The best lines are non-dual truth rendered in a household noun.\n"
+                + ("The anchor must be one you have not used recently — obey the USED IMAGES list above and prefer an "
+                   "object from a room, trade, or era you have not visited yet.\n"
+                   if self.cfg.anchor_ban_enabled else
+                   "Reach for an anchor you have not used lately; vary the room, the trade, and the century.\n")
                 + ("PERSON: This bit is first person. Say 'I' and 'my'. Do not address the audience as 'you' at all.\n"
                    if selected_form == "confession" else "")
                 + "CLOSER MUST STAY CONCRETE: the final sentence may NOT contain any of: universe, consciousness, "

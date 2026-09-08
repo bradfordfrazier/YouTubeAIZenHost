@@ -172,6 +172,10 @@ class AppConfig:
     # --------------------------------------------------------------------------
     obs_require_stream_active: bool = os.getenv("OBS_REQUIRE_STREAM_ACTIVE", "false").lower() in ("true", "1", "yes")
     min_concurrent_viewers_active: int = _get_int("MIN_CONCURRENT_VIEWERS_ACTIVE", 1)
+    # Viewer count assumed while it cannot be resolved at all (no API key, quota exhausted,
+    # scraping blocked). "Unknown" is not "empty": treating it as zero forces ECO mode and the
+    # show sits on the motto while people are watching. Set 0 to keep the old behaviour.
+    assumed_viewers_when_unknown: int = _get_int("ASSUMED_VIEWERS_WHEN_UNKNOWN", 1)
     eco_mode_enabled: bool = os.getenv("ECO_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
     max_responses_per_minute: int = _get_int("MAX_RESPONSES_PER_MINUTE", 12)
     max_responses_per_hour: int = _get_int("MAX_RESPONSES_PER_HOUR", 120)

@@ -263,6 +263,11 @@ def fetch_youtube_live_viewers(video_id_or_url: str, api_key: str = "") -> Optio
         return None
 
     # 1. Primary: YouTube Data API v3
+    if not api_key:
+        logger.warning(
+            "🔑 [YouTube Data API] No YOUTUBE_API_KEY set — viewer count falls back to scraping, "
+            "which YouTube frequently blocks. A missing viewer count forces ECO mode and silences the show."
+        )
     if api_key:
         url = f"https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id={vid}&key={api_key}"
         try:
@@ -284,7 +289,11 @@ def fetch_youtube_live_viewers(video_id_or_url: str, api_key: str = "") -> Optio
                         logger.info("🔑 [YouTube Data API] Broadcast is LIVE with 0 viewers.")
                         return 0
         except Exception as e:
-            logger.debug(f"[YouTube Data API] Query note for '{vid}': {e}. Falling back to web scraper...")
+            logger.warning(
+                f"🔑 [YouTube Data API] Viewer query failed for '{vid}': {e}. "
+                "Check YOUTUBE_API_KEY and that the YouTube Data API v3 is enabled for that key's "
+                "project (a 403 usually means quota or an unenabled API). Falling back to scraping..."
+            )
 
     # 2. Fallback: Public Live Stream Web Scraper
     try:
@@ -451,6 +460,11 @@ class LocalCoHostApp:
         self.concurrent_viewers = 0
         self.chat_velocity = 0
         self.active_video_id = ""
+        # Whether a viewer count has EVER been resolved. Before the first success, "unknown" must
+        # not be read as "empty room": that forces ECO, which suppresses reflections and throttles
+        # chat, i.e. the app sits on the motto doing nothing while people are actually watching.
+        self.viewer_count_known = False
+        self._viewer_fetch_failures = 0
         self.chat_timestamps: list = []
         self.last_chat_received_time = 0.0
         self.engagement_mode = "eco"
@@ -2077,9 +2091,27 @@ class LocalCoHostApp:
                     api_key = self.cfg.youtube_api_key
                     api_viewers = await loop.run_in_executor(None, fetch_youtube_live_viewers, target_vid, api_key)
                     if api_viewers is not None:
+                        if not self.viewer_count_known:
+                            logger.info(f"🔑 [Viewer Count] First successful reading: {api_viewers} viewer(s).")
+                        self.viewer_count_known = True
+                        self._viewer_fetch_failures = 0
                         self._on_viewer_count_update(api_viewers, chat_velocity)
                     else:
-                        logger.debug("YouTube viewer poller: API response unavailable; retaining current viewer count.")
+                        self._viewer_fetch_failures += 1
+                        # Warn on the first failure and then every ~10th, so the log says why the
+                        # show is idle without flooding.
+                        if self._viewer_fetch_failures == 1 or self._viewer_fetch_failures % 10 == 0:
+                            logger.warning(
+                                f"⚠️ [Viewer Count] Unavailable ({self._viewer_fetch_failures} consecutive "
+                                f"failures) for video '{target_vid}'. Assuming "
+                                f"{self.cfg.assumed_viewers_when_unknown} viewer(s) so the show keeps running; "
+                                "set YOUTUBE_API_KEY to get real numbers."
+                            )
+                        if not self.viewer_count_known:
+                            assumed = int(self.cfg.assumed_viewers_when_unknown)
+                            if assumed > 0 and self.concurrent_viewers < assumed:
+                                self.concurrent_viewers = assumed
+                                self._update_engagement_state()
 
             except Exception as e:
                 logger.debug(f"Viewer poller cycle note: {e}")

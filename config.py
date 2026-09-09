@@ -109,6 +109,21 @@ class AppConfig:
     # --------------------------------------------------------------------------
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+    # --- LLM provider -------------------------------------------------------------------
+    # "gemini" (default) or "anthropic". An invalid/missing key for the chosen provider falls
+    # back to Gemini rather than dropping the show into simulated mode.
+    llm_provider: str = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    # Ceiling for one reply. Raised automatically when extended thinking is enabled, since the
+    # budget is drawn from the same allowance.
+    anthropic_max_tokens: int = _get_int("ANTHROPIC_MAX_TOKENS", 1024)
+    # Reasoning effort when extended thinking is not used. "low" | "medium" | "high" | "xhigh" | "max".
+    # Bits are generated offline so they can afford more; chat replies are on the latency path.
+    anthropic_effort_fast: str = os.getenv("ANTHROPIC_EFFORT_FAST", "low").strip().lower()
+    anthropic_effort_deep: str = os.getenv("ANTHROPIC_EFFORT_DEEP", "medium").strip().lower()
+    anthropic_effort_bit: str = os.getenv("ANTHROPIC_EFFORT_BIT", "high").strip().lower()
+
     gemini_thinking_level: str = os.getenv("GEMINI_THINKING_LEVEL", "LOW")
     gemini_fast_thinking_budget: int = _get_int("GEMINI_FAST_THINKING_BUDGET", 0)
     gemini_deep_thinking_budget: int = _get_int("GEMINI_DEEP_THINKING_BUDGET", 512)

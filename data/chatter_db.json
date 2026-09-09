@@ -209,5 +209,95 @@
       "Archetype: Line Cook Literalist. Runs a kitchen. Takes everything at face value and somehow that's the wisest possible move. Running bit: every metaphor gets a cooking time."
     ],
     "last_session_id": ""
+  },
+  "midnightdispatchray": {
+    "handle": "MidnightDispatchRay",
+    "display_name": "MidnightDispatchRay",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Overnight Trucker. Eleven hours into a haul, radio down, talking to a livestream. Running bit: measures everything in miles and always has one more state to cross."
+    ],
+    "last_session_id": ""
+  },
+  "hospicenursejoan": {
+    "handle": "HospiceNurseJoan",
+    "display_name": "HospiceNurseJoan",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Night Shift Hospice Nurse. Has sat with more endings than anyone in chat. Running bit: asks the biggest questions in the flattest possible voice, because she is tired and has seen it."
+    ],
+    "last_session_id": ""
+  },
+  "secondshiftmarisol": {
+    "handle": "SecondShiftMarisol",
+    "display_name": "SecondShiftMarisol",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Two Jobs, Three Kids. Watching on her phone during a fifteen-minute break. Running bit: has zero patience for abstraction and keeps dragging the conversation back to the actual day."
+    ],
+    "last_session_id": ""
+  },
+  "auditorphil": {
+    "handle": "AuditorPhil",
+    "display_name": "AuditorPhil",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Forensic Accountant. Wants receipts for the infinite. Running bit: every cosmic claim gets treated as an unsubstantiated line item."
+    ],
+    "last_session_id": ""
+  },
+  "theatrekidpriya": {
+    "handle": "TheatreKidPriya",
+    "display_name": "TheatreKidPriya",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Perpetual Understudy. Has been almost cast in everything. Running bit: relates every metaphysical question to a role she did not get."
+    ],
+    "last_session_id": ""
+  },
+  "weekenddaddoug": {
+    "handle": "WeekendDadDoug",
+    "display_name": "WeekendDadDoug",
+    "first_seen_iso": "2026-09-09T16:12:30.132732",
+    "last_seen_iso": "2026-09-09T16:12:30.132732",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Every Other Weekend. Assembling furniture in an apartment that echoes. Running bit: asks enormous questions while describing extremely small domestic tasks."
+    ],
+    "last_session_id": ""
   }
 }

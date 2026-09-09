@@ -41,6 +41,13 @@ else:
     GENAI_LEGACY_SDK = False
     genai_legacy = None
 
+try:
+    import anthropic
+    ANTHROPIC_SDK = True
+except ImportError:
+    anthropic = None
+    ANTHROPIC_SDK = False
+
 logger = logging.getLogger("ai_brain")
 
 # ------------------------------------------------------------------------------
@@ -239,7 +246,12 @@ class AIBrain:
 
         # Initialize Gemini Client
         self.client = None
-        self._init_gemini()
+        self.anthropic_client = None
+        self.provider = (self.cfg.llm_provider or "gemini").strip().lower()
+        if self.provider == "anthropic":
+            self._init_anthropic()
+        else:
+            self._init_gemini()
 
     def _precompute_identity_sets(self):
         """Precomputes exempt names and host entities once on startup / identity update (Phase 3.1)."""
@@ -523,6 +535,37 @@ class AIBrain:
             return False, f"hourly_budget_exceeded ({recent_hour_calls}/{max_per_hour} responses in last hour)"
 
         return True, "ok"
+
+    def _init_anthropic(self):
+        """Initialize the Anthropic client. Falls back to Gemini if the SDK or key is missing."""
+        key = (self.cfg.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+        if not ANTHROPIC_SDK:
+            logger.error(
+                "LLM_PROVIDER=anthropic but the 'anthropic' package is not installed "
+                "(pip install anthropic). Falling back to Gemini."
+            )
+            self.provider = "gemini"
+            self._init_gemini()
+            return
+        if not key or len(key) < 20:
+            logger.error(
+                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing or malformed. Falling back to Gemini."
+            )
+            self.provider = "gemini"
+            self._init_gemini()
+            return
+        try:
+            self.anthropic_client = anthropic.AsyncAnthropic(api_key=key)
+            self.model_name = self.cfg.anthropic_model
+            logger.info(
+                f"Initialized Anthropic client with model '{self.model_name}' "
+                f"(max_tokens {self.cfg.anthropic_max_tokens})"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Anthropic client: {e}. Falling back to Gemini.")
+            self.anthropic_client = None
+            self.provider = "gemini"
+            self._init_gemini()
 
     def _init_gemini(self):
         """Initialize Google Gemini client."""
@@ -1418,6 +1461,129 @@ class AIBrain:
 
         return results, remaining, current_mood
 
+    async def _stream_anthropic_deltas(
+        self, full_context: str, is_deep: bool, is_bit: bool
+    ) -> AsyncGenerator[str, None]:
+        """
+        Yields raw text deltas from Claude. Thinking blocks are consumed but never emitted — the
+        pipeline downstream expects spoken text only, and a leaked reasoning block would be
+        synthesized aloud.
+        """
+        max_tokens = int(self.cfg.anthropic_max_tokens)
+
+        # Bits are generated offline, so they get the deepest reasoning; chat replies get the
+        # fast setting because they are on the latency path.
+        if is_bit:
+            budget = int(self.cfg.bit_thinking_budget)
+            effort = self.cfg.anthropic_effort_bit
+        elif is_deep:
+            budget = int(self.cfg.gemini_deep_thinking_budget)
+            effort = self.cfg.anthropic_effort_deep
+        else:
+            budget = int(self.cfg.gemini_fast_thinking_budget)
+            effort = self.cfg.anthropic_effort_fast
+
+        kwargs: Dict[str, Any] = {
+            "model": self.cfg.anthropic_model,
+            "max_tokens": max_tokens,
+            "system": self.cfg.ai_system_prompt,
+            "messages": [{"role": "user", "content": full_context}],
+        }
+
+        # Extended thinking requires budget >= 1024 and budget < max_tokens, and forbids
+        # temperature/top_p sampling controls.
+        if budget >= 1024:
+            kwargs["max_tokens"] = max(max_tokens, budget + int(self.cfg.gemini_max_output_tokens))
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        elif effort:
+            kwargs["output_config"] = {"effort": effort}
+
+        # The SDK's accepted parameters have changed across versions (temperature and top_p were
+        # replaced by output_config.effort). Filter to what THIS installed version accepts rather
+        # than assuming, so an SDK upgrade cannot break the stream with a TypeError.
+        kwargs = self._filter_supported_kwargs(kwargs)
+
+        async with self.anthropic_client.messages.stream(**kwargs) as stream:
+            async for event in stream:
+                etype = getattr(event, "type", "")
+                if etype != "content_block_delta":
+                    continue
+                delta = getattr(event, "delta", None)
+                # thinking_delta / signature_delta must not reach the speech pipeline
+                if delta is None or getattr(delta, "type", "") != "text_delta":
+                    continue
+                piece = getattr(delta, "text", "") or ""
+                if piece:
+                    yield piece
+
+    def _filter_supported_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Drops arguments the installed Anthropic SDK does not accept, warning once for each."""
+        try:
+            import inspect
+            params = inspect.signature(self.anthropic_client.messages.create).parameters
+        except Exception:
+            return kwargs
+        if not params:
+            return kwargs
+        out, dropped = {}, []
+        for k, v in kwargs.items():
+            if k in params:
+                out[k] = v
+            else:
+                dropped.append(k)
+        if dropped:
+            if not getattr(self, "_warned_anthropic_kwargs", None):
+                self._warned_anthropic_kwargs = set()
+            for k in dropped:
+                if k not in self._warned_anthropic_kwargs:
+                    self._warned_anthropic_kwargs.add(k)
+                    logger.warning(
+                        f"[Anthropic] Installed SDK does not accept '{k}'; omitting it. "
+                        "Check the SDK version if this is unexpected."
+                    )
+        return out
+
+    async def _stream_gemini_deltas(
+        self, target_model: str, full_context: str, is_deep: bool, is_bit: bool
+    ) -> AsyncGenerator[str, None]:
+        """Yields raw text deltas from Gemini, excluding thought parts."""
+        cfg = self._build_generate_content_config(is_deep=is_deep, is_bit=is_bit)
+        response = await self.client.aio.models.generate_content_stream(
+            model=target_model, contents=full_context, config=cfg
+        )
+        async for chunk in response:
+            text_piece = chunk.text or ""
+            if not text_piece and hasattr(chunk, "candidates") and chunk.candidates:
+                cand = chunk.candidates[0]
+                if cand.content and cand.content.parts:
+                    text_piece = "".join(
+                        p.text
+                        for p in cand.content.parts
+                        if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+                    )
+            if text_piece:
+                yield text_piece
+
+    async def _stream_legacy_gemini_deltas(self, full_context: str) -> AsyncGenerator[str, None]:
+        """Yields raw text deltas from the legacy google.generativeai SDK."""
+        response = self.client.generate_content(full_context, stream=True)
+        for chunk in response:
+            piece = chunk.text or ""
+            if piece:
+                yield piece
+            await asyncio.sleep(0)
+
+    def _delta_stream(self, target_model: str, full_context: str, is_deep: bool, is_bit: bool):
+        """
+        Chooses the provider for this turn. Every provider yields plain text deltas, so the mood /
+        sentence / beat processing downstream is written once rather than per backend.
+        """
+        if self.provider == "anthropic":
+            return self._stream_anthropic_deltas(full_context, is_deep, is_bit)
+        if GENAI_NEW_SDK:
+            return self._stream_gemini_deltas(target_model, full_context, is_deep, is_bit)
+        return self._stream_legacy_gemini_deltas(full_context)
+
     async def generate_response_stream(
         self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False,
         name_already_spoken: bool = False,
@@ -1476,7 +1642,8 @@ class AIBrain:
         logger.info(f"🧠 [Prompt Classification] Turn depth: {'DEEP' if is_deep else 'FAST'} (Match: '{match_term}') | Streaming with {target_model} for {self.host_name}...")
 
         # If no active client (no API key configured), run dynamic simulated stream
-        if not self.client:
+        active_client = self.anthropic_client if self.provider == "anthropic" else self.client
+        if not active_client:
             async for event in self._generate_simulated_stream(prompt_trigger):
                 yield event
             self.is_generating = False
@@ -1489,109 +1656,51 @@ class AIBrain:
         sentence_mood: Optional[str] = None  # sticky per-sentence mood from inline [MOOD: x] tags
 
         try:
-            if GENAI_NEW_SDK:
-                cfg = self._build_generate_content_config(is_deep=is_deep, is_bit=(match_term == "spontaneous_bit_offline"))
-                # Stream via native async Client (client.aio.models)
-                response = await self.client.aio.models.generate_content_stream(
-                    model=target_model,
-                    contents=full_context,
-                    config=cfg,
-                )
-                async for chunk in response:
-                    text_piece = chunk.text or ""
-                    if not text_piece and hasattr(chunk, "candidates") and chunk.candidates:
-                        cand = chunk.candidates[0]
-                        if cand.content and cand.content.parts:
-                            text_piece = "".join(
-                                p.text
-                                for p in cand.content.parts
-                                if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
-                            )
+            is_bit_turn = (match_term == "spontaneous_bit_offline")
+            # One processing loop for every provider. The mood tag, sentence splitting, [BEAT]
+            # handling and token events are subtle enough that a per-backend copy drifts; the
+            # backends differ only in how raw text deltas are produced.
+            async for text_piece in self._delta_stream(target_model, full_context, is_deep, is_bit_turn):
+                accumulated_text += text_piece
 
-                    if not text_piece:
-                        continue
-
-                    accumulated_text += text_piece
-
-                    # Check for mood tag in early tokens
-                    if not mood_detected:
-                        match = self.mood_pattern.search(accumulated_text)
-                        if match:
-                            active_mood = match.group(1).lower()
-                            mood_detected = True
-                            self.current_mood = active_mood
-                            logger.info(f"Detected Mood Tag: [{active_mood.upper()}]")
-                            yield {"type": "mood", "mood": active_mood}
-                            sentence_mood = active_mood
-                            spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).strip()
-                            sentence_buffer = spoken_text
-                        else:
-                            sentence_buffer += text_piece
+                # Check for mood tag in early tokens
+                if not mood_detected:
+                    match = self.mood_pattern.search(accumulated_text)
+                    if match:
+                        active_mood = match.group(1).lower()
+                        mood_detected = True
+                        self.current_mood = active_mood
+                        logger.info(f"Detected Mood Tag: [{active_mood.upper()}]")
+                        yield {"type": "mood", "mood": active_mood}
+                        sentence_mood = active_mood
+                        spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).strip()
+                        sentence_buffer = spoken_text
                     else:
                         sentence_buffer += text_piece
+                else:
+                    sentence_buffer += text_piece
 
-                    clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
-                    clean_spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", clean_spoken)).strip()
-                    clean_spoken = re.sub(r"@+", "@", clean_spoken)
-                    if not mood_detected and clean_spoken.startswith("[") and "]" not in clean_spoken:
-                        clean_spoken = ""
-                    yield {
-                        "type": "token",
-                        "chunk": text_piece,
-                        "full_text": clean_spoken,
-                        "mood": active_mood,
-                    }
+                clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+                clean_spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", clean_spoken)).strip()
+                clean_spoken = re.sub(r"@+", "@", clean_spoken)
+                if not mood_detected and clean_spoken.startswith("[") and "]" not in clean_spoken:
+                    clean_spoken = ""
+                yield {
+                    "type": "token",
+                    "chunk": text_piece,
+                    "full_text": clean_spoken,
+                    "mood": active_mood,
+                }
 
-                    # Check for complete sentences only after mood is resolved
-                    if mood_detected and sentence_buffer:
-                        completed_sents, sentence_buffer, sentence_mood = self._extract_completed_sentences(
-                            sentence_buffer, base_mood=sentence_mood
-                        )
-                        for s_text, s_beat, s_mood in completed_sents:
-                            yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": s_mood or active_mood}
+                # Check for complete sentences only after mood is resolved
+                if mood_detected and sentence_buffer:
+                    completed_sents, sentence_buffer, sentence_mood = self._extract_completed_sentences(
+                        sentence_buffer, base_mood=sentence_mood
+                    )
+                    for s_text, s_beat, s_mood in completed_sents:
+                        yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": s_mood or active_mood}
 
-                    await asyncio.sleep(0.001)
-
-            elif GENAI_LEGACY_SDK:
-                # google.generativeai legacy streaming
-                response = self.client.generate_content(full_context, stream=True)
-                for chunk in response:
-                    text_piece = chunk.text or ""
-                    accumulated_text += text_piece
-
-                    if not mood_detected:
-                        match = self.mood_pattern.search(accumulated_text)
-                        if match:
-                            active_mood = match.group(1).lower()
-                            mood_detected = True
-                            self.current_mood = active_mood
-                            yield {"type": "mood", "mood": active_mood}
-                            sentence_mood = active_mood
-                            spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).strip()
-                            sentence_buffer = spoken_text
-                        else:
-                            sentence_buffer += text_piece
-                    else:
-                        sentence_buffer += text_piece
-
-                    clean_spoken = self.mood_pattern.sub("", accumulated_text).strip()
-                    clean_spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", clean_spoken)).strip()
-                    clean_spoken = re.sub(r"@+", "@", clean_spoken)
-                    yield {
-                        "type": "token",
-                        "chunk": text_piece,
-                        "full_text": clean_spoken,
-                        "mood": active_mood,
-                    }
-
-                    if mood_detected and sentence_buffer:
-                        completed_sents, sentence_buffer, sentence_mood = self._extract_completed_sentences(
-                            sentence_buffer, base_mood=sentence_mood
-                        )
-                        for s_text, s_beat, s_mood in completed_sents:
-                            yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": s_mood or active_mood}
-
-                    await asyncio.sleep(0.005)
+                await asyncio.sleep(0.001)
 
             # Flush and repair remaining sentence buffer
             raw_spoken = re.sub(r"@+", "@", self.mood_pattern.sub("", accumulated_text, count=1)).strip()  # keeps [BEAT] and inline [MOOD: x]

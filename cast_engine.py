@@ -563,13 +563,18 @@ class CastEngine:
     # -------------------------------------------------------------- casting
 
     def _eligible_personas(self) -> List[CastPersona]:
-        """Personas outside the recency window, respecting tone spacing."""
+        """Personas outside the recency window, respecting tone spacing and fresh questions."""
         pool = [
             p for k, p in self.personas.items()
             if k not in self.recent_persona_handles
         ]
         if not pool:
             pool = list(self.personas.values())
+
+        # Prefer personas that still have unasked questions this session
+        with_fresh = [p for p in pool if len(p.used_questions) < len(p.questions)]
+        if with_fresh:
+            pool = with_fresh
 
         # Don't follow a sincere/wholesome beat with another one.
         if self.last_tone in SPACED_TONES:

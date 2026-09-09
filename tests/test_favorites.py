@@ -10,9 +10,8 @@ def _fav_stub(tmp_path):
     start = src.index("    def _load_favorites(self)")
     end = src.index("    # Bit forms for spontaneous material.")
     body = "\n".join(l[4:] if l.startswith("    ") else l for l in src[start:end].splitlines())
-    ns = {"json": json, "random": random, "re": re, "time": time, "logger": logging.getLogger("t"),
-          "List": list, "Dict": dict, "Any": object, "Optional": object}
-    exec("from typing import List, Dict, Any, Optional\n" + body, ns)
+    ns = {"json": json, "random": random, "time": time, "re": re, "logger": logging.getLogger("t")}
+    exec("import re, json, random, time\nfrom typing import Any, AsyncGenerator, Dict, List, Optional, Tuple\n" + body, ns)
     stub = types.SimpleNamespace(favorites_path=tmp_path / "favs.jsonl", favorites=[], last_played_bit=None)
     for name in ("_load_favorites", "add_favorite", "sample_favorites"):
         setattr(stub, name, types.MethodType(ns[name], stub))
@@ -36,7 +35,7 @@ def test_add_favorite_persists_and_dedupes(tmp_path):
 def test_bits_use_offline_budget_and_prompt_has_craft_rules():
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert 'return True, "spontaneous_bit_offline"' in src
-    assert "is_bit=(match_term == \"spontaneous_bit_offline\")" in src
+    assert 'match_term == "spontaneous_bit_offline"' in src
     assert "budget = self.cfg.bit_thinking_budget" in src
     assert "CRAFT: Anchor the bit in ONE specific physical object" in src
     assert "DRAFTING: In your private reasoning, write three" in src

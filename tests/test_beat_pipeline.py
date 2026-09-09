@@ -27,7 +27,7 @@ def _splitter():
     start = src.index("    def _split_piece(self, buffer: str)")
     end = src.index("    async def generate_response_stream(")
     body = "\n".join(line[4:] if line.startswith("    ") else line for line in src[start:end].splitlines())
-    exec("import re\nfrom typing import List, Tuple, Optional\n" + body, ns)
+    exec("import re\nfrom typing import Any, AsyncGenerator, Dict, List, Optional, Tuple\n" + body, ns)
     stub = types.SimpleNamespace(
         beat_pattern=re.compile(r"\[\s*BEAT\s*\]", re.IGNORECASE),
         mood_pattern=re.compile(r"\[MOOD:\s*([a-zA-Z_-]+)\]", re.IGNORECASE),
@@ -84,7 +84,7 @@ def test_push_audio_uses_beat_gap():
     e.ndi_buffer_enabled = False
     e.cfg.inter_sentence_gap_sec = 0.15
     e.cfg.tts_beat_gap_sec = 0.55
-    e.cfg.tts_beat_gap_jitter = 0.0
+    e.cfg.tts_beat_gap_jitter = 0.0  # deterministic for the exact-length assertions below
     sr = e.sample_rate
     one_sec = np.ones((sr, 2), dtype=np.float32) * 0.3
 
@@ -136,3 +136,42 @@ def test_mood_marker_mid_sentence_is_boundary():
     sents, rem, moods, _ = _split(sp, "And that is exactly why [MOOD: laughing] I invented Tuesdays. ", base="deadpan")
     assert sents == [("And that is exactly why", False), ("I invented Tuesdays.", False)]
     assert moods == ["deadpan", "laughing"]
+
+
+def test_beat_gap_jitter_varies_but_stays_in_range():
+    """A fixed pause every time becomes a tic; jitter must vary it without going out of bounds."""
+    e = TTSEngine()
+    e.ndi_buffer_enabled = False
+    e.cfg.inter_sentence_gap_sec = 0.15
+    e.cfg.tts_beat_gap_sec = 0.45
+    e.cfg.tts_beat_gap_jitter = 0.25
+    sr = e.sample_rate
+    one = np.ones((sr, 2), dtype=np.float32) * 0.2
+
+    gaps = []
+    for _ in range(12):
+        e.begin_utterance()
+        e.push_audio(one)
+        beat = e.push_audio(one, beat_before=True)
+        gaps.append((len(beat) - sr) / sr)
+        e.end_utterance()
+        e.clear_audio_buffer()
+
+    assert all(0.45 * 0.75 - 0.01 <= g <= 0.45 * 1.25 + 0.01 for g in gaps), gaps
+    assert len(set(round(g, 3) for g in gaps)) > 1, "jitter produced identical gaps"
+
+    # jitter=0 must be exact
+    e.cfg.tts_beat_gap_jitter = 0.0
+    e.begin_utterance()
+    e.push_audio(one)
+    beat = e.push_audio(one, beat_before=True)
+    assert len(beat) == sr + int(sr * 0.45)
+
+
+def test_beat_prompt_requires_a_reversal():
+    """The beat must be described as earned, not as a default step."""
+    src = (Path(__file__).resolve().parent.parent / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "Put [BEAT] immediately before the closer (the last sentence)." not in src
+    assert "REVERSES" in src
+    assert "Most replies should contain no [BEAT]" in src
+    assert "Most bits should have no [BEAT]" in src

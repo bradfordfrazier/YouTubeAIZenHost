@@ -13,7 +13,7 @@ def _helpers():
     end = src.index("    async def _recover_from_stuck_turn")
     body = "\n".join(l[4:] if l.startswith("    ") else l for l in src[start:end].splitlines())
     ns = {"re": re, "random": random}
-    exec("from typing import Optional\n" + body, ns)
+    exec("from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple\n" + body, ns)
 
     class Stub:
         _QUESTION_OPENERS = ns["_QUESTION_OPENERS"]

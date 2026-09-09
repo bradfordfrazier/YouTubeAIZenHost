@@ -247,6 +247,8 @@ class AIBrain:
         # Initialize Gemini Client
         self.client = None
         self.anthropic_client = None
+        # "adaptive" (current models) -> "effort" -> "none". Degrades on a server rejection.
+        self._anthropic_thinking_mode = "adaptive"
         self.provider = (self.cfg.llm_provider or "gemini").strip().lower()
         if self.provider == "anthropic":
             self._init_anthropic()
@@ -1473,14 +1475,13 @@ class AIBrain:
 
         # Bits are generated offline, so they get the deepest reasoning; chat replies get the
         # fast setting because they are on the latency path.
+        # Reasoning depth is expressed as an effort level, not a token budget: bits are generated
+        # offline so they can afford more, chat replies sit on the latency path.
         if is_bit:
-            budget = int(self.cfg.bit_thinking_budget)
             effort = self.cfg.anthropic_effort_bit
         elif is_deep:
-            budget = int(self.cfg.gemini_deep_thinking_budget)
             effort = self.cfg.anthropic_effort_deep
         else:
-            budget = int(self.cfg.gemini_fast_thinking_budget)
             effort = self.cfg.anthropic_effort_fast
 
         kwargs: Dict[str, Any] = {
@@ -1490,19 +1491,27 @@ class AIBrain:
             "messages": [{"role": "user", "content": full_context}],
         }
 
-        # Extended thinking requires budget >= 1024 and budget < max_tokens, and forbids
-        # temperature/top_p sampling controls.
-        if budget >= 1024:
-            kwargs["max_tokens"] = max(max_tokens, budget + int(self.cfg.gemini_max_output_tokens))
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-        elif effort:
-            kwargs["output_config"] = {"effort": effort}
+        # Current models control reasoning with thinking.type="adaptive" plus output_config.effort.
+        # The older shape (type="enabled" with budget_tokens) is rejected by claude-sonnet-5 with
+        # a 400. `_anthropic_thinking_mode` degrades to "effort" and then "none" if the server
+        # rejects a shape, so an API change costs one failed call rather than the whole session.
+        mode = getattr(self, "_anthropic_thinking_mode", "adaptive")
+        if mode == "adaptive":
+            kwargs["thinking"] = {"type": "adaptive"}
+            if effort:
+                kwargs["output_config"] = {"effort": effort}
+        elif mode == "effort":
+            if effort:
+                kwargs["output_config"] = {"effort": effort}
+        # mode == "none": send neither; the model uses its defaults.
 
         # The SDK's accepted parameters have changed across versions (temperature and top_p were
         # replaced by output_config.effort). Filter to what THIS installed version accepts rather
         # than assuming, so an SDK upgrade cannot break the stream with a TypeError.
         kwargs = self._filter_supported_kwargs(kwargs)
 
+        # Errors must propagate: the caller degrades the thinking mode on a shape rejection, and
+        # swallowing here turned a fixable 400 into a silent simulated-mode fallback.
         async with self.anthropic_client.messages.stream(**kwargs) as stream:
             async for event in stream:
                 etype = getattr(event, "type", "")
@@ -1515,6 +1524,14 @@ class AIBrain:
                 piece = getattr(delta, "text", "") or ""
                 if piece:
                     yield piece
+
+    @staticmethod
+    def _is_thinking_shape_error(exc: Exception) -> bool:
+        """True when the API rejected how reasoning was requested, rather than the request itself."""
+        msg = str(exc).lower()
+        return ("thinking" in msg or "output_config" in msg or "effort" in msg) and (
+            "not supported" in msg or "invalid" in msg or "unexpected" in msg or "400" in msg
+        )
 
     def _filter_supported_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Drops arguments the installed Anthropic SDK does not accept, warning once for each."""
@@ -1746,17 +1763,36 @@ class AIBrain:
                     yield event
 
         except Exception as e:
+            provider_label = "Anthropic" if self.provider == "anthropic" else "Gemini"
+
+            # If the server rejects the reasoning-control shape, step down instead of burning the
+            # circuit breaker on a config mismatch. API shapes change; the show should not stop.
+            if self.provider == "anthropic" and self._is_thinking_shape_error(e):
+                current = getattr(self, "_anthropic_thinking_mode", "adaptive")
+                nxt = {"adaptive": "effort", "effort": "none"}.get(current)
+                if nxt:
+                    self._anthropic_thinking_mode = nxt
+                    logger.warning(
+                        f"[Anthropic] Server rejected thinking mode '{current}' for "
+                        f"{self.cfg.anthropic_model}; falling back to '{nxt}' and retrying. ({e})"
+                    )
+                    async for ev in self.generate_response_stream(
+                        prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken
+                    ):
+                        yield ev
+                    return
+
             self.consecutive_gemini_errors += 1
             if self.consecutive_gemini_errors >= self.max_consecutive_errors:
                 self.circuit_breaker_tripped = True
                 self.circuit_breaker_reset_time = time.time() + self.circuit_breaker_cooldown_sec
                 logger.error(
-                    f"🚨 [Circuit Breaker Tripped] {self.consecutive_gemini_errors} consecutive Gemini errors. "
+                    f"🚨 [Circuit Breaker Tripped] {self.consecutive_gemini_errors} consecutive {provider_label} errors. "
                     f"Tripping circuit breaker for {self.circuit_breaker_cooldown_sec}s: {e}"
                 )
             else:
                 logger.error(
-                    f"Error during Gemini streaming inference ({self.consecutive_gemini_errors}/{self.max_consecutive_errors}): {e}. "
+                    f"Error during {provider_label} streaming inference ({self.consecutive_gemini_errors}/{self.max_consecutive_errors}): {e}. "
                     f"Failing over to simulation fallback...",
                     exc_info=True,
                 )

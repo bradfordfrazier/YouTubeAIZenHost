@@ -2780,7 +2780,12 @@ class LocalCoHostApp:
         logger.info(f"NDI Broadcast Feed: '{self.cfg.ndi_stream_name}' ({self.visualizer.width}x{self.visualizer.height} @ 60fps)")
         tts_backend_name = self.cfg.tts_backend
         logger.info(f"TTS Backend: {tts_backend_name} ({self.cfg.tts_voice}) @ 48kHz Stereo")
-        logger.info(f"LLM Brain: {self.cfg.ai_cohost_name} ({self.cfg.gemini_model})")
+        # Report the model actually in use, not the Gemini default — the banner claimed
+        # "gemini-3.7-flash" while the brain was running Claude.
+        logger.info(
+            f"LLM Brain: {self.cfg.ai_cohost_name} "
+            f"({getattr(self.brain, 'provider', 'gemini')}: {getattr(self.brain, 'model_name', self.cfg.gemini_model)})"
+        )
         logger.info(f"Local OBS WebSocket: {self.cfg.obs_ws_host}:{self.cfg.obs_ws_port}")
         logger.info("=" * 65)
 

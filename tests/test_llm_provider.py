@@ -134,9 +134,10 @@ def test_thinking_budget_and_kwarg_filtering():
     assert kw["system"] == b.cfg.ai_system_prompt
     assert kw["messages"][0]["role"] == "user"
     if "thinking" in kw:
-        # Extended thinking requires budget >= 1024 and strictly less than max_tokens.
-        assert kw["thinking"]["budget_tokens"] >= 1024
-        assert kw["max_tokens"] > kw["thinking"]["budget_tokens"]
+        # Current models take thinking.type="adaptive" with output_config.effort. The older
+        # shape (type="enabled" + budget_tokens) is rejected by claude-sonnet-5 with a 400.
+        assert kw["thinking"] == {"type": "adaptive"}
+        assert "budget_tokens" not in kw["thinking"]
     # Unsupported params must be filtered, not passed blindly to a differing SDK version.
     assert "temperature" not in kw or "temperature" in _create_params(b)
 
@@ -152,3 +153,74 @@ def test_one_processing_loop_for_all_providers():
     assert "_delta_stream" in src
     assert src.count("Detected Mood Tag:") == 1, "mood detection is duplicated per backend again"
     assert src.count('yield {"type": "sentence", "text": s_text') <= 4
+
+
+class _RejectingMessages(_FakeMessages):
+    """Simulates a server that rejects a given thinking shape, as claude-sonnet-5 does."""
+
+    def __init__(self, pieces, reject_types):
+        super().__init__(pieces)
+        self.reject_types = reject_types
+        self.calls = []
+
+    def stream(self, **kw):
+        self.calls.append(kw)
+        self.last_kwargs = kw
+        t = (kw.get("thinking") or {}).get("type")
+        if t in self.reject_types:
+            class _Failing(_FakeStream):
+                async def __aenter__(inner):
+                    raise Exception(
+                        f'Error code: 400 - "thinking.type.{t}" is not supported for this model'
+                    )
+            return _Failing(self.pieces)
+        return _FakeStream(self.pieces)
+
+
+def _run(brain):
+    async def go():
+        return [ev async for ev in brain.generate_response_stream("[SPONTANEOUS_REFLECTION]",
+                                                                  bypass_cache=True)]
+    return asyncio.run(go())
+
+
+def test_thinking_shape_is_adaptive_plus_effort():
+    """
+    claude-sonnet-5 rejects thinking.type="enabled" with budget_tokens; it wants "adaptive" plus
+    output_config.effort. This shipped wrong once and produced a 400 on every bit generation.
+    """
+    b = _brain(LLM_PROVIDER="anthropic", ANTHROPIC_API_KEY="sk-ant-" + "x" * 40)
+    fake = _attach_fake(b, ["[MOOD: deadpan] A line long enough to pass the guard. "])
+    _run(b)
+    kw = fake.last_kwargs
+    assert kw.get("thinking") == {"type": "adaptive"}
+    assert kw.get("output_config", {}).get("effort") in ("low", "medium", "high", "xhigh", "max")
+
+
+def test_rejected_thinking_shape_degrades_instead_of_failing_the_turn():
+    """
+    An API shape change must cost one retry, not the session. Before this, a 400 fell straight
+    through to simulated mode and every bit came out scripted.
+    """
+    import types as _t
+    b = _brain(LLM_PROVIDER="anthropic", ANTHROPIC_API_KEY="sk-ant-" + "x" * 40)
+    msgs = _RejectingMessages(["[MOOD: deadpan] A line long enough to pass the guard. "],
+                              reject_types={"adaptive"})
+    b.anthropic_client = _t.SimpleNamespace(messages=msgs)
+
+    events = _run(b)
+    assert len(msgs.calls) == 2, "should retry once with a simpler shape"
+    assert msgs.calls[0]["thinking"] == {"type": "adaptive"}
+    assert "thinking" not in msgs.calls[1]
+    assert b._anthropic_thinking_mode == "effort"
+
+    spoken = [e["full_text"] for e in events if e["type"] == "complete"]
+    assert spoken and "long enough" in spoken[0], "the turn must still produce real speech"
+
+
+def test_provider_name_appears_in_errors_and_banner():
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert 'provider_label = "Anthropic" if self.provider == "anthropic" else "Gemini"' in src
+    assert "Error during {provider_label} streaming inference" in src
+    app_src = (ROOT / "app.py").read_text(encoding="utf-8", errors="ignore")
+    assert "getattr(self.brain, 'model_name'" in app_src, "banner must show the active model"

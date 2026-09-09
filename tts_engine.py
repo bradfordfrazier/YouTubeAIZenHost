@@ -10,6 +10,7 @@ from collections import deque
 import io
 import os
 import logging
+import random
 import re
 import threading
 import time
@@ -643,9 +644,18 @@ class TTSEngine:
                 fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
                 audio[:fade_samples] *= fade_in
 
-            inter_gap_sec = float(self.cfg.tts_beat_gap_sec) if beat_before else float(self.cfg.inter_sentence_gap_sec)
             if beat_before:
-                logger.info(f"[TTS BEAT] inserting {inter_gap_sec*1000:.0f} ms comedic pause before chunk #{self._utterance_chunk_count + 1}")
+                # A fixed pause every time becomes a tic; real comics vary it. Jitter breaks the
+                # metronome without making any single beat feel wrong.
+                base = float(self.cfg.tts_beat_gap_sec)
+                jitter = float(self.cfg.tts_beat_gap_jitter)
+                inter_gap_sec = max(0.0, base + random.uniform(-jitter, jitter) * base)
+                logger.info(
+                    f"[TTS BEAT] inserting {inter_gap_sec*1000:.0f} ms comedic pause "
+                    f"(base {base*1000:.0f} ms) before chunk #{self._utterance_chunk_count + 1}"
+                )
+            else:
+                inter_gap_sec = float(self.cfg.inter_sentence_gap_sec)
             if inter_gap_sec > 0:
                 gap_samples = int(self.sample_rate * inter_gap_sec)
                 gap_silence = np.zeros((gap_samples, 2), dtype=np.float32)

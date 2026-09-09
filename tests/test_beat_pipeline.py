@@ -84,6 +84,7 @@ def test_push_audio_uses_beat_gap():
     e.ndi_buffer_enabled = False
     e.cfg.inter_sentence_gap_sec = 0.15
     e.cfg.tts_beat_gap_sec = 0.55
+    e.cfg.tts_beat_gap_jitter = 0.0
     sr = e.sample_rate
     one_sec = np.ones((sr, 2), dtype=np.float32) * 0.3
 

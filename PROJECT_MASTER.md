@@ -1,253 +1,274 @@
 # I AM — AI Livestream Host: Project Master Document
 
-**Status:** current as of September 2026. This document supersedes everything in `docs/archive/`.
-If anything in the archive contradicts this file, this file wins.
+**Verified against the running code on 8 September 2026.** Every fact below was checked against
+the actual modules, not remembered. This supersedes everything in `docs/archive/`.
 
-**Audience:** Antigravity (and any other coding agent), plus future-you. Read this fully before
-changing code. The "Non-negotiables" and "Invariants" sections exist because each one was learned
-the hard way; an agent that "improves" past them will re-introduce a bug that took days to find.
+**Audience:** Antigravity, any other coding agent, and future-you. Read this before changing code.
+Sections 2 and 8 exist because each item was learned by breaking the live stream.
 
 ---
 
 ## 1. What this is
 
-A single AI host, persona **"I AM"** — universal consciousness in the Alan Watts / non-duality vein,
-delivered with a stand-up comedian's timing — running a YouTube live stream in **9:16** for Shorts
-clipping. Viewers watch an animated avatar (a reactive star/core) and hear the host; there is no
-human co-host. Chat questions are answered by name; quiet time is filled with short self-contained
-comedy **bits**. A separate long-form analysis tool (not in this repo) clips the best moments into
-Shorts, keyed on when the avatar speaks and where the background music loops.
+A single AI host, persona **"I AM"** — universal consciousness in the Alan Watts vein with a
+stand-up comedian's timing — running a YouTube live stream in **9:16** for Shorts clipping. Viewers
+watch a reactive star/core avatar and hear the host. Chat questions are answered by name; quiet time
+is filled with short self-contained comedy **bits**. A separate long-form tool (not in this repo)
+clips the best moments into Shorts, keyed on when the avatar speaks and where the music loops.
 
 **The product goal:** every spoken piece should be a tight, well-timed bit that survives being
-clipped cold and looped. Latency to first audio and comedic timing matter more than anything else.
+clipped cold and looped. Comedic timing and time-to-first-audio matter more than anything else.
 
 ---
 
 ## 2. Non-negotiables (product decisions, not open questions)
 
-1. **The AI's spoken text is never shown on screen.** The subtitle/comment card shows only the
-   pinned chat question being answered and the motto when idle. Attention stays on the avatar.
-   Do not add captions, karaoke text, word-by-word chunks, or "transcript" panels.
-2. **Solo host.** The human host / co-host layer (mic transcript, host questions, "host & guest
-   dialogue") was removed on purpose. Do not reintroduce `transcript`, `host_streamer_*`, or
-   `is_host` code paths. `youtube_channel_handle` is the host's own identity.
-3. **The synthetic cast is openly fictional.** Cast questions carry a visible `[CAST]` badge on
-   stream and are labelled `Cast @Name` in the prompt. Never present a cast character as a real viewer.
-4. **Small rooms get full attention.** At or below `SMALL_ROOM_VIEWERS` concurrent viewers, every
-   real chat message that isn't a peer-to-peer reply gets a response, regardless of keywords.
-5. **Timing lives in markers, not prose.** `[BEAT]` (comedic pause) and inline `[MOOD: x]`
-   (delivery change on the closer) are emitted by the model and interpreted by the pipeline. They are
-   stripped before any text reaches logs, memory, subtitles, or the session log.
-6. **Bits are cold-open safe.** Spontaneous material never references chat, handles, earlier bits,
-   or "as I said". First sentence must work with zero context. (Chat *answers* may use callbacks.)
-7. **Idle cadence is the operator's choice.** `IDLE_SILENCE_THRESHOLD_SEC` / `SPONTANEOUS_*` are set
-   deliberately short for clip harvesting. Do not "fix" the cadence in code; it's config.
+1. **The AI's spoken text is never shown on screen.** The subtitle card shows only the pinned chat
+   question and the motto. Attention stays on the avatar. No captions, no karaoke text.
+2. **Solo host.** The human co-host layer was removed deliberately. Do not reintroduce
+   `transcript`, `host_streamer_*`, or `is_host` paths.
+3. **The cast is openly fictional.** Cast questions carry a visible `[CAST]` badge and are labelled
+   `Cast @Name` in the prompt. Never present a cast character as a real viewer.
+4. **Small rooms get full attention.** At or below `SMALL_ROOM_VIEWERS`, every real chat message
+   that is not a peer reply gets a response, regardless of keywords.
+5. **Bits are cold-open safe.** Spontaneous material never references chat, handles, or earlier
+   bits. Chat *answers* may use callbacks; bits may not.
+6. **Say "I", never "we".** I AM is not a member of a group; it is the single thing wearing all the
+   bodies. "We all…" is the pastoral voice and reads as condescension. See §6.
+7. **Never judge the audience.** The bit is "look what I did again", never "look what you people do".
+8. **Idle cadence is the operator's choice.** The `.env` timing values are tuned for clip
+   harvesting. Do not "fix" cadence in code.
 
 ---
 
 ## 3. Topology
 
 ```
-GAMER   (192.168.0.115)  Chatterbox Turbo TTS server, FastAPI, GPU.  POST /synthesize -> WAV
-DESKTOP                  This app (main process + render worker) AND OBS Studio.
-                         NDI 'AI_HOST_NAME' goes app -> OBS over loopback (no network hop).
-YouTube                  Live chat in via pytchat; viewer count via Data API; OBS streams out.
+GAMER   192.168.0.115   Chatterbox Turbo TTS server (C:\Services\tts-server), RTX 4070 SUPER.
+                        POST /synthesize -> WAV 24 kHz. voice_manager.py lives here.
+DESKTOP                 This app (main process + render worker) AND OBS Studio.
+                        NDI 'AI_HOST_NAME' goes app -> OBS over loopback (no network hop).
+YouTube                 Chat in via pytchat; viewer count via YouTube Data API v3; OBS streams out.
 ```
 
-Because OBS and the sender share DESKTOP, **CPU contention is the primary audio risk**. Every
-audio-path design choice below follows from that.
+Because OBS and the NDI sender share DESKTOP, **CPU contention is the primary audio risk**. Every
+audio design choice in §5 follows from that.
 
 ---
 
-## 4. Process & thread map
+## 4. Modules
 
-### Main process (`app.py`, asyncio)
-| Task | Role |
+| File | Role |
 |---|---|
-| `youtube_chat_task` | pytchat polling; builds chat entries; evaluates `should_trigger_response`; enqueues turns |
-| `youtube_viewer_poller_task` | concurrent viewer count; drives engagement state |
-| `obs_monitor_task` | OBS WebSocket: stream live / scene state; FX triggers |
-| `console_chat_task` | local testing: typed messages are treated as viewer chat |
-| `comment_queue_scheduler_task` | **serialized** turn execution from a `heapq` priority queue with TTLs, via `run_guarded_turn` |
-| `_execute_ai_turn` | one turn: pin question → Gemini stream → per-sentence TTS → lead gate → push audio → wait |
-| `idle_reflection_monitor_task` | queues spontaneous bits during quiet |
-| `cast_scheduler_task` | queues synthetic cast questions |
-| `promo_monitor_task` | event-driven promo cards with a global minimum gap |
-| `turn_watchdog_task` | logs when a turn runs > 60 s; the guard cancels at `TURN_MAX_SEC` |
-| `video_broadcast_task` | 20 Hz state sync to the render worker; worker restart check |
-| `stream_observability_task` | telemetry HUD |
-| PortAudio callback (thread) | optional local monitor output only; **does not** write avatar metrics when the proxy is active |
-
-### Render worker (`render_worker.py`, separate process via `VisualizerProxy`)
-| Thread | Role |
-|---|---|
-| main loop | pygame render at 60 fps → `NDIStreamer.send_video` (video only) |
-| `ndi_audio_pump` | **the only audio clock**: pulls 2400-sample blocks from the shared-memory ring every 50 ms, writes to NDI (`clock_audio=True`), computes avatar metrics (60 Hz via the metrics ring) |
-
-Communication main → worker: `ctrl_queue` (never dropped; mood, subtitle, pinned, promos, fades),
-`state_queue` (latest-wins; chat list, viewers, mode), shared-memory audio ring + metrics ring.
-
-### GPU server (GAMER, `C:\Services\tts-server`) — not in this repo
-Stateless `POST /synthesize` returning a WAV. **Known open item:** it must clamp before int16
-conversion (see §10). The client detects clipped input and logs `[TTS PEAK]`.
+| `app.py` | Orchestrator: ~12 asyncio tasks, the serialized turn scheduler, chat ingestion |
+| `ai_brain.py` | Gemini client, prompt construction, bit forms, trigger rules, favourites, reactions |
+| `cast_engine.py` | 18 synthetic personas, 234 questions, rotation + per-session cap |
+| `tts_engine.py` | Chatterbox HTTP client, deque audio buffers, fades, beat gaps, GPU exclusivity |
+| `render_worker.py` | Separate process: pygame render loop + the NDI audio pump + shared memory |
+| `ndi_streamer.py` | cyndilib wrapper; separate audio/video locks; 50 ms SDK-clocked audio blocks |
+| `visualizer.py` | 1080×1920 pygame scene, chat card, promo cards, mixed-font emoji rendering |
+| `emoji_text.py` | Shortcode → emoji normalization and emoji-font compositing |
+| `reflection_cache.py` | 4-slot pre-generated bit cache (text only) |
+| `greeting_cache.py` | 3-slot pre-synthesized welcome cache (text + audio) |
+| `chatter_db.py` | Persistent viewer/cast profiles; roster derived from `cast_engine` |
+| `memory_manager.py` | Canonical rulings, channel lore, cross-session continuity |
+| `session_log.py` | JSONL of every turn, chat message, and cast question |
+| `turn_guard.py` | `run_guarded_turn()` — hard timeout wrapper for one turn |
+| `logging_setup.py` | Single logging configuration for both processes |
+| `voice_manager.py` | **On GAMER.** Reference-clip resolution, PCM repair, sentence trimming |
+| `bit_lab.py` | Offline A/B harness for bit quality (see §11) |
+| `config.py` | Every setting, with defaults |
 
 ---
 
 ## 5. The audio path (do not change casually)
 
 ```
-Gemini stream ─► sentence splitter ─► per-sentence synth (serial, gpu_lock) ─► lead gate
-      ─► TTSEngine.push_audio (fades, gaps, beat) ─► ndi_sink ─► shm ring ─► pump (50 ms blocks) ─► NDI ─► OBS
+Gemini stream → sentence splitter → per-sentence synth (serial, gpu_lock) → lead gate
+   → TTSEngine.push_audio (fades, gaps, beat) → ndi_sink → shm ring → pump (50 ms) → NDI → OBS
 ```
 
-- **Sentence pipelining is on.** Events are `{"type":"sentence","text":...,"beat_before":bool,"mood":str}`.
-  `app.py` reads the `text` key. (A `sentence` vs `text` key mismatch once silently disabled the whole
-  pipeline for weeks; `tests/test_beat_pipeline.py::test_sentence_event_key_is_text` guards it.)
-- **Lead gate.** Playback starts when buffered audio ≥ estimated remaining synth time × `LEAD_SAFETY`,
-  or on the sentinel, or when the question display hold expires — whichever first. Never before
-  `QUESTION_MIN_DISPLAY_SEC` (viewers must be able to read the question).
-- **GPU exclusivity.** Live turns own the GPU (`live_turn_active`, `gpu_lock`). Background work
-  (greeting cache) goes through `synthesize_background`, which waits *outside* the lock and respects
-  `CACHE_REFILL_COOLDOWN_SEC`. `asyncio.Lock` is not re-entrant; `_synthesize_locked` asserts it's held.
-- **One processed stream.** `push_audio` returns the processed array and feeds the NDI sink itself;
-  local monitor and NDI get byte-identical audio. `utterance_state_sink(True)` fires only after the
-  first chunk is in the ring (prevents false underruns and a fade-in on the first syllable).
-- **Buffers are deques**; the PortAudio callback never waits behind a large copy.
-- **50 ms blocks, SDK-clocked.** `NDI_AUDIO_BLOCK_SAMPLES` (2400) is read by both the pump and
-  `AudioSendFrame`. A 30–40 ms scheduling stall (OBS on the same box) is inside one block and inaudible.
-  Audio has its own lock in `NDIStreamer`; it never waits behind the 8 MB video frame copy.
-- **Underrun detection** is real: `[NDI UNDERRUN]` / `[TTS UNDERRUN]` only count after audio has
-  flowed in the utterance. A clean turn logs `underruns=0`.
-- **Diagnostic taps:** `IAM_DUMP_TTS_AUDIO=1` (chunks as pushed) and `IAM_DUMP_NDI_AUDIO=1`
-  (packets as sent) write WAVs. Use them to split synthesis vs transport before changing anything.
+- **Sentence pipelining is on.** Events are `{"type":"sentence","text":…,"beat_before":bool,"mood":str}`.
+  `app.py` reads the `text` key. A `sentence`/`text` key mismatch once disabled the whole pipeline
+  silently; `tests/test_beat_pipeline.py` guards it.
+- **Lead gate.** Playback starts when buffered audio ≥ estimated remaining synth × `LEAD_SAFETY`,
+  or on the sentinel, or when the question hold expires — whichever is first.
+- **GPU exclusivity.** Live turns own the GPU (`live_turn_active`, `gpu_lock`). Background work uses
+  `synthesize_background`, which waits *outside* the lock. `asyncio.Lock` is not re-entrant.
+- **One processed stream.** `push_audio` returns the processed array and feeds the NDI sink itself,
+  so the local monitor and NDI get identical audio.
+- **50 ms SDK-clocked blocks.** `NDI_AUDIO_BLOCK_SAMPLES` (2400) is read by both the pump and
+  `AudioSendFrame`. Audio has its own lock in `NDIStreamer`; it never waits behind the 8 MB frame
+  copy. A 30–40 ms scheduling stall from OBS is inside one block and inaudible.
+- **The render loop sends video only.** Audio is never tied to frame rate.
+- **Diagnostic taps:** `IAM_DUMP_TTS_AUDIO=1` and `IAM_DUMP_NDI_AUDIO=1` write WAVs. Use them to
+  split synthesis from transport before changing anything.
 
 ---
 
 ## 6. The comedy engine
 
-### Turn types and priority (heap; lower = sooner; TTLs in seconds)
-`superchat 1/180 · direct_mention 2/90 · greeting 3/90 · chat 4/90 · cast 5/90 · spontaneous 6/30`
+### Turn priority (heap; lower is sooner)
+`superchat 1 · direct_mention 2 · greeting 3 · chat 4 · cast 5 · spontaneous 6`
 
-### Trigger rules (`AIBrain.should_trigger_response`), in order
-1. Superchat → always. First message from a new chatter → always (both exempt from the per-minute limiter).
-2. Rate limiter (`MAX_RESPONSES_PER_MINUTE/HOUR`) — counts **live** replies only; cache refills are exempt.
-3. Direct address: `@channel`, `@I AM`/`IAM`, caps `I AM`, address-position "I am, …", `hey i am`,
-   whole-word `ai/bot/god/host` only in address position. Plain "I am tired" is **not** a mention.
-4. Peer-reply detection (`@OtherViewer …`, `Name: …`) → ignored.
-5. `?` in message → reply. 6. Small-room rule → reply. 7. Eco-mode suppression (only applies above
-   the small-room size). 8. Keyword list + viewer-count sampling. 9. Otherwise `no_trigger_keywords`.
+### Trigger rules (`should_trigger_response`), in order
+1. **Reaction-only** messages ("lmao", "😂", "ok", "bruh") → scored, never answered.
+2. Superchat → always. First message from a new chatter → always. Both bypass the rate limiter.
+3. Rate limiter — counts **live** replies only; cache refills are exempt.
+4. Direct address: `@channel`, `@I AM`, caps `I AM`, address-position "I am, …". Plain "I am tired"
+   does **not** match.
+5. Peer-reply detection → ignored.
+6. `?` in message → reply. 7. Small-room rule → reply. 8. Eco suppression (only above small-room
+   size). 9. Keywords + viewer sampling. 10. Otherwise `no_trigger_keywords`.
 **Every skip is logged** as `[Chat Skipped] @name: 'text' -> reason`.
 
+### Bit forms (`BIT_FORMS`)
+`observation`, `announcement`, `story`, `address`, `one_liner`. Only `one_liner` has a configured
+share (`ONE_LINER_RATIO`); the rest rotate evenly with no immediate repeats.
+
+**Retired, do not reintroduce:** `confession` (first person "I have done this in eight billion
+bodies" — consistently read as abstract and esoteric) and `structure` (handing the model an abstract
+shape produced textbook examples; A/B-tested and clearly worse).
+
+### Bit quality rules (all forms)
+- 10–25 words, 2–3 sentences, drawn from a 112-entry theme deck (`CONCRETE ANCHOR — non-dual angle`).
+- **Closer must stay concrete**: no abstract nouns in the final sentence. Overreach is always an
+  abstract noun in the last line.
+- **Banned images**: the genre's stock metaphors (ocean/wave, mirror, dream, hologram…).
+  *The operator has deliberately loosened both lists; over-banning strips out the jokes non-dualists
+  enjoy most. Treat their contents as the operator's call, not a rule to tighten.*
+- **Drafting rejects, not prefers**: five-point checklist, keep drafting until one survives.
+- Generated **offline** into a 4-slot cache with `BIT_THINKING_BUDGET` / `BIT_TEMPERATURE`, so extra
+  reasoning costs no stream latency.
+- Over-length bits are rejected before caching (`[Bit Rejected]`).
+
 ### Delivery markers
-- `[MOOD: x]` at the start of a reply sets the turn mood (avatar colour, TTS exaggeration).
-- `[BEAT]` before the closer → `TTS_BEAT_GAP_SEC` pause (default 0.55 s) instead of `INTER_SENTENCE_GAP_SEC`.
-- A second `[MOOD: x]` directly after the beat changes the closer's delivery only (sticky until the next
-  tag). Exaggeration is per chunk, capped by `TTS_EXAGGERATION_MAX`.
-- The avatar colour does **not** change on the closer (chunks are pushed ahead of playback).
+- `[MOOD: x]` at the start sets the turn mood (avatar colour, TTS exaggeration, cfg_weight).
+- `[BEAT]` before the closer → `TTS_BEAT_GAP_SEC` ± `TTS_BEAT_GAP_JITTER` (jitter stops it becoming
+  a metronome). **Earned, not default** — it only works when the closer *reverses* the setup.
+- A second `[MOOD: x]` after the beat changes the closer's delivery only.
+- Markers are stripped before text reaches logs, memory, subtitles, or the session log.
 
-### Spontaneous bits (`reflection_cache.py` + the SPONTANEOUS BIT prompt in `ai_brain.py`)
-- Forms rotate with no immediate repeats: `observation`, `announcement`, `story`, `address`, `confession`, and
-  `one_liner` (one sentence, 10–22 words) at `ONE_LINER_RATIO`.
-- Multi-line forms are generated to `BIT_WORDS_MIN..MAX`; anything over MAX × 1.2 (or a one-liner over
-  `ONE_LINER_WORDS_MAX`) is rejected before caching (`[Bit Rejected]`).
-- The cache stores `raw_text` (markers preserved) so cached bits keep their beat and mood switch.
-- Theme and form are drawn **once**, by the prompt builder, and read back via
-  `brain.last_spontaneous_theme` / `last_bit_form`. The cache must not draw its own theme.
-- Bits are pre-generated during idle (text only); TTS happens live at play time via the normal turn path.
-
-### Prompt hygiene already in place
-Banned AI-isms: "Ah,", "delve", "tapestry", "cosmic dance", "in the grand scheme", "beautiful",
-ending on a question, stating a moral. Chat answers: 1–2 sentences, name the viewer first.
+### Feedback loop
+Every chat message is scored for laughter against the line that just aired (`REACTION_WINDOW_SEC`,
+decaying with time). Lines crossing `REACTION_PROMOTE_SCORE` are auto-saved to
+`data/favorite_bits.jsonl` and become few-shot exemplars. This is the only mechanism that learns
+what *this* audience finds funny; everything else is a guess encoded as a rule.
 
 ---
 
-## 7. Visuals (`visualizer.py`)
-- 1080×1920 (or 1920×1080) pygame, 60 fps, software rendered; preview window ≤ 30 fps.
-- Mood-driven palette, particle field, audio-reactive star with diffraction spikes, EQ bars,
-  celebration bursts, glass chat card with `[CAST]` badge, pinned-question highlight, motto.
-- Subtitle/pinned state is **command-driven** (`SET_SUBTITLE`, `SET_PINNED`, …); `SYNC_STATE`
-  carries only chat list, viewers, mode, live flag, OBS status.
-- Promo cards: event mode (default). `PROMO_OVERLAY_INTERVAL_SEC` = minimum gap between *any* two
-  promos. Like & Subscribe after a completed viewer interaction; Ask Anything during a chat lull;
-  Like & Subscribe during a lull only as a `PROMO_SUB_IDLE_FALLBACK_SEC` fallback. Cooldowns are stamped
-  on *completion* (≥ 60 % displayed), so an interrupted card doesn't consume its cooldown.
+## 7. Visuals
+- 1080×1920 pygame at 60 fps in a separate process; preview window ≤ 30 fps.
+- Mood palette, particle field, audio-reactive star, EQ bars, celebrations, glass chat card with
+  `[CAST]` badge, pinned question, motto.
+- **Emoji**: pytchat sends `:shortcode:` text; `emoji_text.normalize_chat_text()` converts it at
+  ingestion so the prompt, chat card and chatter DB all get real emoji. `_render_text` composites
+  emoji runs using a dedicated emoji font (`Segoe UI Emoji` on Windows), scaling them to the line
+  height. `font.metrics()` cannot detect missing glyphs — a colour emoji font reports `None` for
+  characters it renders fine — so detection compares rendered pixels against `\uFFFF`.
+- Subtitle and pinned state are **command-driven**; `SYNC_STATE` carries only chat list, viewers,
+  mode, live flag, OBS status.
+- Promos are event-driven. `PROMO_OVERLAY_INTERVAL_SEC` is the minimum gap between *any* two promos.
 
 ---
 
 ## 8. Invariants an agent must not break
 - `tts.synthesize()` is called only from the live-turn consumer (`_from_live_turn=True`) and from
-  `synthesize_background`. Any other caller logs `[TTS MISUSE]` with a stack trace.
+  `synthesize_background`. Anything else logs `[TTS MISUSE]` with a stack trace.
 - `NDI_AUDIO_BLOCK_SAMPLES` is read from one config key by both the pump and the streamer.
-- The render loop sends **video only**; audio is never tied to frame rate.
-- Exactly one writer of avatar metrics: the pump. The PortAudio callback stands down under the proxy.
-- `_execute_ai_turn`'s `finally` cancels the consumer task and clears `live_turn_active`; it does **not**
-  reset `turn_phase` (the scheduler does, so a timeout log can report the stuck phase).
-- `data/*.json` and `Media/` are runtime state, not source. Keep them git-ignored.
+- The render loop sends **video only**. Exactly one writer of avatar metrics: the pump.
+- `_execute_ai_turn`'s speech bookkeeping is gated on `pushed_chunks > 0 and clean_speech`; that
+  `if` **must** keep its `else`, or a degenerate turn leaves the motto unset forever.
+- `_build_context_prompt` must assign `is_spontaneous` before the anti-repetition block reads it.
+- Keywords `app.py` passes to `generate_response_stream` must exist in the brain's signature.
+- **"Unknown" is not "zero".** An unresolved viewer count must not force ECO mode.
+- `data/*.json` and `Media/` are runtime state. Keep them git-ignored;
+  `data/favorite_bits.jsonl` is the exception — it is the operator's taste and belongs in git.
 - Do not add `getattr(self.cfg, "key", default)`; every key lives in `config.py` with a default.
 
 ---
 
-## 9. Configuration (`.env`) — the keys that matter, with current intent
+## 9. Configuration — the operator's current values
+
 ```ini
 # Persona / model
-AI_HOST_NAME=I Am            GEMINI_MODEL=gemini-3.7-flash    GEMINI_THINKING_LEVEL=LOW
-# Cadence (deliberately fast for clip harvesting)
-IDLE_SILENCE_THRESHOLD_SEC=12  SPONTANEOUS_MIN_INTERVAL_SEC=25  SPONTANEOUS_MAX_BACKOFF_SEC=25
-# Bits
-BIT_WORDS_MIN=15  BIT_WORDS_MAX=30  ONE_LINER_RATIO=0.25  ONE_LINER_WORDS_MAX=25  TTS_BEAT_GAP_SEC=0.55
+GEMINI_MODEL=gemini-3.7-flash        TTS_REFERENCE_VOICE=pure_oracle
+VISUALIZER_ASPECT_RATIO=9:16
+# Bit cadence and length (tuned for clip harvesting)
+IDLE_SILENCE_THRESHOLD_SEC=25  SPONTANEOUS_MIN_INTERVAL_SEC=10  SPONTANEOUS_MAX_BACKOFF_SEC=45
+BIT_WORDS_MIN=10  BIT_WORDS_MAX=25  ONE_LINER_RATIO=0.60  TTS_BEAT_GAP_SEC=0.55
+# Clip-friendly spacing
+MIN_TURN_GAP_SEC=15  REFLECTION_POST_SPEECH_CHAT_DELAY_SEC=4  COMMENT_POST_SPEECH_HOLD_SEC=3
+QUESTION_MIN_DISPLAY_SEC=2.5  MOTTO_PRE_FADE_IN_SEC=2.75  PROMO_OVERLAY_INTERVAL_SEC=240
 # Chat
-SMALL_ROOM_VIEWERS=5  MAX_RESPONSES_PER_MINUTE=6  CHAT_SAMPLING_VIEWER_THRESHOLD=25
-# TTS pipeline
-TTS_BACKEND=chatterbox  TTS_SERVER_URL=http://192.168.0.115:8123  MAX_CONCURRENT_SYNTH=1
-LEAD_SAFETY=1.25  CACHE_REFILL_COOLDOWN_SEC=8  TTS_EXAGGERATION_MAX=0.7  TTS_PEAK_CEILING=0.95
-# NDI
-NDI_STREAM_NAME=AI_HOST_NAME  NDI_AUDIO_BLOCK_SAMPLES=2400
-# Safety / promos
-TURN_MAX_SEC=75  PROMO_MODE=event  PROMO_OVERLAY_INTERVAL_SEC=90  PROMO_SUB_MIN_INTERVAL_SEC=120
-PROMO_SUB_AFTER_TURN_SEC=8  PROMO_ASK_QUIET_SEC=45  PROMO_SUB_IDLE_FALLBACK_SEC=600
+SMALL_ROOM_VIEWERS=5  MAX_RESPONSES_PER_MINUTE=6  READ_QUESTION_ALOUD=all
+# Cast
+CAST_MIN_INTERVAL_SEC=125  CAST_MAX_INTERVAL_SEC=200  CAST_MAX_PER_SESSION=200
+# TTS
+TTS_CFG_WEIGHT=0.4  (per-mood overrides in config; deadpan 0.30 … hyped 0.60)
 ```
-Dead keys to remove from `.env`: `TTS_ENGINE`, `HOST_STREAMER_*`, `TRANSCRIPT_FILE_PATH`,
-`SHOW_HOST_TRANSCRIPT_CARD`. `TRIGGER_WORDS` should list phrases only (bare `ai`, `bot`, `i am` are
-handled by the address-position rules).
+Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERATION_MAX=0.7`,
+`BIT_THINKING_BUDGET=1024`, `BIT_TEMPERATURE=0.85`, `ANTI_REPETITION_WINDOW=20`,
+`ANCHOR_BAN_ENABLED=false`, `ASSUMED_VIEWERS_WHEN_UNKNOWN=1`, `TURN_MAX_SEC=75`.
+
+`MIN_INTERJECTION_INTERVAL_SEC` is still in `.env` but no longer read; safe to delete.
 
 ---
 
-## 10. Open items (in priority order)
-1. **Feedback loop.** Score each spoken line by chat reactions (lol/lmao/💀/😂 within ~20 s), keep a
-   greatest-hits file, inject the top 5 as few-shot examples. `session_log.py` has the timestamps.
-2. **Bring bit rules to chat answers**: the AI-ism ban list, "last sentence is the joke", and a
-   "draft three closers, say the best" instruction in the thinking budget.
-3. **Callbacks in chat answers** (not in bits) using chatter profiles and recent Q&A.
-4. **Server-side clip clamp on GAMER** (`wav *= 0.95/peak` before WAV write; use `soundfile`), then raise
-   `TTS_EXAGGERATION_MAX` toward 0.85 so savage/hyped closers get full range.
-5. **Stalls during cache primes.** Both processes stalled together (~200–400 ms) while the reflection
-   cache / chatter DB wrote to disk. Move those writes off the event loop thread.
-6. **Verify** the 60 Hz metrics ring, promo cooldown-on-completion, and removal of legacy NDI paths
-   (`send_frame_sync`, `send_audio`) all landed as specified in `docs/archive/NEXT_for_antigravity.md`.
-7. Housekeeping: move root-level `test_*.py` into `tests/`; relax the flaky 2 ms latency assertion to
-   p99 < 2 ms / max < 10 ms; write `AGENTS.md` (see §12).
+## 10. Open items
+1. **Callbacks in chat answers** (not bits) using `chatter_db` and `recent_qa_threads`. The
+   strongest remaining feature and the one only a live show can do.
+2. **Server-side clip clamp on GAMER** (`wav *= 0.95/peak` before int16 write), then raise
+   `TTS_EXAGGERATION_MAX` toward 0.85 so savage/hyped closers get full range. Currently clamped
+   at 0.7 because the source clips.
+3. **Cast cross-talk** — a follow-up event type so personas can react to each other.
+4. **Escalating runs** — occasionally let 2–3 consecutive bits share a thread.
+5. **Room awareness** — the prompt has viewer count, uptime, and time of day but does not use them.
+6. **Negative theme deck** — log theme → outcome and prune the duds.
+7. Stalls during cache primes: both processes stalled ~200–400 ms while the reflection cache and
+   chatter DB wrote to disk. Move those writes off the event-loop thread.
 
 ---
 
 ## 11. Testing
-`pytest tests/ -q` must pass before any change is called done. `tests/test_promo_cards.py` needs
-pygame (skip in headless CI). Current suite covers: GPU exclusivity and non-reentrant lock, turn
-timeout/recovery, deque buffer latency, utterance-open ordering, beat/mood splitter, bit forms,
-small-room ordering, audio sink identity. When a bug is fixed, add the test that would have caught it.
 
-Live verification checklist (run with OBS open, since that's the real load):
-- Multiple `[TTS LIVE]` lines per answer; `TTFA` ≈ first-sentence synth time; `underruns=0`.
-- `[NDI Audio Pump] Rolling max audio interval` ≈ 60 ms; `max time inside write_audio` ≈ 30–55 ms (normal: the SDK paces).
-- `[TTS BEAT]` appears on punchline replies; `[Reflection Cache Primed] <form> on '<theme>' (... words, beat=yes)`.
-- No `[TTS PEAK]`, `[TURN TIMEOUT]`, or `[Chat Skipped]` you can't explain.
+`pytest tests/ -q --ignore=tests/test_promo_cards.py` → **75 passing**. (The promo test needs a
+display; set `SDL_VIDEODRIVER=dummy` to include it.)
+
+Three tests exist specifically because a change broke the live stream and every other test passed:
+- `test_call_signatures.py` — keyword mismatch between `app.py` and `ai_brain.py`
+- `test_call_signatures.py::test_no_use_before_assignment_in_prompt_builders` — `UnboundLocalError`
+- `test_call_signatures.py::test_degenerate_turn_still_restores_the_motto` — the missing `else`
+
+When a bug reaches the stream, add the test that would have caught it.
+
+**`bit_lab.py` — offline A/B for bit quality.** Run with the stream down.
+```
+python bit_lab.py --n 24 --label baseline
+python bit_lab.py --n 24 --b '{"one_liner_ratio": 0.35}'
+python bit_lab.py --score bitlab/<timestamp>/blind.md
+```
+Generates two batches, interleaves them blind with a checkbox each, and hides the key until you have
+marked them. The scorer refuses to declare a winner under a 15-point gap because that is noise at
+this sample size. **Use this instead of memory.** The project lost its comedic register for a week
+because changes were judged against recollection of how bits sounded days earlier.
+
+**Live verification checklist** (run with OBS open — that is the real load):
+- Several `[TTS LIVE]` lines per answer; `underruns=0`; pump interval ≈ 60 ms.
+- `[TTS BEAT]` on punchline replies, with varying millisecond values.
+- `[Reaction] +N` when you type "lmao" in console within 25 s of a line.
+- `🔑 [YouTube Data API] Concurrent Viewers detected: N` — if absent, the show will assume
+  `ASSUMED_VIEWERS_WHEN_UNKNOWN` rather than idling.
+- No `[TTS PEAK]`, `[TURN TIMEOUT]`, `[Degenerate Turn]`, or unexplained `[Chat Skipped]`.
 
 ---
 
 ## 12. Working agreement for agents
 - Read this file first. `docs/archive/` is history, not instructions.
-- Change the smallest thing that fixes the problem; do not refactor adjacent code "while you're there".
-- Instrument before you fix: if a symptom isn't in the log, add the log line, reproduce, then fix.
-- Never adjust a config default to make an acceptance test pass; report the failure instead.
-- Commit after each self-contained change, with the test that covers it. Both machines pull from GitHub;
-  uncommitted edits on one box are how versions diverge.
+- Change the smallest thing that fixes the problem. Do not refactor adjacent code.
+- Instrument before fixing: if a symptom is not in the log, add the log line, reproduce, then fix.
+- Never adjust a config default to make an acceptance test pass; report the failure.
+- Never judge a comedy change by memory. Use `bit_lab.py`.
+- Commit after each self-contained change, with the test that covers it. Both machines pull from
+  GitHub; uncommitted edits are how versions diverge.
 - If a request conflicts with §2 or §8, stop and say so before implementing.

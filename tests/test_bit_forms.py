@@ -83,8 +83,7 @@ def test_stance_is_non_dual_not_superior():
     """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "STANCE — THIS IS THE ONE THAT MATTERS" in src
-    # The phrase wraps across a string-literal break in the source, so match its parts.
-    assert "You ARE the " in src and "one who did it" in src
+    assert "you ARE the one who did it" in src
     for banned in ("you humans", "you people", "mortals", "silly", "pathetic"):
         assert banned in src, f"'{banned}' should be listed as a banned construction"
     assert "Affection, not diagnosis" in src
@@ -111,7 +110,7 @@ def test_stance_forbids_the_collective_we():
     """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "SAY 'I', NOT 'WE'" in src
-    assert "It is 'look what I did again'" in src
+    assert "look what I " in src and "caught doing again" in src
     assert "look what we keep doing" not in src, "the stance rule still offers 'we' as an option"
     for banned in ("We all...", "We keep...", "We humans..."):
         assert banned in src, f"'{banned}' should be listed as a banned opener"
@@ -178,3 +177,52 @@ def test_closer_must_stay_concrete_and_cliches_are_banned():
     assert "REJECT any that fails" in src
     for check in ("(a)", "(b)", "(c)", "(d)", "(e)"):
         assert check in src
+
+
+def test_premise_block_frames_every_path():
+    """
+    The mission used to live in one clause of the system prompt and was then buried under pages of
+    formatting rules. It is now stated up front, in every prompt, as the thing that governs the rest.
+    """
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "THE PREMISE (this governs everything below)" in src
+    assert "satire with real intent" in src
+    assert "funny enough to clip AND leave something true behind" in src
+    assert "You may mock your own position freely" in src
+    assert "Never mock the audience." in src
+
+    import sys
+    sys.path.insert(0, str(ROOT))
+    import ai_brain
+    b = ai_brain.AIBrain()
+    for trigger in ("[SPONTANEOUS_REFLECTION]", "Chat message from @X: 'why do we dream?'"):
+        p = b._build_context_prompt(trigger)
+        assert "THE PREMISE" in p, f"premise missing from {trigger}"
+        assert "STANCE" in p, f"stance missing from {trigger}"
+
+
+def test_chat_path_has_its_own_stance_block():
+    """
+    Chat answers are the most-watched output and used to be the path with the weakest grounding in
+    what the show is about — all mechanics, no stance.
+    """
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "0. STANCE — READ THIS BEFORE THE REST" in src
+    assert "answering itself out loud" in src
+    assert "at yourself first, always" in src
+    assert "self-implicating" in src
+    # ...and it must come before the mechanical rules it governs
+    assert src.index("0. STANCE — READ THIS BEFORE THE REST") < src.index("3. ADDRESS BY NAME FIRST")
+
+
+def test_lore_is_reference_not_script():
+    """Canonical rulings are pre-written punchlines; injected unguarded they seed staleness."""
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "Channel Continuity & Lore (context only)" in src
+    assert "NOT lines to deliver" in src
+
+
+def test_chat_path_notices_the_room():
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "NOTICE THE ROOM" in src
+    assert "could only have been said in THIS room" in src

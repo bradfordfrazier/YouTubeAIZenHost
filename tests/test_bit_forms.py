@@ -226,3 +226,40 @@ def test_chat_path_notices_the_room():
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "NOTICE THE ROOM" in src
     assert "could only have been said in THIS room" in src
+
+
+def test_spontaneous_diversity_and_anchor_ban_isolation():
+    """
+    Spontaneous reflections must draw from diverse domains beyond office/phone life,
+    and anchor banning must ONLY apply to spontaneous bits, never to chat replies.
+    """
+    import sys
+    sys.path.insert(0, str(ROOT))
+    import ai_brain
+    b = ai_brain.AIBrain()
+
+    # Verify theme deck diversity
+    themes = ai_brain.SPONTANEOUS_THEMES
+    assert len(themes) >= 100
+    # Over-clustered tropes must be eliminated
+    for redundant in ("The microwave's last three seconds", "Forty unread emails",
+                      "Doomscrolling at 3 a.m.", "The meeting that could have been an email",
+                      "Performance review season", "A LinkedIn notification"):
+        assert not any(redundant in t for t in themes), f"redundant theme '{redundant}' still present"
+
+    # Diverse domains must be present
+    assert any("blacksmith" in t.lower() or "welding" in t.lower() or "sanding" in t.lower() for t in themes)
+    assert any("aqueduct" in t.lower() or "papyrus" in t.lower() for t in themes)
+    assert any("fungal" in t.lower() or "hermit crab" in t.lower() for t in themes)
+    assert any("starlight" in t.lower() or "tectonic" in t.lower() for t in themes)
+
+    # Verify anchor ban isolation: impacts spontaneous reflection, NOT chat responses
+    b.cfg.anchor_ban_enabled = True
+    b.dialogue_history.append({"text": "The refrigerator hummed in the empty kitchen."})
+
+    spontaneous_prompt = b._build_context_prompt("[SPONTANEOUS_REFLECTION]")
+    assert "USED IMAGES — DO NOT USE ANY OF THESE WORDS" in spontaneous_prompt
+
+    chat_prompt = b._build_context_prompt("Chat message from @Viewer: 'how are you?'")
+    assert "USED IMAGES" not in chat_prompt, "anchor ban must not leak into chat responses"
+

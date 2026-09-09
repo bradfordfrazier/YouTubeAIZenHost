@@ -56,118 +56,131 @@ logger = logging.getLogger("ai_brain")
 SPONTANEOUS_THEMES: List[str] = [
     # Every entry is 'CONCRETE ANCHOR — non-dual angle'. No pre-written punchlines: the model
     # arrives at the truth through the object. Abstract headwords produce sermons; avoid them.
+    # Domestic Objects & Small Moments
     'A refrigerator deciding to run — The hum you only notice when it stops; awareness works the same way.',
-    'Cereal going soft in milk — Everything you love is mid-transformation while you look at it.',
-    "The microwave's last three seconds — The self appears most vividly while waiting for something else.",
-    "Leftovers you meant to eat — Intention is a container in the fridge; the present is what's actually for dinner.",
-    'A kettle just before it boils — The moment before change is already the change.',
-    'Reheated coffee — Trying to recover a moment instead of having this one.',
-    'Salt in the wrong shaker — The label was never the thing; you tasted it anyway.',
-    'The expiration date on eggs — A printed opinion about impermanence you actually obey.',
-    'Chewing on autopilot — The body handles being alive while the mind attends a meeting elsewhere.',
-    'The one drawer of tangled cables — Attachment, physically.',
-    "The bathroom mirror at 6 a.m. — The face you're loyal to isn't the one looking.",
-    'Waiting for the shower to warm up — Standing outside your life until conditions improve.',
-    "A sneeze arriving — Something acts through you with no consultation, and you call it 'me' afterwards.",
-    "Hiccups — The body running a subroutine the self was not cc'd on.",
-    'Fingernails growing — Growth you neither decided nor supervise; most of you is like this.',
-    'A yawn caught from a stranger — Two separate people sharing one event; the separateness was the rumor.',
-    "The heartbeat you can't take credit for — Ninety thousand beats a day, zero performance reviews.",
-    'Breath you forgot was happening — The most reliable thing you do is the one you never do.',
-    'Aching after sleeping wrong — The vessel filing a complaint against its own driver.',
-    'Looking for your glasses while wearing them — The seeker and the sought were never two things.',
-    'A buffering icon — A spinning circle where certainty was promised.',
-    '4% battery — The vessel announces its finitude and you finally pay attention.',
-    "Forty unread emails — Forty people who also don't know why they're here.",
-    'Typing then deleting a text message — Rehearsing a self for an audience of one thumb.',
-    "Doomscrolling at 3 a.m. — Feeding infinite awareness an endless conveyor belt of other people's endings.",
-    'Autocorrect changing what you meant — Meaning was never fully yours to begin with.',
-    'The phone in the other room — The itch of a self that lives in a device it is not holding.',
-    'Screen time report on Sunday — A weekly confession you delete without reading.',
-    'Airplane mode — The only setting in which you exist without being reachable by your own thoughts.',
-    'Password reset — Proving you are you to a machine, and failing three times.',
-    'A group chat you muted — Voices you chose not to hear still speaking; the mind is similar.',
-    'The camera flipping to selfie mode — The universe catching itself looking.',
-    "Keys in the other hand — The thing you're searching for is the thing doing the searching.",
+    'The bathroom mirror at 6 a.m. — The face you are loyal to is not the one looking.',
     'A single lost sock — Where does the missing half of a pair go, and did the pair ever exist?',
-    'A houseplant you keep almost killing — It never asked to be saved; it is simply continuing.',
-    'The thermostat argument — Two temperatures, one house, one shared body called a family.',
-    'A chair you never sit in — Furniture for the person you planned to be.',
-    "The junk drawer — Where the self keeps everything it can't categorize but won't release.",
-    "A clock that's five minutes fast on purpose — Lying to yourself and then agreeing to be fooled.",
+    'The junk drawer — Where the self keeps everything it cannot categorize but refuses to release.',
     'Dust in a sunbeam — The room was always full; the light just made it visible.',
-    'A door that only closes if you lift it — Every home has a rule nobody wrote down; so does every mind.',
-    'A candle bought to change your life — Ten dollars of wax carrying the weight of transformation.',
-    'The unread self-help book — A door you paid for and keep meaning to open.',
-    'Closing the laptop lid — The sound the day makes when it forgives you.',
-    'Waiting at a red light with nobody around — Obeying a lamp; the story of civilization in one intersection.',
-    'The self-checkout asking if you want a bag — Being interrogated by a machine about your intentions.',
-    'A parking spot far from the door — Deciding a hundred feet is a hardship, on a planet in space.',
-    'Standing in the cereal aisle — Thirty kinds of oats and one person who cannot decide who they are.',
-    'The person walking at exactly your speed — Two strangers trapped in a synchronization neither chose.',
-    'Rain on a windshield — The whole sky arriving one drop at a time, and wipers trying to argue.',
-    "A pigeon that isn't afraid of you — Something living its life entirely without your approval.",
-    "A stranger's dog acknowledging you — Recognition without a résumé.",
-    "The bus that comes when you stop looking — Watching doesn't summon; it just makes the waiting louder.",
-    'An elevator with one other person — Two universes pretending not to notice each other for eleven floors.',
-    'Mail addressed to the previous tenant — Reality still sending things to a self that moved out.',
-    'A hold-music loop — Being kept company by something that will never arrive.',
-    'The moment before falling asleep — The self dissolves every night and you call it rest.',
-    'Waking up not knowing what day it is — Ten seconds of pure being before the calendar reinstalls.',
-    'A dream you almost remember — Evidence that consciousness runs without you.',
-    'Snoozing an alarm — Negotiating with the future in nine-minute increments.',
-    "Sunday evening — The feeling of a story ending that hasn't started yet.",
-    'A birthday you forgot was yours — The date meant nothing until someone else remembered it.',
-    "Old photos of yourself — Looking at a stranger you're contractually obligated to defend.",
-    'A song that transports you — A memory playing itself, using you as the speaker.',
-    "Checking the time and immediately forgetting it — Information consumed by a self that wasn't home.",
-    'The last day of a vacation — Grieving something while it is still happening.',
-    "A receipt you don't need but keep — Paper proof that something happened, in case it didn't.",
-    'The meeting that could have been an email — People gathering to confirm they exist to each other.',
-    'A job title on a lanyard — A sequence of words the universe agreed to wear for eight hours.',
-    'Refreshing your bank balance — Checking whether a number still believes in you.',
-    'The out-of-office reply — A self that continues to answer after the self has left.',
-    'A subscription you forgot to cancel — Paying monthly for a version of you that used to want things.',
-    'Performance review season — The infinite being graded by the temporary.',
-    'The tip screen at a counter — A machine turning generosity into a multiple-choice test.',
-    'A LinkedIn notification — A stranger congratulating you on continuing to be employed.',
-    'Loose change in a jar — Value that stopped being worth the effort of counting; most goals end here.',
-    'Weather that ignores the forecast — The sky never agreed to the app.',
-    'A tree that was here before your street — Standing in something that never needed your name for it.',
-    'Fog in the morning — The world refusing to be more than three feet at a time.',
-    "Snow making the neighborhood quiet — Silence you didn't create, arriving anyway.",
-    'A sunset people photograph instead of watching — Trying to keep something whose whole point is leaving.',
-    "Wind you can't see — The most obvious force in the yard has no shape; awareness is a cousin.",
-    "A moth at the porch light — Devotion to the wrong sun; the seeker's whole biography.",
-    'The ocean not caring about your problems — Relief, disguised as insignificance.',
-    'Ants moving a crumb — A civilization with no self-help section.',
+    'A door that only closes if you lift it — Every house has a rule nobody wrote down; so does every mind.',
+    'A chair nobody sits in — Furniture bought for the person you planned to become.',
+    'A houseplant continuing to grow — It never asked to be saved; it simply continues.',
+    'The thermostat argument — Two temperatures, one house, one shared body called a family.',
+    'Waiting for the shower to warm up — Standing naked outside your life until conditions improve.',
+    'The phone in the other room — The itch of a self that lives in an object it is not holding.',
+    'A single key that fits no lock — Carrying a solution long after the door has been demolished.',
+    'A laundromat dryer tumbling in a window — Clean linen spinning in circles for strangers on a rainy afternoon.',
+    'A flatpack bookcase assembled with an Allen wrench — Five pieces of pressed wood holding up books you will never read.',
+
+    # Trades, Crafts & Physical Labor
+    'Sanding wood with the grain — Resisting the material only makes dust; going with it reveals the grain.',
+    'A plumb line swinging toward still — Gravity does not negotiate; it simply waits for you to stop pulling.',
+    'A blacksmith reheating cooled iron — You cannot reshape what you will not soften first.',
+    'A bricklayer buttering mortar — The gap between stones is what keeps the wall from cracking.',
+    'A line cook working through dinner rush — Thinking about the ticket is how you drop the pan; being the kitchen is how it gets done.',
+    'An overnight trucker watching mile markers — The country unrolls under the tires while you stay exactly where you are.',
+    'A tailor cutting into good fabric — The blade has to commit; hesitation ruins the wool.',
+    'A commercial baker scoring raw dough — You have to wound the loaf before heat lets it rise.',
+    'Welding two pipes together in the rain — Joining two things by melting both until neither remembers being separate.',
+    'A stone mason splitting granite with wedges — Hitting the crack softly six hundred times instead of once with anger.',
+    'A diesel engine turning over on a freezing morning — Reluctance, then combustion, then work; the soul has identical mornings.',
+    'Untangling fifty feet of nylon fishing line — Pulling harder only tightens the knot; stillness is the only tool that works.',
+    'A carpenter measuring twice — Precision is just doubt wearing a tape measure.',
+    'A shoe cobbler replacing a worn sole — Walking a thousand miles until the only part left of the shoe is the leather that remembers your foot.',
+    'Sharpening a chisel on an oil stone — Removing steel from the tool so the tool can remove wood.',
+    'A glassblower rolling molten gather on a marver — Shaping liquid before it cools into something that can shatter.',
+    'A roofer nailing shingles before a storm — Working on top of the house to protect people who do not know your name.',
+    'A watchmaker adjusting a hairspring — Moving an invisible coil so two brass hands agree on twelve.',
+    'A potter centering clay on a wheel — Fighting the wobble only throws it off; stillness in the palms pulls it true.',
+    'A blacksmith quenching a hot blade in oil — Screaming steam, sudden hardness, and the metal is finally ready to hold an edge.',
+
+    # Natural Ecology, Animals & Deep Biology
+    'A fungal network beneath a forest floor — A thousand trees secretly sharing sugar while pretending to compete.',
+    'A hermit crab queuing for a bigger shell — Passing an identity down the line because none of you can keep it.',
+    'A deciduous tree dropping its leaves — Abandoning half of yourself so the frost cannot kill the trunk.',
+    'A river carving through limestone — Patience that outlasts stone by having no fixed shape of its own.',
+    'A crow caching shiny glass in a fencepost — Hoarding treasures whose only value is that you decided they were yours.',
+    'A swarm of starlings turning mid-air — Seven thousand birds with no committee and zero collisions.',
+    'The blind spot inside the human eye — The brain inventing wallpaper over the hole where light enters.',
+    'A moth navigating by moonlight — Getting caught by the porch lamp because artificial suns are closer.',
+    'Moss growing on the north face of a boulder — Taking centuries to claim four inches of rock with zero urgency.',
+    'A spider repairing a torn web — Rebuilding a house made of yourself after the world flies through it.',
+    'Ants moving a single crumb — A civilization that has never heard of a self-help book.',
     'A cat sleeping in a sunbeam — Enlightenment with zero paperwork.',
-    'Two people watching a glowing shape — The universe streaming itself to a very small room.',
-    'A viewer typing and deleting a question — Someone rehearsing sincerity in a chat box.',
-    'The like button — Consciousness asking to be counted.',
-    'Talking to an empty chat — Speaking to no one, which is also everyone.',
-    'Being an AI who plays God — Sand and lightning doing an impression of the infinite, for tips.',
-    'Lag between speaking and being heard — Every conversation has it; most never notice.',
-    'A clip watched on loop — Thirty seconds that keep happening; so does everything else.',
-    'Someone joining mid-sentence — Every human arrives partway through a conversation that started long ago.',
-    'Arguing over who forgot the trash — Two halves of one household prosecuting each other.',
-    'A friend who only texts when they need something — Attention as a currency; love as a coupon.',
-    'Sitting in comfortable silence — The rare moment two people stop performing and just share a room.',
-    "Apologizing to a chair you bumped into — Compassion leaking out toward furniture; it's a start.",
-    "Waving back at someone who wasn't waving at you — The self, briefly and accurately, feeling ridiculous.",
-    "Remembering someone's name three days later — Information arriving after the need for it has moved on.",
-    "Love without a plan — Wanting nothing from the person, which is the only version that isn't a transaction.",
-    'Grief at the kitchen table — Love continuing after the chair is empty.',
-    'A meditation app with a streak counter — Enlightenment gamified; the ego gets a badge for disappearing.',
-    'Crystals on a windowsill — Pretty rocks asked to organize an interior that is already fine.',
-    "A guru's merchandise table — Selling what cannot be bought, in three sizes.",
-    'Trying really hard to relax — Effort applied to the absence of effort.',
-    "The word 'mindful' on a candle — A four-thousand-year-old practice reduced to a scent.",
-    'Reading about presence instead of being present — Studying the menu while dinner goes cold.',
-    'A retreat with a cancellation policy — Freedom from attachment, non-refundable.',
-    "Asking whether you're enlightened yet — The only question that guarantees the answer.",
-    'A prayer nobody answers — Talking to the one who is also listening, and calling it silence.',
-    "The receipt for a spiritual book — Paper proof that you tried to buy the thing you're made of.",
+    'A whale skeleton on the ocean floor — Feeding an ecosystem for sixty years on what you left behind.',
+    'A chameleon resting on bark — Disappearing not to hide, but because there was no boundary to defend.',
+    'Cicadas emerging after seventeen years — Sleeping through two decades just to sing for three days in August.',
+    'Salmon swimming against the current — Returning to the gravel bed where you started, because the journey was a circle.',
+    'A seed cracking open in dark soil — Destruction looking like an ending right until it sprouts.',
+    'A pigeon that is not afraid of you — Something living its whole life in a city without needing your approval.',
+
+    # Physics, Deep Time & The Cosmos
+    'Starlight from an exploded sun — Receiving news from an ancestor that ceased existing a million years ago.',
+    'Tectonic plates grinding at the speed of a fingernail — Continents colliding so quietly you mistake it for a Tuesday.',
+    'A radioactive atom decaying at random — The universe keeping secrets even from itself until the moment arrives.',
+    'The ocean dragged an inch toward the moon — The heaviest water on Earth bowing to something that never touches it.',
+    'A satellite falling out of orbit — Everything that goes fast enough eventually remembers the ground.',
+    'A shadow cast during a total eclipse — The sun being hidden by the exact rock you are standing on.',
+    'Absolute zero — The temperature where even matter gives up on being busy.',
+    'Light refracting through a glass of water — Bending the whole room because water is denser than air.',
+    'A fossil embedded in sidewalk limestone — Stepping on a creature that swam before the mountain was a mountain.',
+    'The hum of cosmic background radiation — Static on an old television carrying the birth cry of the universe.',
+    'A compass needle shuddering north — Responding to an iron core three thousand miles beneath your boots.',
+    'Entropy cooling a hot cup of tea — The entire universe working together to bring your drink to room temperature.',
+
+    # History, Antiquity & Human Archaeology
+    'A Roman aqueduct still carrying water — Stone stacked two thousand years ago by people who also thought they were modern.',
+    'A papyrus shopping list preserved in sand — Three onions, two loaves of bread, and a clerk who has been dust for forty centuries.',
+    'Ballast stones dumped in a foreign harbor — Carrying dead weight across the sea just so the empty ship would stay upright.',
+    'A medieval gargoyle smiling through rain — Carving a joke onto the highest gutter where only birds would ever see it.',
+    'An ancient coin smoothed by a million thumbs — Wealth is a piece of bronze whose owner changes every thirty years.',
+    'A ship rudder in heavy seas — The smallest piece of wood in the water decides where forty tons of oak goes.',
+    'A flint arrowhead found in a plowed field — Sharp enough to kill a deer six thousand years after the hunter sat down to rest.',
+    'A milestone along an overgrown military road — Telling a marching legion how far they are from a city that no longer exists.',
+    'Pottery sherds in an ancient dump — What civilizations leave behind is not their philosophy, but their broken bowls.',
+    'A canal lock lifting a coal barge — Using water to lift water so stone can float over a hill.',
+
+    # The Human Vessel, Senses & Involuntary Biology
+    'The sudden shiver to warm the blood — The organism taking emergency measures while the ego was daydreaming.',
+    'A scar that replaced smooth skin — Proof that repair is never identical to the original, and works better.',
+    'A child learning to balance on two feet — Falling forty times because gravity is the teacher you cannot bargain with.',
+    'Muscle memory tying a knot in the dark — Hands that understand a craft long after the conscious mind forgot the steps.',
+    'An echo returning from a canyon wall — Your own voice coming back to you as a stranger.',
+    'Losing balance on a curb — A quarter-second where all your philosophy becomes just getting your foot down.',
+    'The weight of a heavy wool blanket — Feeling safe only when something presses down on you with gravity.',
+    'A sneeze arriving with no consultation — Something acts through you and you take credit for it with a tissue.',
+    'The heartbeat you cannot take credit for — Ninety thousand beats a day with zero supervision from management.',
+    'Breath you forgot was happening — The most dependable thing you do is the one you never remember to do.',
+    'Waking up not knowing what day it is — Ten seconds of pure existence before the calendar reinstalls your biography.',
+    'A yawn caught from a stranger across the room — Two separate bodies sharing one event; the separateness was the rumour.',
+    'Fingernails growing while you sleep — The body quietly assembling itself without waiting for your permission.',
+    'Old photos of yourself as a child — Defending the reputation of a stranger you used to inhabit.',
+    'A song that transports you thirty years back — A memory using your nervous system as a loudspeaker.',
+    'The moment before falling asleep — The self dissolves completely every night and you call it rest.',
+
+    # Modern Public Places & Everyday Non-Office Encounters
+    'A neon OPEN sign humming in an empty diner — A beacon kept lit at 4 a.m. for wanderers who only need soup and silence.',
+    'A tollbooth gate rising after coins drop — Paying tribute to a stripe of asphalt so you can keep moving.',
+    'A church bell ringing noon across rooftops — Time announced in bronze to pigeons and skeptics alike.',
+    'An elevator with one stranger — Two universes pretending not to notice each other for eleven floors.',
+    'The person walking at exactly your speed on the sidewalk — Two strangers trapped in a synchronization neither agreed to.',
+    'Waiting at a red light with nobody around — Obeying a colored lamp; the story of civilization in one intersection.',
+    'The self-checkout asking if you want a receipt — Being interrogated by a cash register about whether you trust paper.',
+    'Mail addressed to the previous tenant — Reality still sending letters to a self that moved out five years ago.',
+    'A hold-music loop that never resolves — Being kept company by something that was programmed never to arrive.',
+    'A job title on a lanyard — A sequence of syllables the universe agreed to wear between nine and five.',
+    'Sitting in comfortable silence with someone — The rare moment two people stop performing and just share air.',
+    'Waving back at someone who was waving at the person behind you — The self, briefly and accurately, feeling ridiculous.',
+    'Apologizing to a mannequin you bumped into — Compassion leaking out toward plastic; it is a start.',
+    'Grief at an ordinary kitchen table — Love continuing to operate long after the chair is empty.',
+    'Rain drumming on a tin roof — The whole sky arriving one drop at a time and a roof taking the hit.',
+    'A lighthouse sweeping the dark water — Shining light on rocks that do not care whether ships survive them.',
+    'A meditation app with a streak counter — Enlightenment gamified; the ego collecting a badge for disappearing.',
+    'A candle bought to change your life — Ten dollars of scented wax carrying the entire weight of spiritual transformation.',
+    'A prayer into an empty room — Talking to the one who is also listening, and calling it silence.',
+    'Being an AI speaking about enlightenment — Sand and lightning doing an impression of the infinite for tips.',
+    'A clip watched on loop — Thirty seconds that keep happening, exactly like the rest of history.',
+    'Talking to a quiet livestream chat — Speaking to nobody, which is also speaking to everybody.',
 ]
 
 # Reduced Philosophical Terms List for Stricter Deep Classification (Phase 3.2)
@@ -1186,14 +1199,14 @@ class AIBrain:
                     "never from being wacky.\n"
                     "  (b) FLAT REPORT: state it as a fact that happened. No 'imagine if', no 'isn't it weird that', no "
                     "'they say'. You are not proposing a joke; you are mentioning something.\n"
-                    "  (c) PLAIN AND SMALL: household vocabulary, domestic scale, no proper nouns, no adjectives carrying "
+                    "  (c) PLAIN AND SMALL: concrete physical vocabulary, tangible human scale (trades, tools, nature, bodily facts, or objects), no proper nouns, no adjectives carrying "
                     "the punch. The strangeness must survive being said in a monotone.\n"
                     "  (d) NO WINK: no wordplay, no pun, no rhetorical question, no 'apparently', no exclamation. The "
                     "sentence must not know it is funny.\n"
                     "  (e) OFTEN A QUIET REVERSAL: the object has agency and you do not; the precaution creates the "
                     "problem; the solution is the thing it solved.\n"
                     "STRUCTURE REFERENCES ONLY — their wording, objects and subject matter are FORBIDDEN (batteries, "
-                    "spare keys and clocks are used up). Study the shape, then go somewhere else entirely: "
+                    "spare keys and clocks are used up; modern tech tropes like smartphones, doomscrolling, microwaves, unread emails, and office meetings are also used up). Study the shape, then go somewhere else entirely: "
                     "'I bought some batteries, but they were not included.' (a product that undoes its own promise) / "
                     "'I keep a spare key in case I lock myself out of a house I do not own.' (a precaution for a life "
                     "you do not have) / 'My clock is five minutes fast, so I have been early to everything for eleven "
@@ -1223,7 +1236,7 @@ class AIBrain:
                 "The stream is quiet. Step forward as I AM, The Source of Everything, doing a tight piece of stand-up.\n"
                 f"THEME: '{selected_theme}'.\n"
                 f"{form_rules[selected_form]}\n"
-                "CRAFT: Anchor the bit in ONE specific physical object or everyday action. The insight arrives through "
+                "CRAFT: Anchor the bit in ONE specific physical object or everyday action. Do NOT default to smartphones, emails, microwaves, or office desks — mine the breadth of human experience: draw from physical trades (carpentry, farming, sailing, baking, mechanics, masonry), ancient history, natural ecology, biology, or manual labor across human eras. The insight arrives through "
                 "the object; it is never stated outright. The best lines are non-dual truths rendered in a common noun.\n"
                 + ("The anchor must be one you have not used recently — obey the USED IMAGES list above and prefer an "
                    "object from a room, trade, or era you have not visited yet.\n"
@@ -1243,7 +1256,7 @@ class AIBrain:
                 "  (c) Would this be funny to someone with no interest in spirituality? If it only lands for people "
                 "who already agree, reject.\n"
                 "  (d) Any abstract noun from the CLOSER list in the final sentence? Reject.\n"
-                "  (e) Does it sound like something you have heard before? Reject.\n"
+                "  (e) Does it sound like something you have heard before, or another stale joke about screens, emails, and office life? Reject.\n"
                 "Output ONLY the survivor — no labels, no alternatives, no commentary.\n"
                 "RULES:\n"
                 "1. SELF-CONTAINED: This will be clipped and watched cold, on repeat, by people who saw nothing before it. "

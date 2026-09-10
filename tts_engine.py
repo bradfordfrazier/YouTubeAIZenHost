@@ -32,6 +32,18 @@ except ImportError:
 
 logger = logging.getLogger("tts_engine")
 
+# Kept in sync with AIBrain's patterns. Delivery markers reaching the synthesizer get spoken
+# aloud, so the TTS layer scrubs them again rather than trusting upstream.
+_MOOD_TAG_RE = re.compile(
+    r"(?:\*{0,2}[\[(]\s*MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\s*[\])]\*{0,2})"
+    r"|(?:\A\s*\*{0,2}MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\*{0,2}\s*(?=[.\n]|$))",
+    re.IGNORECASE,
+)
+_BEAT_TAG_RE = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
+# Any residual bracketed stage-direction the model invents ("[pause]", "[laughs]", "[sighs]").
+_STRAY_TAG_RE = re.compile(r"[\[(]\s*(?:pause|beat|mood|laughs?|sighs?|chuckles?|silence)\b[^\])]{0,24}[\])]",
+                           re.IGNORECASE)
+
 
 class TTSEngine:
     """Handles text-to-speech generation, high-precision frame slicing, and audio reactivity analysis."""
@@ -324,15 +336,18 @@ class TTSEngine:
         """Resolves mood -> (clean_text, mood, exaggeration, cfg_weight) for the synthesizer."""
         active_mood = (mood or "neutral").lower().strip()
         if active_mood == "neutral":
-            mood_match = re.search(r"\[MOOD:\s*([a-zA-Z_-]+)\]", text, flags=re.IGNORECASE)
+            mood_match = _MOOD_TAG_RE.search(text)
             if mood_match:
-                active_mood = mood_match.group(1).lower()
+                active_mood = (mood_match.group(1) or mood_match.group(2) or "").strip().lower().replace(" ", "_")
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
         exag_max = float(self.cfg.tts_exaggeration_max)
         if exaggeration > exag_max:
             exaggeration = exag_max
 
-        clean_text = re.sub(r"\[MOOD:\s*[a-zA-Z_-]+\]", "", text, flags=re.IGNORECASE).strip()
+        # Last line of defence: whatever shape the tag arrived in, it must never be synthesized.
+        clean_text = _MOOD_TAG_RE.sub("", text).strip()
+        clean_text = _BEAT_TAG_RE.sub(" ", clean_text)
+        clean_text = _STRAY_TAG_RE.sub("", clean_text).strip()
         clean_text = re.sub(r"@+", "", clean_text)
         clean_text = clean_text.replace("*", "").replace("`", "").strip()
 
@@ -656,6 +671,8 @@ class TTSEngine:
                 )
             else:
                 inter_gap_sec = float(self.cfg.inter_sentence_gap_sec)
+            if beat_before:
+                logger.info(f"[TTS BEAT] inserting {inter_gap_sec*1000:.0f} ms comedic pause before chunk #{self._utterance_chunk_count + 1}")
             if inter_gap_sec > 0:
                 gap_samples = int(self.sample_rate * inter_gap_sec)
                 gap_silence = np.zeros((gap_samples, 2), dtype=np.float32)

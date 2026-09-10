@@ -238,10 +238,19 @@ class AIBrain:
         self.circuit_breaker_cooldown_sec: float = float(os.getenv("CIRCUIT_BREAKER_COOLDOWN_SEC", "60.0"))
 
         # Regex for mood tags like [MOOD: hyped] or [MOOD: energetic]
-        self.mood_pattern = re.compile(r"\[MOOD:\s*([a-zA-Z_-]+)\]", re.IGNORECASE)
+        # Tolerant on purpose. Models emit this tag in several shapes — square brackets,
+        # parentheses, a dash instead of a colon, wrapped in markdown asterisks, or bare on the
+        # first line. Any shape the pattern misses is SPOKEN ALOUD, which is what happened live.
+        # Bracketed/parenthesised forms match anywhere; the bare form only at the very start, so a
+        # viewer writing "my mood: terrible" in chat is never mistaken for a tag.
+        self.mood_pattern = re.compile(
+            r"(?:\*{0,2}[\[(]\s*MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\s*[\])]\*{0,2})"
+            r"|(?:\A\s*\*{0,2}MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\*{0,2}\s*(?=[.\n]|$))",
+            re.IGNORECASE,
+        )
         # Comedic beat marker. The model places [BEAT] immediately before a punchline; the TTS
         # layer turns it into a longer pause (tts_beat_gap_sec) instead of the normal sentence gap.
-        self.beat_pattern = re.compile(r"\[\s*BEAT\s*\]", re.IGNORECASE)
+        self.beat_pattern = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
         self.last_spontaneous_theme: str = ""
         self.last_bit_form: str = ""
         # Operator-curated favourite bits (few-shot steering) + the last bit that played (for /fav)
@@ -1414,7 +1423,7 @@ class AIBrain:
             if is_marker:
                 m = self.mood_pattern.match(tok)
                 if m:
-                    current_mood = m.group(1).lower()
+                    current_mood = (m.group(1) or m.group(2) or "").strip().lower().replace(" ", "_")
                     unconsumed_markers = [t for t in unconsumed_markers if not self.mood_pattern.match(t)]
                     unconsumed_markers.append(f"[MOOD: {current_mood}]")
                 else:
@@ -1668,13 +1677,18 @@ class AIBrain:
                 if not mood_detected:
                     match = self.mood_pattern.search(accumulated_text)
                     if match:
-                        active_mood = match.group(1).lower()
+                        # Either capture group can hold the mood depending on which shape matched.
+                        raw_mood = (match.group(1) or match.group(2) or "").strip().lower()
+                        active_mood = raw_mood.replace(" ", "_")
                         mood_detected = True
                         self.current_mood = active_mood
                         logger.info(f"Detected Mood Tag: [{active_mood.upper()}]")
                         yield {"type": "mood", "mood": active_mood}
                         sentence_mood = active_mood
-                        spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).strip()
+                        # lstrip only: .strip() removed the trailing space of the streamed chunk,
+                        # so the next delta joined onto the last word ("a spare key" + "for a
+                        # house" -> "a spare keyfor a house"). Leading space still goes.
+                        spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).lstrip()
                         sentence_buffer = spoken_text
                     else:
                         sentence_buffer += text_piece
@@ -1713,7 +1727,10 @@ class AIBrain:
             if rem:
                 tail_beat = bool(self.beat_pattern.search(rem))
                 tail_mood_m = self.mood_pattern.search(rem)
-                tail_mood = tail_mood_m.group(1).lower() if tail_mood_m else (sentence_mood or active_mood)
+                tail_mood = (
+                    ((tail_mood_m.group(1) or tail_mood_m.group(2) or "").strip().lower().replace(" ", "_"))
+                    if tail_mood_m else (sentence_mood or active_mood)
+                )
                 rem = self.mood_pattern.sub("", self.beat_pattern.sub("", rem)).strip()
                 rem_words = rem.split()
                 if len(rem_words) >= 3 and len(rem) >= 12:

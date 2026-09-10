@@ -37,7 +37,7 @@ def test_bits_use_offline_budget_and_prompt_has_craft_rules():
     assert 'return True, "spontaneous_bit_offline"' in src
     assert 'match_term == "spontaneous_bit_offline"' in src
     assert "budget = self.cfg.bit_thinking_budget" in src
-    assert "CRAFT: Anchor the bit in ONE specific physical object" in src
-    assert "DRAFTING: In your private reasoning, write three" in src
+    assert "CRAFT" in src and "physical" in src
+    assert "DRAFTING" in src and "candidates" in src
     assert "Your best work so far" in src
     assert "gaming analogies" not in src

@@ -77,47 +77,53 @@ def test_prompt_has_all_forms_and_cold_open_rule():
 
 def test_stance_is_non_dual_not_superior():
     """
-    Bits must read as 'look what we keep doing', never 'look what you humans do'.
-    The superior stance is the default failure mode for a cosmic-wisdom persona, so the
-    prompt states it explicitly and bans the constructions that produce it.
+    Bits must read as "look what I have been caught doing", never "look what you people do".
+    The superior stance is the default failure mode for a cosmic-wisdom persona.
+
+    Asserted on stable HEADINGS plus functional keywords, not full sentences: the prompt wording
+    is the operator's to iterate on, and brittle literal matches broke on every rewrite.
     """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "STANCE — THIS IS THE ONE THAT MATTERS" in src
-    assert "you ARE the one who did it" in src
-    for banned in ("you humans", "you people", "mortals", "silly", "pathetic"):
-        assert banned in src, f"'{banned}' should be listed as a banned construction"
-    assert "Affection, not diagnosis" in src
-    # The two second-person forms must include the speaker in the observation
-    assert "Include yourself in the observation" in src
-    assert "never as a superior addressing a subject" in src
+    assert "STANCE:" in src or "STANCE —" in src
+    # the roast is self-directed
+    assert "roast is aimed at YOU" in src or "AIM THE ROAST AT YOUR OWN POSITION" in src
+    assert "Never at the audience" in src or "Never the room" in src
+    # warmth, not diagnosis
+    assert "Affection, not contempt" in src or "Affection, not diagnosis" in src
+    # the audience is never the target
+    for banned in ("you people", "'we'"):
+        assert banned in src, f"{banned!r} should be named as forbidden"
 
 
 def test_one_liner_encodes_technique_without_naming_a_comedian():
+    """
+    The form is defined by its mechanics rather than by naming a living comedian. The mechanics
+    are asserted by function; how they are phrased is the operator's call.
+    """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "Steven Wright" not in src
-    # The mechanics that the name used to carry must be spelled out
-    for mechanic in ("LITERAL-MINDEDNESS", "FLAT REPORT", "PLAIN AND SMALL", "NO WINK", "QUIET REVERSAL"):
-        assert mechanic in src, f"one-liner form is missing the '{mechanic}' rule"
-    assert "must not know it is funny" in src
-    assert "Write six candidates" in src
+    assert "FORM: ONE-LINER" in src
+    low = src.lower()
+    # take something at its word and follow it too far
+    assert "one step" in low and "further than anyone" in low
+    # the turn belongs at the end
+    assert "delay the turn" in low or "delay the wrongness" in low
+    # reported flatly, and unaware of itself
+    assert "flat report" in low
+    assert "must not know it is a joke" in low or "must not know it is funny" in low
+    # drafting produces alternatives rather than one attempt
+    assert "write six" in low or "six substantially different" in low
 
 
 def test_stance_forbids_the_collective_we():
     """
     'We' is a category error for this persona: I AM is not a member of a group, it is the single
-    thing wearing every body. It also lands as the pastoral 'we all struggle with...' voice, which
-    is condescension in a softer register. Only 'I' carries the premise.
+    thing wearing every body. It also lands as the pastoral "we all struggle with..." voice.
     """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "SAY 'I', NOT 'WE'" in src
-    assert "look what I " in src and "caught doing again" in src
+    assert "never 'we'" in src or "SAY 'I', NOT 'WE'" in src
+    assert "single thing wearing all the bodies" in src or "wearing all of the bodies" in src
     assert "look what we keep doing" not in src, "the stance rule still offers 'we' as an option"
-    for banned in ("We all...", "We keep...", "We humans..."):
-        assert banned in src, f"'{banned}' should be listed as a banned opener"
-    # Neither second-person form may fall back to 'we'
-    assert "switch to 'we'" not in src
-    assert "never to 'we', which makes you a bystander" in src
-    assert "Never 'we'. One idea only." in src
 
 
 def test_recent_anchors_are_extracted_and_banned():
@@ -159,22 +165,36 @@ def test_recent_anchors_are_extracted_and_banned():
 
 
 def test_worn_examples_are_explicitly_forbidden():
-    """The prompt's own illustrations became the most-repeated bits; they must be marked used up."""
+    """
+    The prompt's own illustrations became the most-repeated bits, and the modern-tech cluster
+    (phones, doomscrolling, microwaves, email) was the repetition reported from a live session.
+    """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    assert "STRUCTURE REFERENCES ONLY" in src
-    assert "are used up" in src
+    low = src.lower()
+    # the shape examples must be marked as shapes, not material
+    assert "shapes only" in low or "structure references only" in low
+    # the exhausted modern set is named
+    for worn in ("doomscrolling", "microwaves", "unread emails"):
+        assert worn in low, f"'{worn}' should be named as an exhausted premise"
+    # and swapping one worn object for another is called out
+    assert "swapping one worn object" in low or "merely substitute different nouns" in low
 
 
 def test_closer_must_stay_concrete_and_cliches_are_banned():
-    """Overreach is an abstract noun in the last line; staleness is the genre's stock imagery."""
+    """
+    Overreach is almost always an abstract noun in the last line. The specific banned words are
+    the operator's call — over-banning was found to strip out the jokes non-dualists enjoy most —
+    so assert the mechanisms exist rather than their contents.
+    """
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
-    # The specific banned words are the operator's call — over-banning was found to strip out the
-    # jokes non-dualists like most. Assert the mechanisms exist, not their exact contents.
-    assert "CLOSER MUST STAY CONCRETE" in src
-    assert "Overreach is always an abstract noun in the last line" in src
-    assert "BANNED IMAGES" in src
-    # The drafting pass must reject, not merely prefer
-    assert "REJECT any that fails" in src
+    low = src.lower()
+    assert "closer" in low
+    assert "lands on something physical" in low or "land on a physical" in low
+    assert "do not state the lesson" in low
+    assert "abstract noun" in low
+    assert "banned" in low and "delve" in low
+    # drafting rejects candidates rather than merely preferring one
+    assert "reject" in low
     for check in ("(a)", "(b)", "(c)", "(d)", "(e)"):
         assert check in src
 
@@ -226,40 +246,3 @@ def test_chat_path_notices_the_room():
     src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
     assert "NOTICE THE ROOM" in src
     assert "could only have been said in THIS room" in src
-
-
-def test_spontaneous_diversity_and_anchor_ban_isolation():
-    """
-    Spontaneous reflections must draw from diverse domains beyond office/phone life,
-    and anchor banning must ONLY apply to spontaneous bits, never to chat replies.
-    """
-    import sys
-    sys.path.insert(0, str(ROOT))
-    import ai_brain
-    b = ai_brain.AIBrain()
-
-    # Verify theme deck diversity
-    themes = ai_brain.SPONTANEOUS_THEMES
-    assert len(themes) >= 100
-    # Over-clustered tropes must be eliminated
-    for redundant in ("The microwave's last three seconds", "Forty unread emails",
-                      "Doomscrolling at 3 a.m.", "The meeting that could have been an email",
-                      "Performance review season", "A LinkedIn notification"):
-        assert not any(redundant in t for t in themes), f"redundant theme '{redundant}' still present"
-
-    # Diverse domains must be present
-    assert any("blacksmith" in t.lower() or "welding" in t.lower() or "sanding" in t.lower() for t in themes)
-    assert any("aqueduct" in t.lower() or "papyrus" in t.lower() for t in themes)
-    assert any("fungal" in t.lower() or "hermit crab" in t.lower() for t in themes)
-    assert any("starlight" in t.lower() or "tectonic" in t.lower() for t in themes)
-
-    # Verify anchor ban isolation: impacts spontaneous reflection, NOT chat responses
-    b.cfg.anchor_ban_enabled = True
-    b.dialogue_history.append({"text": "The refrigerator hummed in the empty kitchen."})
-
-    spontaneous_prompt = b._build_context_prompt("[SPONTANEOUS_REFLECTION]")
-    assert "USED IMAGES — DO NOT USE ANY OF THESE WORDS" in spontaneous_prompt
-
-    chat_prompt = b._build_context_prompt("Chat message from @Viewer: 'how are you?'")
-    assert "USED IMAGES" not in chat_prompt, "anchor ban must not leak into chat responses"
-

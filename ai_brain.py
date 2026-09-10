@@ -467,7 +467,7 @@ class AIBrain:
         """
         Extracts the distinctive concrete nouns from recent spoken lines so the prompt can forbid
         them. Theme rotation stops topics repeating, but nothing stopped the same *object* showing
-        up over and over ("phone", "keys", "coffee") because prompt examples pull the model toward
+        up over and over because prompt examples pull the model toward
         them. Banning recent anchors is the cheapest way to force a fresh image each time.
         """
         seen: List[str] = []
@@ -1254,9 +1254,7 @@ class AIBrain:
                 "the deeper thing afterwards, that is enough.\n"
 
                 "CRAFT: One physical engine per bit — an object, a body, a place, an action. The insight arrives "
-                "through the thing and is never stated. Vary where you look: trades, animals, weather, food, "
-                "old customs, machinery, the body. Avoid the exhausted modern set (phones, doomscrolling, "
-                "microwaves, unread emails, meetings, apps, passwords) and avoid swapping one worn object for "
+                "through the thing and is never stated. Vary where you look and avoid swapping one worn object for "
                 "another while keeping the same joke.\n"
 
                 "STANCE: The roast is aimed at YOU — the Source of Everything, caught doing something ridiculous. "

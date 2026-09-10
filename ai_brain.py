@@ -238,18 +238,26 @@ class AIBrain:
         self.circuit_breaker_cooldown_sec: float = float(os.getenv("CIRCUIT_BREAKER_COOLDOWN_SEC", "60.0"))
 
         # Regex for mood tags like [MOOD: hyped] or [MOOD: energetic]
-        # Tolerant on purpose. Models emit this tag in several shapes — square brackets,
-        # parentheses, a dash instead of a colon, wrapped in markdown asterisks, or bare on the
-        # first line. Any shape the pattern misses is SPOKEN ALOUD, which is what happened live.
-        # Bracketed/parenthesised forms match anywhere; the bare form only at the very start, so a
-        # viewer writing "my mood: terrible" in chat is never mistaken for a tag.
+        # Tolerant on purpose. Models emit this tag in several shapes — with or without the word
+        # "MOOD", square brackets or parentheses, colon or dash, wrapped in markdown asterisks, or
+        # bare on the first line. Any shape the pattern misses is SPOKEN ALOUD on stream.
+        # The bare-name form ("[DEADPAN]") is restricted to the known mood vocabulary so that
+        # other bracketed text (a [CAST] badge, a viewer's aside) is never swallowed.
+        _mood_names = sorted(
+            (m for m in (self.cfg.tts_mood_exaggeration_map or {}).keys() if m),
+            key=len, reverse=True,
+        ) or ["neutral"]
+        _names_alt = "|".join(re.escape(m) for m in _mood_names)
         self.mood_pattern = re.compile(
+            # [MOOD: deadpan] / (MOOD - deadpan) / **[MOOD:deadpan]**
             r"(?:\*{0,2}[\[(]\s*MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\s*[\])]\*{0,2})"
+            # [DEADPAN] / (deadpan) — bare mood name, known vocabulary only
+            r"|(?:\*{0,2}[\[(]\s*(" + _names_alt + r")\s*[\])]\*{0,2})"
+            # MOOD: deadpan at the very start of the reply, no brackets
             r"|(?:\A\s*\*{0,2}MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\*{0,2}\s*(?=[.\n]|$))",
             re.IGNORECASE,
         )
-        # Comedic beat marker. The model places [BEAT] immediately before a punchline; the TTS
-        # layer turns it into a longer pause (tts_beat_gap_sec) instead of the normal sentence gap.
+
         self.beat_pattern = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
         self.last_spontaneous_theme: str = ""
         self.last_bit_form: str = ""
@@ -1423,7 +1431,7 @@ class AIBrain:
             if is_marker:
                 m = self.mood_pattern.match(tok)
                 if m:
-                    current_mood = (m.group(1) or m.group(2) or "").strip().lower().replace(" ", "_")
+                    current_mood = next((g for g in m.groups() if g), "").strip().lower().replace(" ", "_")
                     unconsumed_markers = [t for t in unconsumed_markers if not self.mood_pattern.match(t)]
                     unconsumed_markers.append(f"[MOOD: {current_mood}]")
                 else:
@@ -1678,7 +1686,7 @@ class AIBrain:
                     match = self.mood_pattern.search(accumulated_text)
                     if match:
                         # Either capture group can hold the mood depending on which shape matched.
-                        raw_mood = (match.group(1) or match.group(2) or "").strip().lower()
+                        raw_mood = next((g for g in match.groups() if g), "").strip().lower()
                         active_mood = raw_mood.replace(" ", "_")
                         mood_detected = True
                         self.current_mood = active_mood
@@ -1728,7 +1736,7 @@ class AIBrain:
                 tail_beat = bool(self.beat_pattern.search(rem))
                 tail_mood_m = self.mood_pattern.search(rem)
                 tail_mood = (
-                    ((tail_mood_m.group(1) or tail_mood_m.group(2) or "").strip().lower().replace(" ", "_"))
+                    next((g for g in tail_mood_m.groups() if g), "").strip().lower().replace(" ", "_")
                     if tail_mood_m else (sentence_mood or active_mood)
                 )
                 rem = self.mood_pattern.sub("", self.beat_pattern.sub("", rem)).strip()

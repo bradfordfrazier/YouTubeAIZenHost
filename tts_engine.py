@@ -34,11 +34,26 @@ logger = logging.getLogger("tts_engine")
 
 # Kept in sync with AIBrain's patterns. Delivery markers reaching the synthesizer get spoken
 # aloud, so the TTS layer scrubs them again rather than trusting upstream.
-_MOOD_TAG_RE = re.compile(
-    r"(?:\*{0,2}[\[(]\s*MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\s*[\])]\*{0,2})"
-    r"|(?:\A\s*\*{0,2}MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\*{0,2}\s*(?=[.\n]|$))",
-    re.IGNORECASE,
-)
+def _build_mood_tag_re():
+    """
+    Built from the live mood vocabulary so the bare-name form ("[DEADPAN]") is recognised without
+    swallowing other bracketed text such as the [CAST] badge. Kept in sync with AIBrain by
+    construction rather than by hand.
+    """
+    try:
+        names = sorted((m for m in (config.tts_mood_exaggeration_map or {}) if m), key=len, reverse=True)
+    except Exception:
+        names = []
+    names_alt = "|".join(re.escape(m) for m in names) or "neutral"
+    return re.compile(
+        r"(?:\*{0,2}[\[(]\s*MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\s*[\])]\*{0,2})"
+        r"|(?:\*{0,2}[\[(]\s*(" + names_alt + r")\s*[\])]\*{0,2})"
+        r"|(?:\A\s*\*{0,2}MOOD\s*[:\-–—]\s*([a-zA-Z][a-zA-Z _-]{0,20}?)\*{0,2}\s*(?=[.\n]|$))",
+        re.IGNORECASE,
+    )
+
+
+_MOOD_TAG_RE = _build_mood_tag_re()
 _BEAT_TAG_RE = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
 # Any residual bracketed stage-direction the model invents ("[pause]", "[laughs]", "[sighs]").
 _STRAY_TAG_RE = re.compile(r"[\[(]\s*(?:pause|beat|mood|laughs?|sighs?|chuckles?|silence)\b[^\])]{0,24}[\])]",
@@ -338,7 +353,7 @@ class TTSEngine:
         if active_mood == "neutral":
             mood_match = _MOOD_TAG_RE.search(text)
             if mood_match:
-                active_mood = (mood_match.group(1) or mood_match.group(2) or "").strip().lower().replace(" ", "_")
+                active_mood = next((g for g in mood_match.groups() if g), "").strip().lower().replace(" ", "_")
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
         exag_max = float(self.cfg.tts_exaggeration_max)
         if exaggeration > exag_max:

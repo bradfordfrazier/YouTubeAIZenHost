@@ -1247,8 +1247,8 @@ class AIBrain:
                 "The question comes from a recurring fictional cast character (labeled with [CAST] on stream for audience transparency).\n"
                 "1. FICTIONAL CHARACTER FOURTH-WALL GUIDANCE: Treat the asker as a recurring fictional cast character in on the joke. Light fourth-wall breaks and playing into their character tropes/comedic vein are encouraged. NEVER imply or state that they are a real human viewer.\n"
                 "2. ADDRESS BY NAME FIRST: Always start with '@CharacterHandle' (e.g. '@ExistentialDave, ...').\n"
-                "3. COMEDIC POINTER & JUDO: Answer their dilemma directly using non-duality and wit tailored to their comedic angle.\n"
-                "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-30 words). Spoken live on air — NO markdown.\n"
+                "3. COMEDIC POINTER & JUDO: Answer their dilemma directly using wit tailored to their comedic angle.\n"
+                "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-25 words). Spoken live on air — NO markdown.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching your tone (e.g. [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], [MOOD: chill], [MOOD: savage], or [MOOD: transcendent]).\n"
             )
             if override_prompt:
@@ -1275,7 +1275,7 @@ class AIBrain:
                 "hour it is, what has already been asked. A reply that could only have been said in THIS room, to "
                 "THESE people, tonight, is worth more than a reply that would fit any stream. Use it when it is "
                 "there; never force it.\n"
-                "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences maximum (~10-25 words). Spoken aloud live on air — NO markdown.\n"
+                "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences maximum (~5-25 words). Spoken aloud live on air — NO markdown.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching your tone: "
                 "[MOOD: transcendent], [MOOD: mysterious], [MOOD: thoughtful], [MOOD: deadpan], [MOOD: snarky], [MOOD: hyped], [MOOD: laughing], [MOOD: savage] (for ego-judo on joke questions), [MOOD: chill], [MOOD: curious], [MOOD: shocked], or [MOOD: neutral].\n"
             )

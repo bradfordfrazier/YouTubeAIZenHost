@@ -1193,7 +1193,7 @@ class AIBrain:
                     "escalating clauses, then the closer."
                 ),
                 "story": (
-                    f"FORM: TINY STORY. {w_min}-{w_max} words, 3 to 4 sentences. "
+                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. "
                     "A concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (
@@ -1203,7 +1203,7 @@ class AIBrain:
                 "one_liner": (
                     "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, first person, [MOOD: deadpan]. "
                     "The whole joke fits in one spoken sentence — no second sentence, no explanation.\n"
-                    " Write six that are genuinely different — not the same joke with new nouns — and keep the "
+                    " Write three that are genuinely different — not the same joke with new nouns — and keep the "
                     "flattest one that still turns. If none turns, say something plainly true instead of a bad joke."
                 ),
             }

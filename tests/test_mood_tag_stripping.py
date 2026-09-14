@@ -155,3 +155,29 @@ def test_alias_map_is_shared_by_both_layers():
     assert "tts_mood_aliases" in brain_src and "tts_mood_aliases" in tts_src
     assert "leading_tag_pattern" in brain_src
     assert "_LEADING_TAG_RE" in tts_src
+
+
+def test_bit_prompt_offers_the_full_mood_vocabulary():
+    """
+    A prompt strip-down removed the mood list from the bit block, leaving only the
+    "[MOOD: deadpan]" inside the one-liner rule. Every bit of every form then came out deadpan,
+    which also froze the avatar colour and the TTS exaggeration for a whole session.
+    """
+    import re as _re
+    import sys as _s
+    _s.path.insert(0, str(ROOT))
+    import ai_brain
+    from config import config
+
+    b = ai_brain.AIBrain()
+    for trigger in ("[SPONTANEOUS_REFLECTION]", "Chat message from @X: 'why do we dream?'"):
+        p = b._build_context_prompt(trigger)
+        offered = {m.lower() for m in _re.findall(r"\[MOOD:\s*([a-z_]+)\]", p, _re.I)} - {"x"}
+        assert len(offered) >= 8, f"{trigger} offers only {sorted(offered)}"
+        assert "deadpan" in offered and "transcendent" in offered
+
+    # And the list is built from config, so adding a mood cannot leave the prompt stale.
+    src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    assert "tts_mood_exaggeration_map" in src
+    for mood in ("savage", "chill", "curious"):
+        assert mood in config.tts_mood_exaggeration_map

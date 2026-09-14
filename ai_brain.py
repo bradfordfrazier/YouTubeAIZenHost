@@ -1246,6 +1246,13 @@ class AIBrain:
                 "BANNED: 'Ah,', 'delve', 'tapestry', 'cosmic dance', 'in the grand scheme', 'beautiful', "
                 "inspirational-poster phrasing, meditation-app language, ending on a question, stating a moral.\n"
 
+                # Without this line the only mood the bit prompt mentioned was the [MOOD: deadpan]
+                # inside the one-liner rule, so every bit of every form came out deadpan.
+                "MOOD: open with a mood tag. Pick the one the bit actually wants — "
+                + ", ".join(f"[MOOD: {m}]" for m in self.cfg.tts_mood_exaggeration_map)
+                + ". One-liners are deadpan; everything else should vary. Do not default to the same "
+                "mood turn after turn.\n"
+
                 "DRAFTING: privately write several genuinely different candidates, then reject any that (a) sound "
                 "like spiritual teaching with jokes attached, (b) would work with any other object swapped in, "
                 "(c) explain themselves, (d) end on an abstraction, or (e) sound like something you have heard "

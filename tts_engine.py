@@ -41,7 +41,10 @@ def _build_mood_tag_re():
     construction rather than by hand.
     """
     try:
-        names = sorted((m for m in (config.tts_mood_exaggeration_map or {}) if m), key=len, reverse=True)
+        names = sorted(
+            set(list(config.tts_mood_exaggeration_map or {}) + list(config.tts_mood_aliases or {})),
+            key=len, reverse=True,
+        )
     except Exception:
         names = []
     names_alt = "|".join(re.escape(m) for m in names) or "neutral"
@@ -55,6 +58,11 @@ def _build_mood_tag_re():
 
 _MOOD_TAG_RE = _build_mood_tag_re()
 _BEAT_TAG_RE = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
+# Any short bracketed tag opening a reply is an invented stage direction. Unstripped, it is read
+# aloud letter by letter ("[DRY]" -> "D-R-Y"). Start-anchored so [CAST] and [BEAT] survive.
+_LEADING_TAG_RE = re.compile(
+    r"\A\s*\*{0,2}[\[(]\s*(?!BEAT\b)([A-Za-z][A-Za-z _-]{0,24}?)\s*[\])]\*{0,2}\s*", re.IGNORECASE
+)
 # Any residual bracketed stage-direction the model invents ("[pause]", "[laughs]", "[sighs]").
 _STRAY_TAG_RE = re.compile(r"[\[(]\s*(?:pause|beat|mood|laughs?|sighs?|chuckles?|silence)\b[^\])]{0,24}[\])]",
                            re.IGNORECASE)
@@ -350,10 +358,14 @@ class TTSEngine:
     def _prepare_text(self, text: str, mood: str) -> Tuple[str, str, float, float]:
         """Resolves mood -> (clean_text, mood, exaggeration, cfg_weight) for the synthesizer."""
         active_mood = (mood or "neutral").lower().strip()
+        _aliases = {k.lower(): v.lower() for k, v in (self.cfg.tts_mood_aliases or {}).items()}
+        if active_mood not in self.mood_exaggeration_map:
+            active_mood = _aliases.get(active_mood, active_mood)
         if active_mood == "neutral":
             mood_match = _MOOD_TAG_RE.search(text)
             if mood_match:
-                active_mood = next((g for g in mood_match.groups() if g), "").strip().lower().replace(" ", "_")
+                _raw = next((g for g in mood_match.groups() if g), "").strip().lower()
+                active_mood = _raw if _raw in self.mood_exaggeration_map else _aliases.get(_raw, _raw)
         exaggeration = self.mood_exaggeration_map.get(active_mood, self.exaggeration_default)
         exag_max = float(self.cfg.tts_exaggeration_max)
         if exaggeration > exag_max:
@@ -362,7 +374,13 @@ class TTSEngine:
         # Last line of defence: whatever shape the tag arrived in, it must never be synthesized.
         clean_text = _MOOD_TAG_RE.sub("", text).strip()
         clean_text = _BEAT_TAG_RE.sub(" ", clean_text)
-        clean_text = _STRAY_TAG_RE.sub("", clean_text).strip()
+        clean_text = _STRAY_TAG_RE.sub("", clean_text)
+        # Final guard: an unrecognised leading tag would otherwise be spelled out by the voice.
+        leading = _LEADING_TAG_RE.match(clean_text)
+        if leading:
+            logger.info(f"[TTS] Stripped unrecognised leading tag '{leading.group(1)}' before synthesis.")
+            clean_text = _LEADING_TAG_RE.sub("", clean_text)
+        clean_text = clean_text.strip()
         clean_text = re.sub(r"@+", "", clean_text)
         clean_text = clean_text.replace("*", "").replace("`", "").strip()
 

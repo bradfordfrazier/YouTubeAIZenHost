@@ -115,3 +115,43 @@ def test_mood_vocabulary_is_shared_by_construction():
     assert "tts_mood_exaggeration_map" in brain_src
     assert "tts_mood_exaggeration_map" in tts_src
     assert "_build_mood_tag_re" in tts_src
+
+
+def test_invented_mood_names_are_mapped_not_spoken():
+    """
+    Models invent moods that are not in the vocabulary. "[DRY]" was read aloud as "D-R-Y" because
+    the bare-name pattern only matched known moods. Common inventions now map onto real moods.
+    """
+    from ai_brain import AIBrain
+    b = AIBrain()
+    for raw, expected in (("[DRY] text", "deadpan"), ("[WRY] text", "deadpan"),
+                          ("[SARDONIC] text", "snarky"), ("[AMUSED] text", "laughing"),
+                          ("[MOOD: dry] text", "deadpan")):
+        m = b.mood_pattern.search(raw)
+        assert m, f"pattern missed {raw!r}"
+        got = next((g for g in m.groups() if g), "")
+        assert b._resolve_mood(got) == expected, (raw, b._resolve_mood(got))
+
+
+def test_unrecognised_leading_tag_is_stripped_anyway():
+    """
+    An invented tag with no sensible mapping ("[WHISPERING]") must still never be synthesized.
+    The catch-all is start-anchored so [CAST] and [BEAT] elsewhere are untouched.
+    """
+    from tts_engine import TTSEngine
+    e = TTSEngine()
+    clean, mood, _, _ = e._prepare_text("[WHISPERING] A line that should survive.", "neutral")
+    assert clean == "A line that should survive."
+    assert mood == "neutral", "an unmappable tag must not change the mood"
+
+    # ...but a beat marker mid-text is handled by its own rule, not eaten by the catch-all
+    clean2, _, _, _ = e._prepare_text("A setup. [BEAT] A punchline.", "deadpan")
+    assert "setup" in clean2 and "punchline" in clean2 and "[" not in clean2
+
+
+def test_alias_map_is_shared_by_both_layers():
+    brain_src = (ROOT / "ai_brain.py").read_text(encoding="utf-8", errors="ignore")
+    tts_src = (ROOT / "tts_engine.py").read_text(encoding="utf-8", errors="ignore")
+    assert "tts_mood_aliases" in brain_src and "tts_mood_aliases" in tts_src
+    assert "leading_tag_pattern" in brain_src
+    assert "_LEADING_TAG_RE" in tts_src

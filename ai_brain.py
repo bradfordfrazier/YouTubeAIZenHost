@@ -243,8 +243,9 @@ class AIBrain:
         # bare on the first line. Any shape the pattern misses is SPOKEN ALOUD on stream.
         # The bare-name form ("[DEADPAN]") is restricted to the known mood vocabulary so that
         # other bracketed text (a [CAST] badge, a viewer's aside) is never swallowed.
+        self.mood_aliases = {k.lower(): v.lower() for k, v in (self.cfg.tts_mood_aliases or {}).items()}
         _mood_names = sorted(
-            (m for m in (self.cfg.tts_mood_exaggeration_map or {}).keys() if m),
+            set(list((self.cfg.tts_mood_exaggeration_map or {}).keys()) + list(self.mood_aliases.keys())),
             key=len, reverse=True,
         ) or ["neutral"]
         _names_alt = "|".join(re.escape(m) for m in _mood_names)
@@ -259,6 +260,15 @@ class AIBrain:
         )
 
         self.beat_pattern = re.compile(r"\*{0,2}[\[(]\s*BEAT\s*[\])]\*{0,2}", re.IGNORECASE)
+
+        # Catch-all: ANY short bracketed tag at the very start of a reply is a stage direction the
+        # model invented ("[DRY]", "[WHISPERING]"). It must never be synthesized — an unmapped tag
+        # was being read aloud letter by letter. Start-anchored so [CAST] and [BEAT] mid-text
+        # are untouched; BEAT is excluded explicitly because it is handled separately.
+        self.leading_tag_pattern = re.compile(
+            r"\A\s*\*{0,2}[\[(]\s*(?!BEAT\b)([A-Za-z][A-Za-z _-]{0,24}?)\s*[\])]\*{0,2}\s*",
+            re.IGNORECASE,
+        )
         self.last_spontaneous_theme: str = ""
         self.last_bit_form: str = ""
         # Operator-curated favourite bits (few-shot steering) + the last bit that played (for /fav)
@@ -1309,6 +1319,15 @@ class AIBrain:
 
         return "\n".join(prompt_parts)
 
+    def _resolve_mood(self, raw: str) -> str:
+        """Maps an emitted mood name onto the real vocabulary, via aliases where needed."""
+        name = (raw or "").strip().lower().replace(" ", "_")
+        if not name:
+            return "neutral"
+        if name in (self.cfg.tts_mood_exaggeration_map or {}):
+            return name
+        return self.mood_aliases.get(name.replace("_", " "), self.mood_aliases.get(name, name))
+
     def _extract_mood(self, text: str) -> Tuple[str, str]:
         """Extracts [MOOD: xxx] tag from text, returning (mood, clean_text)."""
         match = self.mood_pattern.search(text)
@@ -1646,7 +1665,7 @@ class AIBrain:
                     if match:
                         # Either capture group can hold the mood depending on which shape matched.
                         raw_mood = next((g for g in match.groups() if g), "").strip().lower()
-                        active_mood = raw_mood.replace(" ", "_")
+                        active_mood = self._resolve_mood(raw_mood)
                         mood_detected = True
                         self.current_mood = active_mood
                         logger.info(f"Detected Mood Tag: [{active_mood.upper()}]")
@@ -1655,7 +1674,9 @@ class AIBrain:
                         # lstrip only: .strip() removed the trailing space of the streamed chunk,
                         # so the next delta joined onto the last word ("a spare key" + "for a
                         # house" -> "a spare keyfor a house"). Leading space still goes.
-                        spoken_text = self.mood_pattern.sub("", accumulated_text, count=1).lstrip()
+                        spoken_text = self.leading_tag_pattern.sub(
+                            "", self.mood_pattern.sub("", accumulated_text, count=1)
+                        ).lstrip()
                         sentence_buffer = spoken_text
                     else:
                         sentence_buffer += text_piece
@@ -1685,8 +1706,11 @@ class AIBrain:
                 await asyncio.sleep(0.001)
 
             # Flush and repair remaining sentence buffer
-            raw_spoken = re.sub(r"@+", "@", self.mood_pattern.sub("", accumulated_text, count=1)).strip()  # keeps [BEAT] and inline [MOOD: x]
-            final_spoken = self.mood_pattern.sub("", accumulated_text).strip()
+            raw_spoken = re.sub(
+                r"@+", "@",
+                self.leading_tag_pattern.sub("", self.mood_pattern.sub("", accumulated_text, count=1)),
+            ).strip()  # keeps [BEAT] and inline [MOOD: x]
+            final_spoken = self.leading_tag_pattern.sub("", self.mood_pattern.sub("", accumulated_text)).strip()
             final_spoken = self.beat_pattern.sub(" ", final_spoken)
             final_spoken = re.sub(r"\s{2,}", " ", re.sub(r"@+", "@", final_spoken)).strip()
 

@@ -457,6 +457,23 @@ class AppConfig:
         }
     )
 
+    # Models invent mood names that are not in the vocabulary ("[DRY]", "[WRY]"). Unmapped tags
+    # used to be spoken aloud letter by letter. These map common inventions onto real moods; any
+    # leading bracketed tag that still does not resolve is stripped and the default mood is kept.
+    tts_mood_aliases: Dict[str, str] = field(
+        default_factory=lambda: {
+            "dry": "deadpan", "wry": "deadpan", "flat": "deadpan", "dead": "deadpan",
+            "sardonic": "snarky", "sarcastic": "snarky", "ironic": "snarky", "wistful": "thoughtful",
+            "amused": "laughing", "playful": "laughing", "joyful": "hyped", "excited": "hyped",
+            "warm": "chill", "gentle": "chill", "kind": "chill", "calm": "chill", "serene": "chill",
+            "somber": "thoughtful", "serious": "thoughtful", "reflective": "thoughtful",
+            "awed": "transcendent", "cosmic": "transcendent", "reverent": "transcendent",
+            "cryptic": "mysterious", "enigmatic": "mysterious", "ominous": "mysterious",
+            "brutal": "savage", "cutting": "savage", "harsh": "savage",
+            "surprised": "shocked", "stunned": "shocked", "inquisitive": "curious",
+        }
+    )
+
     # Neural TTS voice and fallback settings (48kHz Stereo)
     tts_voice: str = os.getenv("TTS_VOICE", "en-US-ChristopherNeural")
     tts_sample_rate: int = _get_int("TTS_SAMPLE_RATE", 48000)

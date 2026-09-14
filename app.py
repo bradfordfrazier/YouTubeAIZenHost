@@ -1112,6 +1112,7 @@ class LocalCoHostApp:
                 # produces anything, so it synthesizes in parallel with generation; the first
                 # answer chunk then gets a beat so the question and the answer don't run together.
                 force_beat_on_first_answer = False
+                answer_sentences_queued = 0
                 intro_text = self._question_read_aloud_text(event)
                 if intro_text:
                     pending_queue_chars += len(intro_text)
@@ -1138,6 +1139,7 @@ class LocalCoHostApp:
                         sent_mood = chunk_ev.get("mood", active_mood)
                         sent_beat = bool(chunk_ev.get("beat_before", False)) or force_beat_on_first_answer
                         if sent:
+                            answer_sentences_queued += 1
                             force_beat_on_first_answer = False
                             clean_sent = re.sub(r"@+", "@", sent).strip()
                             pending_queue_chars += len(clean_sent)
@@ -1154,8 +1156,8 @@ class LocalCoHostApp:
 
                 clean_speech = re.sub(r"@+", "@", full_statement).strip()
 
-                # Fallback: if no sentences were produced but full statement exists
-                if pushed_chunks == 0 and is_completed and clean_speech:
+                # Fallback: if no answer sentences were produced but full statement exists
+                if (pushed_chunks == 0 or answer_sentences_queued == 0) and is_completed and clean_speech:
                     self.turn_phase = "synth"
                     s_audio = await self.tts.synthesize(
                         clean_speech, mood=active_mood, is_live=True, _from_live_turn=True

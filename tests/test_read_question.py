@@ -80,3 +80,28 @@ def test_template_rotation_avoids_immediate_repeat():
     for a, b in zip(outs, outs[1:]):
         assert a != b, "same intro template twice in a row"
     assert len(set(outs)) > 1
+
+
+def test_fallback_triggers_when_no_answer_sentences_produced():
+    """
+    If the question was read aloud (pushed_chunks > 0) but zero answer sentences were
+    produced/queued from the stream, the fallback must still trigger and synthesize
+    clean_speech so the answer is never silently omitted.
+    """
+    import ast as _ast
+    src = (ROOT / "app.py").read_text(encoding="utf-8", errors="ignore")
+    tree = _ast.parse(src)
+
+    found = False
+    for node in _ast.walk(tree):
+        if not (isinstance(node, _ast.AsyncFunctionDef) and node.name == "_execute_ai_turn"):
+            continue
+        for sub in _ast.walk(node):
+            if not isinstance(sub, _ast.If):
+                continue
+            seg = _ast.get_source_segment(src, sub.test) or ""
+            if "answer_sentences_queued" in seg and "clean_speech" in seg:
+                found = True
+                break
+    assert found, "fallback in _execute_ai_turn must check answer_sentences_queued"
+

@@ -1739,6 +1739,7 @@ class AIBrain:
                         spoken_text = self.leading_tag_pattern.sub(
                             "", self.mood_pattern.sub("", accumulated_text, count=1)
                         ).lstrip()
+                        sentence_buffer = spoken_text
                     else:
                         lead_m = self.leading_tag_pattern.match(accumulated_text)
                         if lead_m:

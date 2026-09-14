@@ -239,3 +239,33 @@ def test_unrecognised_leading_tag_in_stream_is_stripped_and_does_not_stall():
     assert "WHISPERING" not in sentence_events[0]["text"]
     assert "The silence" in sentence_events[0]["text"]
 
+
+def test_stream_sentence_buffer_preserves_first_half_of_statement():
+    """
+    When a mood tag is detected at the start of a streamed chunk that also includes
+    the first part of a statement, that first part must not be lost from the sentence
+    buffer; the full statement must be yielded for speech synthesis.
+    """
+    import ai_brain
+    b = ai_brain.AIBrain()
+
+    async def fake(*a, **k):
+        for piece in [
+            "[DEADPAN] It stops rendering the particle board bookshelf until you open the door ",
+            "again with two plastic grocery bags.",
+        ]:
+            yield piece
+
+    b._delta_stream = lambda *a, **k: fake()
+    b.client = object()
+
+    async def run():
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+
+    events = asyncio.run(run())
+    sentence_events = [e for e in events if e["type"] == "sentence"]
+    assert len(sentence_events) == 1
+    assert sentence_events[0]["text"].startswith("It stops rendering the particle board bookshelf")
+    assert sentence_events[0]["text"].endswith("again with two plastic grocery bags.")
+
+

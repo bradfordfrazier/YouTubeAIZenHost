@@ -494,6 +494,8 @@ class Visualizer:
         self.ai_text_state = "steady"
         self.ai_text_y_drift = 0.0
         self.motto_pause_timer = 0.0
+        # Mood colour captured when the motto appears; None means "sample on next appearance".
+        self._motto_latched_color = None
 
         # Live chat pinned question card animation state (synchronized dissolution with Oracle comment)
         self.pinned_chat_alpha = 0.0
@@ -2027,10 +2029,22 @@ class Visualizer:
                 y_start = 12
             y_start += self.ai_text_y_drift
 
-            # Dynamic mood-matched color (for motto, use steady celestial color so it never flashes or shifts color on mood changes)
+            # Dynamic mood-matched colour. c_primary lerps continuously as moods blend, so using
+            # it directly for the motto would make the text shift colour while it sits on screen.
+            # Instead the colour is LATCHED the moment the motto appears and held for that whole
+            # display, then released when the motto leaves. Mood-coloured, never shifting.
             if self.ai_text_current == motto:
-                mood_color = (0, 200, 255)
+                if self.cfg.motto_uses_mood_color:
+                    if self._motto_latched_color is None:
+                        self._motto_latched_color = tuple(
+                            int(np.clip(c, 0, 255)) for c in self.c_primary
+                        )
+                    mood_color = self._motto_latched_color
+                else:
+                    mood_color = (0, 200, 255)
             else:
+                # Not showing the motto: release the latch so the next appearance samples afresh.
+                self._motto_latched_color = None
                 mood_color = tuple(int(np.clip(c, 0, 255)) for c in self.c_primary)
 
             alpha_int = int(np.clip(self.ai_text_alpha * 255, 0, 255))

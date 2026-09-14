@@ -524,6 +524,10 @@ class AppConfig:
     question_fade_out_sec: float = _get_float("QUESTION_FADE_OUT_SEC", 0.80)
     question_min_display_sec: float = _get_float("QUESTION_MIN_DISPLAY_SEC", _get_float("QUESTION_READ_MIN_SEC", 2.0))
     question_read_word_rate_sec: float = _get_float("QUESTION_READ_WORD_RATE_SEC", 0.25)
+    # Colour the motto with the current mood instead of a fixed celestial cyan. The colour is
+    # latched when the motto appears and held until it leaves, so it never shifts mid-display.
+    motto_uses_mood_color: bool = os.getenv("MOTTO_USES_MOOD_COLOR", "true").strip().lower() in ("true", "1", "yes")
+
     motto_pre_fade_in_sec: float = _get_float("MOTTO_PRE_FADE_IN_SEC", _get_float("MOTTO_DELAY_SEC", _get_float("MOTTO_PAUSE_SEC", 0.0)))
     motto_fade_in_sec: float = _get_float("MOTTO_FADE_IN_SEC", 1.4)
     motto_fade_out_sec: float = _get_float("MOTTO_FADE_OUT_SEC", 0.6)

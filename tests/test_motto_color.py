@@ -104,3 +104,42 @@ def test_feature_can_be_switched_off():
     finally:
         v.cfg.motto_uses_mood_color = True
         v.close()
+
+
+def test_fade_out_for_turn_releases_latch_when_dissolved():
+    """Real live turn flow: motto fades out for speech, mood changes, motto re-emerges in new color."""
+    v = _vis()
+    try:
+        motto = v.cfg.motto_phrase
+        v.ai_text_current = motto
+        v.ai_text_alpha = 1.0
+        _draw(v)
+        initial_latched = v._motto_latched_color
+        assert initial_latched is not None
+
+        # Turn begins: fade out for speech
+        v.fade_out_for_turn()
+        for _ in range(60):
+            _draw(v)
+        assert v.ai_text_alpha <= 0.005
+        assert v._motto_latched_color is None, "latch must be released once motto fades below threshold"
+
+        # AI speaks in savage mood
+        v.set_mood("savage")
+        for _ in range(120):
+            _draw(v)
+
+        # Speech finishes: motto returns via clear_subtitle
+        v.clear_subtitle()
+        # Fast-forward motto pause & fade-in
+        for _ in range(250):
+            _draw(v)
+
+        assert v.ai_text_current == motto
+        assert v.ai_text_alpha > 0.05
+        new_latched = v._motto_latched_color
+        assert new_latched is not None
+        assert new_latched != initial_latched, f"motto remained old colour {initial_latched}"
+        assert new_latched[0] > 200, f"expected savage reddish color, got {new_latched}"
+    finally:
+        v.close()

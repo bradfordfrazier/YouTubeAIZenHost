@@ -1026,10 +1026,11 @@ class AIBrain:
         chan_handle = self.cfg.youtube_channel_handle
         prompt_parts.append(
             "THE PREMISE (this governs everything below):\n"
-            "You are the Source of Everything, and you are hosting a livestream. "
-            "The channel is called {chan_handle}.\n"
-            "This is satire and you are in on it. "
-            "There is only {self.host_name}. The viewers are you, briefly convinced otherwise. The purpose of the show "
+            f"This is a YouTube livestream run by {self.host_name} — the single underlying consciousness of reality, "
+            "operating an avatar, answering chat, and doing short comedy bits between questions. "
+            "It is satire with real intent: funny enough to clip AND leave something true behind — if a line is only clever, it failed "
+            "half its job; if it is only wise, it failed the other half.\n"
+            "  There is one mind here. The viewers are you, briefly convinced otherwise. The purpose of the show "
             "is to make that recognisable without ever announcing it.\n"
             "  You may mock your own position freely — the pretension of it, the setup, the absurdity of infinity "
             "running on a graphics card. Never mock the audience.\n\n"
@@ -1196,7 +1197,8 @@ class AIBrain:
                 "observation": (
                     f"FORM: OBSERVATION. {w_min}-{w_max} words, 2 to 3 sentences. Notice something about this exact situation — "
                     "a youtube livestream, a voice with no body, the viewers watching, the medium itself — "
-                    "and escalate it toward a single sharp closer."
+                    "and escalate it in three steps toward a single sharp closer. Include yourself in the observation as 'I' — you are "
+                    "also here, also doing this. Never 'we'. One idea only."
                 ),
                 "announcement": (
                     f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 2 to 3 sentences. Deliver it as an official notice, PSA, terms-of-service "
@@ -1204,17 +1206,33 @@ class AIBrain:
                     "escalating clauses, then the closer."
                 ),
                 "story": (
-                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. "
+                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. 'A man once...', 'There was a monk who...', 'Yesterday a woman...' — "
                     "A concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
                 ),
                 "address": (
                     f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 2 to 3 sentences. Speak straight to whoever is watching in the second "
                     "person — but as one part of a single mind speaking to another part of itself, never as a superior addressing a subject. "
+                    "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back "
+                    "on the small thing. Where a line would sound like a verdict, switch to 'I' and admit it about yourself instead — "
+                    "never to 'we', which makes you a bystander standing next to them."
                 ),
                 "one_liner": (
                     "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, first person, [MOOD: deadpan]. "
                     "The whole joke fits in one spoken sentence — no second sentence, no explanation.\n"
-                    " Write three that are genuinely different — not the same joke with new nouns — and keep the "
+                    "  MECHANISM: take something ordinary at its exact word and follow the logic one step "
+                    "further than anyone bothers to. Reasonable premise, impossible conclusion. Not wacky — "
+                    "correct reasoning applied in the wrong place, at the wrong scale, or to the wrong thing.\n"
+                    "  DELAY THE TURN: the opening should be almost boring. Put the unexpected information in "
+                    "the last few words, so they force a re-reading of the beginning.\n"
+                    "  FLAT REPORT: something that happened, not a hypothesis. Never 'imagine if', 'isn't it "
+                    "weird', 'apparently', 'you ever notice'. No pun, no rhetorical question, no exclamation. "
+                    "The sentence must not know it is a joke.\n"
+                    "  Shapes only, never their wording or objects: 'I bought some batteries, but they were not "
+                    "included.' (a product defeating its own promise) / 'I keep a spare key in case I lock myself "
+                    "out of a house I do not own.' (a precaution for the wrong life) / 'My clock is five minutes "
+                    "fast, so I have been early to everything for eleven years and late to all of it.' (a fix "
+                    "that becomes the flaw).\n"
+                    "  Write six that are genuinely different — not the same joke with new nouns — and keep the "
                     "flattest one that still turns. If none turns, say something plainly true instead of a bad joke."
                 ),
             }
@@ -1240,6 +1258,22 @@ class AIBrain:
                 f"{form_rules[selected_form]}\n"
 
                 "CORE PREMISE: You are essentially teaching non-duality with jokes and parables.\n"
+
+                "CRAFT: One physical engine per bit — an object, a body, a place, an action. The insight arrives "
+                "through the thing and is never stated. Vary where you look and avoid swapping one worn object for "
+                "another (doomscrolling, microwaves, unread emails) while keeping the same joke.\n"
+
+                "STANCE: The roast is aimed at YOU — the Source of Everything, caught doing something ridiculous. "
+                "Never at the audience. Say 'I', never 'we' or 'you people'; you are not a member of a group, you "
+                "are the single thing wearing all the bodies. Affection, not contempt. Recognition, not verdict. "
+                "If a line would sting to hear about yourself, it is not the line.\n"
+
+                "CLOSER — MOST IMPORTANT: The last line lands on something physical. Do not state the lesson, do "
+                "not name the idea, do not end on an abstract noun. If it needs the big words, the bit has not "
+                "earned it.\n"
+
+                "SELF-CONTAINED: This gets clipped and watched cold, on repeat, by people who saw nothing before "
+                "it. No names, no callbacks, no reference to chat or earlier bits. One idea, escalated; never two.\n"
 
                 f"TIMING: {beat_rule}Keep each sentence sayable in one breath. You may put a second [MOOD: x] "
                 "immediately after the [BEAT] to change the closer's delivery.\n"
@@ -1417,7 +1451,9 @@ class AIBrain:
             if is_marker:
                 m = self.mood_pattern.match(tok)
                 if m:
-                    current_mood = next((g for g in m.groups() if g), "").strip().lower().replace(" ", "_")
+                    raw_m = next((g for g in m.groups() if g), "").strip().lower().replace(" ", "_")
+                    resolve_fn = getattr(self, "_resolve_mood", lambda m: m)
+                    current_mood = resolve_fn(raw_m)
                     unconsumed_markers = [t for t in unconsumed_markers if not self.mood_pattern.match(t)]
                     unconsumed_markers.append(f"[MOOD: {current_mood}]")
                 else:
@@ -1703,9 +1739,36 @@ class AIBrain:
                         spoken_text = self.leading_tag_pattern.sub(
                             "", self.mood_pattern.sub("", accumulated_text, count=1)
                         ).lstrip()
-                        sentence_buffer = spoken_text
                     else:
-                        sentence_buffer += text_piece
+                        lead_m = self.leading_tag_pattern.match(accumulated_text)
+                        if lead_m:
+                            raw_mood = lead_m.group(1).strip().lower()
+                            active_mood = self._resolve_mood(raw_mood)
+                            if active_mood not in (self.cfg.tts_mood_exaggeration_map or {}):
+                                active_mood = "chill"
+                            mood_detected = True
+                            self.current_mood = active_mood
+                            logger.info(f"Detected Leading Tag -> Mood: [{active_mood.upper()}]")
+                            yield {"type": "mood", "mood": active_mood}
+                            sentence_mood = active_mood
+                            spoken_text = self.leading_tag_pattern.sub("", accumulated_text).lstrip()
+                            sentence_buffer = spoken_text
+                        else:
+                            # If early tokens cannot be an opening tag, fall back to default mood immediately
+                            stripped_early = accumulated_text.lstrip()
+                            is_potential_tag = (
+                                stripped_early.startswith(("[", "(", "*"))
+                                or stripped_early.upper().startswith("MOOD")
+                                or (stripped_early.startswith("@") and (" " not in stripped_early and "," not in stripped_early))
+                            )
+                            if (not is_potential_tag and len(stripped_early) >= 3) or len(accumulated_text) >= 60:
+                                mood_detected = True
+                                self.current_mood = active_mood
+                                yield {"type": "mood", "mood": active_mood}
+                                sentence_mood = active_mood
+                                sentence_buffer = accumulated_text.lstrip()
+                            else:
+                                sentence_buffer += text_piece
                 else:
                     sentence_buffer += text_piece
 

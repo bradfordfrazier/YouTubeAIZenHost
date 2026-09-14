@@ -181,3 +181,61 @@ def test_bit_prompt_offers_the_full_mood_vocabulary():
     assert "tts_mood_exaggeration_map" in src
     for mood in ("savage", "chill", "curious"):
         assert mood in config.tts_mood_exaggeration_map
+
+
+def test_direct_speech_without_mood_tag_streams_promptly():
+    """
+    If the model emits direct speech with no opening mood tag, sentence pipelining must not
+    stall waiting for a tag that will never arrive. A mood event must be emitted and completed
+    sentences yielded while streaming.
+    """
+    import ai_brain
+    b = ai_brain.AIBrain()
+
+    async def fake(*a, **k):
+        for piece in ["The clock on the wall ", "is running backwards today. ", "Nobody noticed yet."]:
+            yield piece
+
+    b._delta_stream = lambda *a, **k: fake()
+    b.client = object()
+
+    async def run():
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+
+    events = asyncio.run(run())
+    mood_events = [e for e in events if e["type"] == "mood"]
+    sentence_events = [e for e in events if e["type"] == "sentence"]
+
+    assert len(mood_events) == 1
+    assert mood_events[0]["mood"] in b.cfg.tts_mood_exaggeration_map
+    assert len(sentence_events) >= 1
+    assert "running backwards" in sentence_events[0]["text"]
+
+
+def test_unrecognised_leading_tag_in_stream_is_stripped_and_does_not_stall():
+    """
+    An invented tag like '[WHISPERING]' at the start of a response must be stripped from the
+    spoken text, map to a safe default mood, and not block pipelined sentences.
+    """
+    import ai_brain
+    b = ai_brain.AIBrain()
+
+    async def fake(*a, **k):
+        for piece in ["[WHISPERING] The silence ", "is louder than the music. "]:
+            yield piece
+
+    b._delta_stream = lambda *a, **k: fake()
+    b.client = object()
+
+    async def run():
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+
+    events = asyncio.run(run())
+    mood_events = [e for e in events if e["type"] == "mood"]
+    sentence_events = [e for e in events if e["type"] == "sentence"]
+
+    assert len(mood_events) == 1
+    assert len(sentence_events) >= 1
+    assert "WHISPERING" not in sentence_events[0]["text"]
+    assert "The silence" in sentence_events[0]["text"]
+

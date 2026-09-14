@@ -854,7 +854,9 @@ class VisualizerProxy:
 
     def set_mood(self, mood: str):
         """Sets visualizer color and particle mood."""
-        self.current_mood = (mood or "neutral").strip().lower()
+        m_lower = (mood or "neutral").strip().lower()
+        _aliases = {k.lower(): v.lower() for k, v in (getattr(self.cfg, "tts_mood_aliases", None) or {}).items()}
+        self.current_mood = _aliases.get(m_lower, m_lower)
         self._send_cmd("SET_MOOD", self.current_mood)
 
     def set_subtitle(self, text: str):

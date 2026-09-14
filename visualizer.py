@@ -637,6 +637,9 @@ class Visualizer:
     def set_mood(self, mood: str):
         """Update active mood."""
         m_lower = (mood or "neutral").strip().lower()
+        _aliases = {k.lower(): v.lower() for k, v in (getattr(self.cfg, "tts_mood_aliases", None) or {}).items()}
+        if m_lower not in ColorPalette.PALETTES:
+            m_lower = _aliases.get(m_lower, "neutral")
         if m_lower not in ColorPalette.PALETTES:
             m_lower = "neutral"
         if m_lower != self.target_mood:
@@ -1996,6 +1999,11 @@ class Visualizer:
         # Maintain typewriter_index for compatibility with callers
         if self.ai_text_current:
             self.typewriter_index = len(self.ai_text_current)
+
+        # Release motto color latch when motto is hidden or not showing, so the next
+        # appearance re-samples c_primary in the mood that just completed.
+        if self.ai_text_current != motto or self.ai_text_alpha <= 0.005:
+            self._motto_latched_color = None
 
         # Render Ethereal Floating Text Centered Horizontally & Vertically
         self.surf_ai_text.fill((0, 0, 0, 0))

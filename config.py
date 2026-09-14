@@ -112,6 +112,11 @@ class AppConfig:
     # --- LLM provider -------------------------------------------------------------------
     # "gemini" (default) or "anthropic". An invalid/missing key for the chosen provider falls
     # back to Gemini rather than dropping the show into simulated mode.
+    # Transient upstream failures (500/503/timeouts) are retried with exponential backoff before
+    # the turn falls back to a scripted simulation line. 0 disables retrying.
+    transient_retry_attempts: int = _get_int("TRANSIENT_RETRY_ATTEMPTS", 2)
+    transient_retry_base_sec: float = _get_float("TRANSIENT_RETRY_BASE_SEC", 0.6)
+
     llm_provider: str = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")

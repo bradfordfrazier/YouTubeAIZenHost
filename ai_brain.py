@@ -236,6 +236,7 @@ class AIBrain:
         self.circuit_breaker_reset_time: float = 0.0
         self.max_consecutive_errors: int = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "3"))
         self.circuit_breaker_cooldown_sec: float = float(os.getenv("CIRCUIT_BREAKER_COOLDOWN_SEC", "60.0"))
+        self._transient_retries: int = 0
 
         # Regex for mood tags like [MOOD: hyped] or [MOOD: energetic]
         # Tolerant on purpose. Models emit this tag in several shapes — with or without the word
@@ -1512,6 +1513,24 @@ class AIBrain:
                     yield piece
 
     @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """
+        True for upstream failures that are worth retrying: server-side 5xx, timeouts, and dropped
+        connections. Deliberately excludes 4xx — a bad request or an exhausted quota will fail
+        identically on a retry and the delay would just add dead air.
+        """
+        name = exc.__class__.__name__.lower()
+        msg = str(exc).lower()
+        if any(k in name for k in ("servererror", "timeout", "connection", "unavailable")):
+            return True
+        if any(code in msg for code in ("500", "502", "503", "504")):
+            return True
+        return any(k in msg for k in (
+            "internal error", "deadline exceeded", "unavailable", "overloaded",
+            "connection reset", "temporarily", "try again",
+        ))
+
+    @staticmethod
     def _is_thinking_shape_error(exc: Exception) -> bool:
         """True when the API rejected how reasoning was requested, rather than the request itself."""
         msg = str(exc).lower()
@@ -1763,6 +1782,33 @@ class AIBrain:
 
         except Exception as e:
             provider_label = "Anthropic" if self.provider == "anthropic" else "Gemini"
+
+            # A transient upstream failure (500/502/503/504, timeout, connection reset) costs the
+            # whole turn: the viewer hears a scripted simulation line instead of a real answer.
+            # Retry briefly before falling back — these almost always succeed on the second try.
+            # Only retry when nothing has been emitted yet, so a mid-stream failure cannot produce
+            # a duplicated half-answer.
+            if self._is_transient_error(e) and not accumulated_text.strip():
+                attempts = int(getattr(self, "_transient_retries", 0)) + 1
+                if attempts <= int(self.cfg.transient_retry_attempts):
+                    self._transient_retries = attempts
+                    delay = float(self.cfg.transient_retry_base_sec) * (2 ** (attempts - 1))
+                    logger.warning(
+                        f"[{provider_label}] Transient error ({e.__class__.__name__}); "
+                        f"retry {attempts}/{self.cfg.transient_retry_attempts} in {delay:.1f}s "
+                        "rather than dropping to a scripted line."
+                    )
+                    await asyncio.sleep(delay)
+                    try:
+                        async for ev in self.generate_response_stream(
+                            prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken
+                        ):
+                            yield ev
+                        self._transient_retries = 0
+                        self.consecutive_gemini_errors = 0
+                        return
+                    finally:
+                        self._transient_retries = 0
 
             # If the server rejects the reasoning-control shape, step down instead of burning the
             # circuit breaker on a config mismatch. API shapes change; the show should not stop.

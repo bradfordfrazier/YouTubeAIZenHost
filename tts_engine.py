@@ -704,8 +704,6 @@ class TTSEngine:
                 )
             else:
                 inter_gap_sec = float(self.cfg.inter_sentence_gap_sec)
-            if beat_before:
-                logger.info(f"[TTS BEAT] inserting {inter_gap_sec*1000:.0f} ms comedic pause before chunk #{self._utterance_chunk_count + 1}")
             if inter_gap_sec > 0:
                 gap_samples = int(self.sample_rate * inter_gap_sec)
                 gap_silence = np.zeros((gap_samples, 2), dtype=np.float32)

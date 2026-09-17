@@ -195,21 +195,28 @@ def test_cast_roster_has_range_and_depth():
     from cast_engine import CastEngine
 
     ce = CastEngine()
-    assert len(ce.personas) >= 18, f"only {len(ce.personas)} personas"
+    assert len(ce.personas) >= 24, f"only {len(ce.personas)} personas"
+    # At a ~162s cast interval, 234 questions exhausted the whole pool in 10.6 hours, so a
+    # 24-hour stream replayed everything. The pool must outlast a full-day session.
     total = sum(len(p.questions) for p in ce.personas.values())
-    assert total >= 200, f"only {total} cast questions"
+    assert total >= 400, f"only {total} cast questions — a 24h stream will cycle them"
+
+    # The three optimizer archetypes were retired for producing weak bits; they must not return.
+    retired = {"SpeedrunnerKyle", "GymSageBrody", "GrindsetGreg"}
+    assert not (retired & set(ce.personas)), f"retired personas are back: {retired & set(ce.personas)}"
+
+    # Tonal range: a roster that is all deadpan makes every cast question sound the same.
+    tones = {p.tone for p in ce.personas.values()}
+    assert len(tones) >= 5, f"only {len(tones)} distinct tones: {tones}"
     assert min(len(p.questions) for p in ce.personas.values()) >= 8
 
     # No question may repeat inside a long session
     seen = {}
-    for _ in range(120):
+    for _ in range(250):
         _, q = ce.next_cast_question()
         seen[q] = seen.get(q, 0) + 1
-    assert not [q for q, c in seen.items() if c > 1], "cast question repeated within 120 picks"
+    assert not [q for q, c in seen.items() if c > 1], "cast question repeated within 250 picks"
 
     # Card-readable: the pinned question must fit on screen
     long_qs = [q for p in ce.personas.values() for q in p.questions if len(q.split()) > 24]
     assert not long_qs, f"questions too long for the pinned card: {long_qs[:2]}"
-
-
-

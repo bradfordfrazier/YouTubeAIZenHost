@@ -103,7 +103,7 @@ def test_anthropic_stream_drives_the_shared_pipeline():
 
     async def run():
         return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]",
-                                                              bypass_cache=True)]
+                                                              bypass_cache=True, _skip_gate=True)]
     events = asyncio.run(run())
     kinds = [e["type"] for e in events]
     assert "mood" in kinds and "sentence" in kinds and "complete" in kinds
@@ -125,7 +125,7 @@ def test_thinking_budget_and_kwarg_filtering():
     fake = _attach_fake(b, ["[MOOD: deadpan] A line that is long enough. "])
 
     async def run():
-        async for _ in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True):
+        async for _ in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True, _skip_gate=True):
             pass
     asyncio.run(run())
 
@@ -180,7 +180,8 @@ class _RejectingMessages(_FakeMessages):
 def _run(brain):
     async def go():
         return [ev async for ev in brain.generate_response_stream("[SPONTANEOUS_REFLECTION]",
-                                                                  bypass_cache=True)]
+                                                                  bypass_cache=True,
+                                                                  _skip_gate=True)]
     return asyncio.run(go())
 
 

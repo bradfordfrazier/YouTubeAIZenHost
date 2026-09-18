@@ -21,6 +21,13 @@ USAGE
   # A/B a prompt edit: stash the current ai_brain.py, edit it, and pass --b-file
   python bit_lab.py --n 24 --b-file ai_brain_variant.py
 
+  # A/B the bit gate (writer -> lint -> cold-read editor) against single-pass generation
+  python bit_lab.py --n 24 --a '{"bit_gate_enabled": false}' --b "{}"
+  # ...the editor alone (lint stays on in both arms)
+  python bit_lab.py --n 24 --a '{"bit_editor_enabled": false}' --b "{}"
+  # ...handing the whole theme card over (legacy) vs anchor + direction
+  python bit_lab.py --n 24 --a '{"bit_theme_mode": "full"}' --b "{}"
+
   # score a finished blind file back into a verdict
   python bit_lab.py --score bitlab/20260908-141500/blind.md
 
@@ -72,12 +79,15 @@ async def _generate_batch(brain, n: int, variant: str, overrides: Dict[str, Any]
     """Generates n bits, feeding each back into dialogue_history so anti-repetition behaves live."""
     from config import config
     prev = _apply_overrides(config, overrides)
-    prev_brain = _apply_overrides(brain.cfg, overrides)
+    # brain.cfg normally IS `config`. Applying the overrides to it a second time recorded the
+    # already-overridden values as "previous", and restoring those last left arm A's overrides in
+    # force for arm B. Any A/B where --a set a key that --b did not was comparing A with A.
+    prev_brain = _apply_overrides(brain.cfg, overrides) if brain.cfg is not config else {}
     out: List[Dict] = []
     try:
         for i in range(n):
             t0 = time.perf_counter()
-            text, mood = "", ""
+            text, mood, vetted = "", "", False
             try:
                 async for ev in brain.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True):
                     if ev.get("type") == "mood":
@@ -85,10 +95,14 @@ async def _generate_batch(brain, n: int, variant: str, overrides: Dict[str, Any]
                     elif ev.get("type") == "complete":
                         text = (ev.get("full_text") or "").strip()
                         mood = ev.get("mood", mood)
+                        vetted = bool(ev.get("is_vetted"))
             except Exception as e:
                 print(f"  ! generation {i+1} failed: {e}")
                 continue
             if not text:
+                # With the bit gate on, "nothing" is a legitimate result: every candidate was
+                # linted out or the editor passed on all of them. It costs the arm a sample.
+                print(f"  [{variant}] {i+1}/{n}  (no bit — see [Bit Gate] lines in the log)")
                 continue
             dt = time.perf_counter() - t0
             rec = {
@@ -99,14 +113,15 @@ async def _generate_batch(brain, n: int, variant: str, overrides: Dict[str, Any]
                 "theme": getattr(brain, "last_spontaneous_theme", ""),
                 "words": len(text.split()),
                 "seconds": round(dt, 2),
+                "vetted": vetted,
             }
             out.append(rec)
             # Feed it back so the anti-repetition window sees a realistic history.
             brain.dialogue_history.append({"text": text, "mood": mood, "timestamp": time.time()})
             print(f"  [{variant}] {i+1}/{n}  {rec['form']:<13} {rec['words']:>3}w  {dt:4.1f}s  {text[:70]}")
     finally:
+        _apply_overrides(brain.cfg, prev_brain)   # reverse order of application
         _apply_overrides(config, prev)
-        _apply_overrides(brain.cfg, prev_brain)
     return out
 
 

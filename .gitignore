@@ -13,6 +13,8 @@ __pycache__/
 test_output/
 chat_cache.json
 data/*_cache.json
+data/*.jsonl
+!data/favorite_bits.jsonl
 youtube_cookies.txt
 *.tmp
 logs/

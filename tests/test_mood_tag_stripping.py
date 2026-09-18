@@ -87,7 +87,7 @@ def test_stripping_the_tag_does_not_join_words():
 
     async def run():
         return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]",
-                                                              bypass_cache=True)]
+                                                              bypass_cache=True, _skip_gate=True)]
     events = asyncio.run(run())
     spoken = [e["full_text"] for e in events if e["type"] == "complete"][0]
     assert "keyfor" not in spoken, spoken
@@ -200,7 +200,7 @@ def test_direct_speech_without_mood_tag_streams_promptly():
     b.client = object()
 
     async def run():
-        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True, _skip_gate=True)]
 
     events = asyncio.run(run())
     mood_events = [e for e in events if e["type"] == "mood"]
@@ -228,7 +228,7 @@ def test_unrecognised_leading_tag_in_stream_is_stripped_and_does_not_stall():
     b.client = object()
 
     async def run():
-        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True, _skip_gate=True)]
 
     events = asyncio.run(run())
     mood_events = [e for e in events if e["type"] == "mood"]
@@ -260,7 +260,7 @@ def test_stream_sentence_buffer_preserves_first_half_of_statement():
     b.client = object()
 
     async def run():
-        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True)]
+        return [ev async for ev in b.generate_response_stream("[SPONTANEOUS_REFLECTION]", bypass_cache=True, _skip_gate=True)]
 
     events = asyncio.run(run())
     sentence_events = [e for e in events if e["type"] == "sentence"]

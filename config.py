@@ -413,6 +413,59 @@ class AppConfig:
     # the host learns what THIS audience laughs at rather than what the prompt was told to like.
     reaction_window_sec: float = _get_float("REACTION_WINDOW_SEC", 25.0)
     reaction_promote_score: int = _get_int("REACTION_PROMOTE_SCORE", 2)
+
+    # ------------------------------------------------------------------------------------------
+    # Bit gate (bit_gate.py): offline bits are written as several candidates, linted against the
+    # rules in PROJECT_MASTER §2/§6, then read cold by a separate editor call that may pick none.
+    # Costs roughly 2x Gemini calls per cached bit and zero stream latency. Every key here can be
+    # overridden from bit_lab.py, e.g.  --a '{"bit_gate_enabled": false}' --b "{}"
+    # ------------------------------------------------------------------------------------------
+    bit_gate_enabled: bool = os.getenv("BIT_GATE_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+    # The cold-read editor. With this off the gate still lints, and airs the first clean candidate.
+    bit_editor_enabled: bool = os.getenv("BIT_EDITOR_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+    # Candidates the writer produces per call. More is not better past ~5: they start to be the
+    # same joke with different nouns, and the editor's attention thins.
+    bit_candidates: int = _get_int("BIT_CANDIDATES", 4)
+    # Writer+editor rounds before the slot is given up (each round draws a fresh theme and form).
+    bit_gate_max_attempts: int = _get_int("BIT_GATE_MAX_ATTEMPTS", 2)
+    # Editor's bar on its 1-5 laugh scale (3 = "an actual exhale through the nose").
+    bit_editor_min_laugh: int = _get_int("BIT_EDITOR_MIN_LAUGH", 3)
+    bit_editor_temperature: float = _get_float("BIT_EDITOR_TEMPERATURE", 0.2)
+    # After this many consecutive empty-handed refills the gate airs its least-bad clean candidate
+    # instead, so a bad night for the model can never starve the cache. 0 = never fail open.
+    bit_gate_fail_open_after: int = _get_int("BIT_GATE_FAIL_OPEN_AFTER", 3)
+    # "anchor_hint": the theme card is split — the object is mandatory, the angle is a compass the
+    #   bit may not paraphrase. "full": legacy, the whole card is handed over as THEME.
+    bit_theme_mode: str = os.getenv("BIT_THEME_MODE", "anchor_hint").strip().lower()
+    # One jsonl row per round: theme, form, every candidate, why it died, what the editor scored.
+    # This is the raw material for open item 6 (negative theme deck). Empty string disables it.
+    bit_gate_log_path: str = os.getenv("BIT_GATE_LOG_PATH", "data/bit_gate_log.jsonl")
+    # Lint thresholds.
+    bit_gate_duplicate_similarity: float = _get_float("BIT_GATE_DUPLICATE_SIMILARITY", 0.62)
+    bit_gate_theme_overlap_max: float = _get_float("BIT_GATE_THEME_OVERLAP_MAX", 0.6)
+    bit_gate_opener_window: int = _get_int("BIT_GATE_OPENER_WINDOW", 8)
+    # "Closer must stay concrete": none of these may appear in the last N words. The list is the
+    # operator's call and is short on purpose — it names the genre's big words, nothing else.
+    bit_gate_abstract_tail_words: int = _get_int("BIT_GATE_ABSTRACT_TAIL_WORDS", 6)
+    bit_gate_abstract_nouns: List[str] = field(
+        default_factory=lambda: [
+            w.strip().lower() for w in os.getenv(
+                "BIT_GATE_ABSTRACT_NOUNS",
+                "consciousness,awareness,existence,infinity,eternity,oneness,enlightenment,illusion,"
+                "separation,impermanence,transcendence,duality,nonduality,emptiness,wholeness,"
+                "reality,truth,meaning,presence,nothingness",
+            ).split(",") if w.strip()
+        ]
+    )
+    # Mirrors the BANNED line of the bit prompt; enforced instead of merely requested.
+    bit_gate_banned_phrases: List[str] = field(
+        default_factory=lambda: [
+            w.strip().lower() for w in os.getenv(
+                "BIT_GATE_BANNED_PHRASES",
+                "delve,tapestry,cosmic dance,in the grand scheme,let that sink in,think about that",
+            ).split(",") if w.strip()
+        ]
+    )
     max_concurrent_synth: int = _get_int("MAX_CONCURRENT_SYNTH", 1)
     tts_sec_per_char: float = _get_float("TTS_SEC_PER_CHAR", 0.065)
     cache_refill_cooldown_sec: float = _get_float("CACHE_REFILL_COOLDOWN_SEC", 8.0)

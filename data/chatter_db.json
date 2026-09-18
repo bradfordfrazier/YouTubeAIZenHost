@@ -19,26 +19,6 @@
     ],
     "last_session_id": ""
   },
-  "speedrunnerkyle": {
-    "handle": "SpeedrunnerKyle",
-    "display_name": "SpeedrunnerKyle",
-    "first_seen_iso": "2026-08-30T08:50:23.541577",
-    "last_seen_iso": "2026-08-30T08:50:23.541577",
-    "visit_count": 1,
-    "message_count": 1,
-    "is_member": false,
-    "is_cast": true,
-    "topics_discussed": [
-      "speedrunning",
-      "samsara",
-      "Any% route",
-      "frame-perfect peace"
-    ],
-    "notes": [
-      "Archetype: Enlightenment Speedrunner. Gamer attempting to glitch past dualistic suffering."
-    ],
-    "last_session_id": ""
-  },
   "astralbrenda": {
     "handle": "AstralBrenda",
     "display_name": "AstralBrenda",
@@ -120,21 +100,6 @@
     ],
     "last_session_id": ""
   },
-  "grindsetgreg": {
-    "handle": "GrindsetGreg",
-    "display_name": "GrindsetGreg",
-    "first_seen_iso": "2026-09-07T09:15:01.748580",
-    "last_seen_iso": "2026-09-07T09:15:01.748580",
-    "visit_count": 1,
-    "message_count": 1,
-    "is_member": false,
-    "is_cast": true,
-    "topics_discussed": [],
-    "notes": [
-      "Archetype: Monetized Mindfulness Bro. LinkedIn thought-leader trying to turn the dissolution of the self into a personal brand. Running bit: every insight becomes a course; every course has a waitlist."
-    ],
-    "last_session_id": ""
-  },
   "debraw1957": {
     "handle": "DebraW1957",
     "display_name": "DebraW1957",
@@ -147,21 +112,6 @@
     "topics_discussed": [],
     "notes": [
       "Archetype: Wrong-Website Grandma. Thought this was the church group's page. Stayed. Types in caps. Running bit: she is accidentally the most profound person here and thinks she's asking about her phone."
-    ],
-    "last_session_id": ""
-  },
-  "gymsagebrody": {
-    "handle": "GymSageBrody",
-    "display_name": "GymSageBrody",
-    "first_seen_iso": "2026-09-07T09:15:01.748580",
-    "last_seen_iso": "2026-09-07T09:15:01.748580",
-    "visit_count": 1,
-    "message_count": 1,
-    "is_member": false,
-    "is_cast": true,
-    "topics_discussed": [],
-    "notes": [
-      "Archetype: Protein-Fueled Mystic. Discovered non-duality between sets. Running bit: he's not sure if he's lifting the weight or the weight is lifting him, and he's asked the weight."
     ],
     "last_session_id": ""
   },
@@ -297,6 +247,141 @@
     "topics_discussed": [],
     "notes": [
       "Archetype: Every Other Weekend. Assembling furniture in an apartment that echoes. Running bit: asks enormous questions while describing extremely small domestic tasks."
+    ],
+    "last_session_id": ""
+  },
+  "craneoplen": {
+    "handle": "CraneOpLen",
+    "display_name": "CraneOpLen",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Container Crane Operator. Ninety feet up in a glass box, moving other people's things from one place to another. Running bit: measures everything in tons and has never opened a single box."
+    ],
+    "last_session_id": ""
+  },
+  "morticianbeatrice": {
+    "handle": "MorticianBeatrice",
+    "display_name": "MorticianBeatrice",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Third-Generation Funeral Director. Grew up in the apartment above the funeral home. Running bit: entirely unbothered by death and completely bewildered by the living."
+    ],
+    "last_session_id": ""
+  },
+  "beekeeperaugust": {
+    "handle": "BeekeeperAugust",
+    "display_name": "BeekeeperAugust",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Third-Year Beekeeper. Forty thousand animals that behave as one and do not need him. Running bit: cannot decide whether he owns the hive or works for it."
+    ],
+    "last_session_id": ""
+  },
+  "graveyarddjeddie": {
+    "handle": "GraveyardDJEddie",
+    "display_name": "GraveyardDJEddie",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Overnight AM Radio Host. Talks into a microphone from 1 to 5 a.m. for an audience he cannot see or count. Running bit: suspects he is doing the same job as I AM, for less money."
+    ],
+    "last_session_id": ""
+  },
+  "subteacherfrank": {
+    "handle": "SubTeacherFrank",
+    "display_name": "SubTeacherFrank",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Permanent Substitute Teacher. A different name on a different door every morning. Running bit: nobody learns his name and he has stopped offering it."
+    ],
+    "last_session_id": ""
+  },
+  "locksmithvera": {
+    "handle": "LocksmithVera",
+    "display_name": "LocksmithVera",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: 24-Hour Locksmith. Opens other people's doors at three in the morning. Running bit: has never once been let in — she lets herself in, then leaves."
+    ],
+    "last_session_id": ""
+  },
+  "nightopmaya": {
+    "handle": "NightOpMaya",
+    "display_name": "NightOpMaya",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Radio Telescope Night Operator. Runs the overnight observing block at a radio array. Running bit: keeps finding that the measured universe is stranger than anything in the chat, and nobody believes her."
+    ],
+    "last_session_id": ""
+  },
+  "skepticholloway": {
+    "handle": "SkepticHolloway",
+    "display_name": "SkepticHolloway",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Retired Philosophy Lecturer. Thirty years teaching undergraduates to spot a bad argument, now aimed at a livestream. Running bit: keeps watching, and cannot account for why."
+    ],
+    "last_session_id": ""
+  },
+  "doularosalind": {
+    "handle": "DoulaRosalind",
+    "display_name": "DoulaRosalind",
+    "first_seen_iso": "2026-09-18T10:58:38.842570",
+    "last_seen_iso": "2026-09-18T10:58:38.842570",
+    "visit_count": 1,
+    "message_count": 1,
+    "is_member": false,
+    "is_cast": true,
+    "topics_discussed": [],
+    "notes": [
+      "Archetype: Birth Doula, Twenty Years. Has been in the room for over six hundred first breaths. Running bit: the only person in chat who is consistently, unembarrassedly delighted, and it disarms everyone."
     ],
     "last_session_id": ""
   }

@@ -1,6 +1,7 @@
 # I AM — AI Livestream Host: Project Master Document
 
-**Verified against the running code on 8 September 2026.** Every fact below was checked against
+**Verified against the running code on 8 September 2026; §4, §6, §8–§11 revised 18 September 2026
+(bit gate, short-closer fix, bit-prompt isolation — not yet A/B'd on the operator's machine, see §11).** Every fact below was checked against
 the actual modules, not remembered. This supersedes everything in `docs/archive/`.
 
 **Audience:** Antigravity, any other coding agent, and future-you. Read this before changing code.
@@ -77,6 +78,7 @@ audio design choice in §5 follows from that.
 | `logging_setup.py` | Single logging configuration for both processes |
 | `voice_manager.py` | **On GAMER.** Reference-clip resolution, PCM repair, sentence trimming |
 | `bit_lab.py` | Offline A/B harness for bit quality (see §11) |
+| `bit_gate.py` | Pure functions: candidate parsing, the bit linter, the cold-read editor prompt (see §6) |
 | `config.py` | Every setting, with defaults |
 
 ---
@@ -142,12 +144,62 @@ shape produced textbook examples; A/B-tested and clearly worse).
   reasoning costs no stream latency.
 - Over-length bits are rejected before caching (`[Bit Rejected]`).
 
+### The bit gate (`bit_gate.py`, offline refills only)
+Single-pass generation made the writer its own editor inside one thinking pass. Cache refills
+(`bypass_cache=True`) now run **writer → lint → editor**:
+1. **Writer** returns `BIT_CANDIDATES` (4) numbered candidates for one theme card and form.
+2. **Lint** rejects, mechanically, what §2 and the rules above already forbid: `we_voice`,
+   `handle_or_callback`, `ends_on_question`, `abstract_landing` (an abstract noun in the last
+   `BIT_GATE_ABSTRACT_TAIL_WORDS` words), `banned_phrase`, `theme_parrot` (a rewording of the card),
+   `near_duplicate` (vs. recent lines and favourites), `repeated_opener`, `too_long`/`too_short`,
+   `one_liner_multi_sentence`. Logged as `✂️ [Bit Rejected] reason -> 'text'`.
+3. **Editor** — a separate low-temperature call with its own system line. It never sees the theme or
+   form; it reads the survivors cold, scores laugh/true 1–5, and may pick **0**. Logged as `🎬 [Bit Gate]`.
+4. An empty round retries once with a fresh card and the verdict as an `EDITOR'S NOTE`. If that is
+   empty too, **no `complete` event is emitted and nothing is cached**. After
+   `BIT_GATE_FAIL_OPEN_AFTER` (3) consecutive empty refills the editor's least-bad *lint-clean*
+   candidate airs, so the cache cannot starve. A rule-breaking bit never fails open.
+- Live spontaneous turns (cache empty) and the internal error retries (`_skip_gate=True`) never enter
+  the gate: there a second call would be latency on air. Provider errors inside the gate fall back
+  to the single-pass path, which owns retry and the circuit breaker.
+- Cost: ~2× model calls per cached bit, zero stream latency. `is_generating` is held as before, for
+  roughly twice as long per refill.
+- Every round is appended to `data/bit_gate_log.jsonl` (theme, form, every candidate, lint reasons,
+  editor scores, what aired). This is the dataset open item 6 needs.
+- The word lists (`BIT_GATE_ABSTRACT_NOUNS`, `BIT_GATE_BANNED_PHRASES`) are the operator's call and
+  deliberately short. A false positive costs one candidate out of four, not a bit.
+
+### What the bit writer is and is not shown
+- **Not shown:** live chat, addressing rules, the session continuity brief, the Q&A thread. A bit is
+  watched cold; none of that can help it and all of it can leak.
+- **Shown:** the last `ANTI_REPETITION_WINDOW` *distinct* spoken lines with `@handles` stripped, and up
+  to `FAVORITES_FEW_SHOT` favourites **that are bits** (same form once three exist). Chat and cast
+  replies in `favorite_bits.jsonl` are never bit exemplars.
+- **Theme card** (`BIT_THEME_MODE=anchor_hint`): the object before the dash is mandatory (`ANCHOR`);
+  the text after it is a `DIRECTION` the bit may not reword. `full` restores the legacy `THEME:` line.
+- Form rules refer to the anchor (the observation form used to say "notice this livestream" while
+  the theme said "a blacksmith"). At `BIT_WORDS_MAX ≤ 35` the arc is "set up, turn once, land", not
+  "three steps".
+- Static one-liner examples disappear once three one-liner favourites exist. No example in the
+  prompt is a working comedian's line (one previously was: Steven Wright's batteries joke).
+- `ONE_LINER_RATIO` is a draw probability, not a share: with no immediate repeats, 0.60 yields
+  ≈ 37.5 % one-liners. Left alone; the operator's A/Bs were run under this behaviour.
+
+### Cast replies
+`_cast_persona()` looks the asker up in the roster and gives the host the persona's `tone` and
+`roast_angle` as private direction. The cast is the one place a roast may land on the asker.
+(`cast_engine.build_oracle_context()` was written for this and never called.)
+
 ### Delivery markers
 - `[MOOD: x]` at the start sets the turn mood (avatar colour, TTS exaggeration, cfg_weight).
 - `[BEAT]` before the closer → `TTS_BEAT_GAP_SEC` ± `TTS_BEAT_GAP_JITTER` (jitter stops it becoming
   a metronome). **Earned, not default** — it only works when the closer *reverses* the setup.
 - A second `[MOOD: x]` after the beat changes the closer's delivery only.
 - Markers are stripped before text reaches logs, memory, subtitles, or the session log.
+- **End of text flushes whatever is left, however short** (`_flush_tail`). `_split_piece` refuses
+  chunks under 3 words / 12 chars so mid-stream fragments merge *forward*; the old end-of-text flush
+  reused that minimum, so a short closer ("I'm management.") was never synthesized while `full_text`
+  recorded it as spoken. Live, cached and simulated paths all go through the same flush now.
 
 ### Feedback loop
 Every chat message is scored for laughter against the line that just aired (`REACTION_WINDOW_SEC`,
@@ -185,6 +237,13 @@ what *this* audience finds funny; everything else is a guess encoded as a rule.
 - `data/*.json` and `Media/` are runtime state. Keep them git-ignored;
   `data/favorite_bits.jsonl` is the exception — it is the operator's taste and belongs in git.
 - Do not add `getattr(self.cfg, "key", default)`; every key lives in `config.py` with a default.
+- `_build_context_prompt` must never show a spontaneous bit the chat buffer, the Q&A thread, or an
+  `@handle`. `recent_qa_threads` holds *every* aired turn, bits included — branch on
+  `is_spontaneous` before branching on it.
+- The final sentence of a reply is spoken regardless of length. Do not reintroduce a minimum in the
+  end-of-text flush.
+- The bit gate runs only when `bypass_cache=True and not _skip_gate`. It must never add a model call
+  to a live turn.
 
 ---
 
@@ -209,7 +268,10 @@ TTS_CFG_WEIGHT=0.4  (per-mood overrides in config; deadpan 0.30 … hyped 0.60)
 ```
 Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERATION_MAX=0.7`,
 `BIT_THINKING_BUDGET=1024`, `BIT_TEMPERATURE=0.85`, `ANTI_REPETITION_WINDOW=20`,
-`ANCHOR_BAN_ENABLED=false`, `ASSUMED_VIEWERS_WHEN_UNKNOWN=1`, `TURN_MAX_SEC=75`.
+`ANCHOR_BAN_ENABLED=false`, `ASSUMED_VIEWERS_WHEN_UNKNOWN=1`, `TURN_MAX_SEC=75`,
+`BIT_GATE_ENABLED=true`, `BIT_EDITOR_ENABLED=true`, `BIT_CANDIDATES=4`, `BIT_GATE_MAX_ATTEMPTS=2`,
+`BIT_EDITOR_MIN_LAUGH=3`, `BIT_EDITOR_TEMPERATURE=0.2`, `BIT_GATE_FAIL_OPEN_AFTER=3`,
+`BIT_THEME_MODE=anchor_hint`, `BIT_GATE_LOG_PATH=data/bit_gate_log.jsonl`.
 
 `MIN_INTERJECTION_INTERVAL_SEC` is still in `.env` but no longer read; safe to delete.
 
@@ -224,7 +286,8 @@ Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERA
 3. **Cast cross-talk** — a follow-up event type so personas can react to each other.
 4. **Escalating runs** — occasionally let 2–3 consecutive bits share a thread.
 5. **Room awareness** — the prompt has viewer count, uptime, and time of day but does not use them.
-6. **Negative theme deck** — log theme → outcome and prune the duds.
+6. **Negative theme deck** — `data/bit_gate_log.jsonl` now records theme → candidates → editor
+   scores → aired. Still to do: aggregate it and prune cards that never produce a pick.
 7. Stalls during cache primes: both processes stalled ~200–400 ms while the reflection cache and
    chatter DB wrote to disk. Move those writes off the event-loop thread.
 
@@ -232,7 +295,9 @@ Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERA
 
 ## 11. Testing
 
-`pytest tests/ -q --ignore=tests/test_promo_cards.py` → **75 passing**. (The promo test needs a
+`pytest tests/ -q --ignore=tests/test_promo_cards.py` → **75 passing** before 18 Sept, plus the 35 in
+`tests/test_bit_gate.py` (scripted provider, no network). **The 75 were not available when the 18 Sept
+changes were made — run the full suite before going live.** (The promo test needs a
 display; set `SDL_VIDEODRIVER=dummy` to include it.)
 
 Three tests exist specifically because a change broke the live stream and every other test passed:
@@ -247,7 +312,18 @@ When a bug reaches the stream, add the test that would have caught it.
 python bit_lab.py --n 24 --label baseline
 python bit_lab.py --n 24 --b '{"one_liner_ratio": 0.35}'
 python bit_lab.py --score bitlab/<timestamp>/blind.md
+# the 18 Sept changes, one lever at a time (B = current in each)
+python bit_lab.py --n 24 --a '{"bit_gate_enabled": false}' --b "{}"
+python bit_lab.py --n 24 --a '{"bit_editor_enabled": false}' --b "{}"
+python bit_lab.py --n 24 --a '{"bit_theme_mode": "full"}' --b "{}"
+# the prompt edits as a whole: A = current file, B = the previous one
+git show HEAD~1:ai_brain.py > ai_brain_prev.py && python bit_lab.py --n 24 --b-file ai_brain_prev.py
 ```
+A gated arm can return fewer than `--n` bits (the editor may pass on a slot); the scorer reports
+rates per arm, so this is fair. Until 18 Sept `bit_lab` restored overrides in the wrong order and arm
+A's overrides stayed in force for arm B — any earlier run where `--a` set a key that `--b` did not
+compared A with A and should be repeated.
+
 Generates two batches, interleaves them blind with a checkbox each, and hides the key until you have
 marked them. The scorer refuses to declare a winner under a 15-point gap because that is noise at
 this sample size. **Use this instead of memory.** The project lost its comedic register for a week
@@ -256,6 +332,9 @@ because changes were judged against recollection of how bits sounded days earlie
 **Live verification checklist** (run with OBS open — that is the real load):
 - Several `[TTS LIVE]` lines per answer; `underruns=0`; pump interval ≈ 60 ms.
 - `[TTS BEAT]` on punchline replies, with varying millisecond values.
+- A reply ending in a two-word closer is **audible to the end** — listen, do not read the log.
+- `🎬 [Bit Gate] … editor picked #n` for most refills; occasional `came up empty` is healthy,
+  `failing open` more than once an hour means the editor's bar or the lint lists are too tight.
 - `[Reaction] +N` when you type "lmao" in console within 25 s of a line.
 - `🔑 [YouTube Data API] Concurrent Viewers detected: N` — if absent, the show will assume
   `ASSUMED_VIEWERS_WHEN_UNKNOWN` rather than idling.

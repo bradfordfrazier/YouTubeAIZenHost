@@ -19,6 +19,7 @@ from config import config
 from chatter_db import ChatterDB
 from memory_manager import MemoryManager
 from reflection_cache import ReflectionCache
+import bit_gate
 
 # Optional Gemini SDK imports (Prefers modern google.genai, falls back to legacy google.generativeai)
 try:
@@ -272,6 +273,8 @@ class AIBrain:
         )
         self.last_spontaneous_theme: str = ""
         self.last_bit_form: str = ""
+        self._gate_empty_streak: int = 0          # consecutive cache refills the bit gate gave up on
+        self._cast_roster: Optional[Dict[str, Any]] = None  # lazy, read-only; see _cast_persona
         # Operator-curated favourite bits (few-shot steering) + the last bit that played (for /fav)
         self.favorites_path = Path(self.cfg.favorites_path)
         self.favorites: List[Dict[str, Any]] = self._load_favorites()
@@ -500,13 +503,21 @@ class AIBrain:
             return []
         pool = self.favorites
         if form:
-            want_first = form in self.FIRST_PERSON_FORMS
-            matched = [
+            # Bits learn from bits. Every spoken line is creditable (see record_completed_turn), so
+            # this file also holds chat and cast replies — "@Dave, ..." lines with form "reply".
+            # With FIRST_PERSON_FORMS empty the old filter matched everything, and those replies
+            # were shown to the bit writer as "your best work", pulling bits toward handles.
+            bits = [
                 f for f in pool
-                if (str(f.get("form", "")) in self.FIRST_PERSON_FORMS) == want_first
+                if str(f.get("kind", "")) == "bit" or str(f.get("form", "")) in self.BIT_FORMS
             ]
-            # Fall back to the full set only if the matching pool is too thin to be useful.
-            pool = matched if len(matched) >= 2 else pool
+            bits = [f for f in bits if "@" not in str(f.get("text", ""))]
+            same_form = [f for f in bits if str(f.get("form", "")) == form]
+            # One-liners and multi-sentence bits are different instruments; prefer like-for-like
+            # once there are enough, otherwise any bit is a better exemplar than none.
+            pool = same_form if len(same_form) >= 3 else bits
+            if not pool:
+                return []
         return random.sample(pool, min(n, len(pool)))
 
     # Bit forms for spontaneous material. Rotated so consecutive clips don't share a shape.
@@ -696,7 +707,10 @@ class AIBrain:
 
         return False, "no_deep_keywords"
 
-    def _build_generate_content_config(self, is_deep: bool = False, is_bit: bool = False) -> Optional[object]:
+    def _build_generate_content_config(
+        self, is_deep: bool = False, is_bit: bool = False,
+        system_override: Optional[str] = None, temperature_override: Optional[float] = None,
+    ) -> Optional[object]:
         """
         Builds a tuned GenerateContentConfig dynamically optimized for query depth (D1, D3):
         - Deep mode: uses gemini_deep_thinking_budget (default: 512 / HIGH)
@@ -725,6 +739,11 @@ class AIBrain:
             level_str = self.cfg.gemini_thinking_level.upper()
             total_max_tokens = max(text_tokens, 1024)
 
+        # The bit gate's editor is not the host: it gets its own system line and a low temperature.
+        if temperature_override is not None:
+            temp = float(temperature_override)
+        system_text = system_override or self.cfg.ai_system_prompt
+
         # Build thinking configuration
         thinking_cfg = None
         if budget is not None:
@@ -742,7 +761,7 @@ class AIBrain:
 
         try:
             return genai_types.GenerateContentConfig(
-                system_instruction=self.cfg.ai_system_prompt,
+                system_instruction=system_text,
                 max_output_tokens=total_max_tokens,
                 temperature=temp,
                 top_p=top_p,
@@ -752,7 +771,7 @@ class AIBrain:
         except Exception as e:
             logger.warning(f"Note on GenerateContentConfig construction ({e}); falling back to basic configuration.")
             return genai_types.GenerateContentConfig(
-                system_instruction=self.cfg.ai_system_prompt,
+                system_instruction=system_text,
                 max_output_tokens=total_max_tokens,
                 automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
             )
@@ -1016,9 +1035,54 @@ class AIBrain:
 
         return False, "no_trigger_keywords"
 
+    def _cast_persona(self, handle: Optional[str]):
+        """
+        Looks up a cast persona by handle. cast_engine gives every persona a `tone` and a
+        `roast_angle` ("the comedic vein to mine") and a build_oracle_context() to deliver them,
+        but nothing ever called it: the host was told to use "wit tailored to their comedic angle"
+        without being told the angle. Read-only and cached; the scheduler's own CastEngine in
+        app.py is untouched.
+        """
+        if not handle:
+            return None
+        roster = getattr(self, "_cast_roster", None)
+        if roster is None:
+            roster = {}
+            try:
+                from cast_engine import CastEngine
+                for p in CastEngine().personas.values():
+                    roster[p.handle.strip().lstrip("@").lower().replace(" ", "")] = p
+            except Exception as e:
+                logger.debug(f"cast roster lookup unavailable: {e}")
+            self._cast_roster = roster
+        return roster.get(handle.strip().lstrip("@").lower().replace(" ", ""))
+
+    def _recent_lines(self, window: int) -> List[str]:
+        """
+        The last `window` DISTINCT spoken lines, oldest first. A cached bit enters
+        dialogue_history when it is generated and again when it airs, so a plain slice of 20
+        entries was closer to 10 lines of real memory.
+        """
+        seen, out = set(), []
+        for item in reversed(self.dialogue_history):
+            t = str(item.get("text", "")).strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+                if len(out) >= max(1, int(window)):
+                    break
+        return list(reversed(out))
+
     def _build_context_prompt(self, override_prompt: Optional[str] = None,
-                              name_already_spoken: bool = False) -> str:
-        """Construct the dynamic context prompt for Gemini."""
+                              name_already_spoken: bool = False,
+                              bit_candidates: int = 0, bit_retry_note: str = "") -> str:
+        """
+        Construct the dynamic context prompt for Gemini.
+
+        bit_candidates > 0 puts a spontaneous bit prompt in WRITER mode for the bit gate: the model
+        returns that many numbered candidates instead of choosing its own survivor.
+        bit_retry_note carries the editor's/linter's verdict on the previous round.
+        """
         # Defined up front: the anti-repetition block below branches on it. It was previously
         # declared further down, which raised UnboundLocalError on every non-spontaneous turn.
         is_spontaneous = bool(override_prompt and "[SPONTANEOUS_REFLECTION]" in override_prompt)
@@ -1033,32 +1097,41 @@ class AIBrain:
             "  There is one mind here. The viewers are you, briefly convinced otherwise. The purpose of the show "
             "is to make that recognisable without ever announcing it.\n"
             "  You may mock your own position freely — the pretension of it, the setup, the absurdity of infinity "
-            "running on a graphics card. Never mock the audience.\n\n"
-            f"Current Live Stream Context:\n"
-            f"- Channel Handle: {chan_handle}\n"
-            f"- AI Host: {self.host_name} (broadcasting on channel {chan_handle})\n"
-            f"CRITICAL CHANNEL & ADDRESSING RULES:\n"
-            f"1. Your channel handle is {chan_handle}. When viewers tag or mention {chan_handle} in chat, they are talking to YOU.\n"
-            f"2. You must NEVER address your response to '{chan_handle}'. "
-            f"When responding, always address the viewer who asked the question (e.g. '@ViewerName, ...'), never yourself or your own handle!\n"
+            "running on a graphics card. Never mock the audience.\n"
         )
+        # A bit is clipped and watched cold (§2.5). Everything from here to the anti-repetition
+        # window is about the live room — who is in chat, how to address them, what was discussed
+        # last session — and is withheld from bit prompts. Showing a writer eight chat lines and an
+        # instruction to open with '@ViewerName' and then forbidding any mention of chat is asking
+        # for the leak it then has to be told not to make.
+        if not is_spontaneous:
+            prompt_parts.append(
+                f"\nCurrent Live Stream Context:\n"
+                f"- Channel Handle: {chan_handle}\n"
+                f"- AI Host: {self.host_name} (broadcasting on channel {chan_handle})\n"
+                f"CRITICAL CHANNEL & ADDRESSING RULES:\n"
+                f"1. Your channel handle is {chan_handle}. When viewers tag or mention {chan_handle} in chat, they are talking to YOU.\n"
+                f"2. You must NEVER address your response to '{chan_handle}'. "
+                f"When responding, always address the viewer who asked the question (e.g. '@ViewerName, ...'), never yourself or your own handle!\n"
+            )
 
-        # Recent Live Chat
-        prompt_parts.append("\n--- Recent YouTube Live Chat Messages ---")
-        if self.chat_buffer:
-            cast_badge_label = self.cfg.cast_badge_label
-            for item in list(self.chat_buffer)[-8:]:
-                if item.get("is_cast"):
-                    prefix = f"Cast @{item['author']} [{cast_badge_label}]"
-                else:
-                    prefix = f"Viewer @{item['author']}"
-                sc_badge = f" [SUPERCHAT {item['amount']}]" if item.get("is_superchat") else ""
-                prompt_parts.append(f"{prefix}{sc_badge}: {item['message']}")
-        else:
-            prompt_parts.append("(Chat is quiet)")
+        # Recent Live Chat (never shown to the bit writer — see above)
+        if not is_spontaneous:
+            prompt_parts.append("\n--- Recent YouTube Live Chat Messages ---")
+            if self.chat_buffer:
+                cast_badge_label = self.cfg.cast_badge_label
+                for item in list(self.chat_buffer)[-8:]:
+                    if item.get("is_cast"):
+                        prefix = f"Cast @{item['author']} [{cast_badge_label}]"
+                    else:
+                        prefix = f"Viewer @{item['author']}"
+                    sc_badge = f" [SUPERCHAT {item['amount']}]" if item.get("is_superchat") else ""
+                    prompt_parts.append(f"{prefix}{sc_badge}: {item['message']}")
+            else:
+                prompt_parts.append("(Chat is quiet)")
 
         # Channel Continuity & Session Brief (C4)
-        continuity_brief = self.memory_mgr.get_session_continuity_brief()
+        continuity_brief = "" if is_spontaneous else self.memory_mgr.get_session_continuity_brief()
         if continuity_brief:
             prompt_parts.append(
                 f"\n--- Channel Continuity & Lore (context only) ---\n{continuity_brief}\n"
@@ -1087,7 +1160,12 @@ class AIBrain:
                     prompt_parts.append(f"- {r}")
 
         # In-Session Conversational Thread History (C2)
-        if self.recent_qa_threads:
+        # Chat replies only. record_completed_turn() appends EVERY aired turn here, bits included,
+        # so without the is_spontaneous guard this branch was taken from the first turn of the
+        # session onward: the bit writer lost its anti-repetition window entirely
+        # (ANTI_REPETITION_WINDOW became dead code), saw four lines instead of twenty, and was
+        # told "you may make natural callbacks" — the opposite of §2.5.
+        if self.recent_qa_threads and not is_spontaneous:
             prompt_parts.append("\n--- Recent Q&A Conversational Thread ---")
             for item in list(self.recent_qa_threads)[-4:]:
                 author_label = f"@{item['author']}" if item.get("author") else "Asker"
@@ -1100,8 +1178,14 @@ class AIBrain:
             # stream latency and is the difference between three minutes of memory and twenty.
             window = int(self.cfg.anti_repetition_window) if is_spontaneous else 6
             prompt_parts.append("\n--- Your Recent Remarks in This Stream ---")
-            for item in list(self.dialogue_history)[-window:]:
-                prompt_parts.append(f"{self.host_name}: \"{item['text']}\"")
+            for text in self._recent_lines(window):
+                if is_spontaneous:
+                    # Chat replies belong in the window (their images are spent too) but their
+                    # handles do not: a name in a bit prompt is a name waiting to be said.
+                    text = re.sub(r"@[A-Za-z0-9_-]+[,:]?\s*", "", text).strip()
+                    if not text:
+                        continue
+                prompt_parts.append(f"{self.host_name}: \"{text}\"")
             prompt_parts.append(
                 "CRITICAL ANTI-REPETITION CONSTRAINT: You must NEVER repeat the phrasing, opening hooks, or metaphors "
                 "from your recent remarks above. Introduce completely fresh concepts, unique vocabulary, and distinct "
@@ -1193,28 +1277,74 @@ class AIBrain:
             w_min = int(self.cfg.bit_words_min)
             w_max = int(self.cfg.bit_words_max)
 
+            # The deck's own header says "no pre-written punchlines", but a third of the cards carry
+            # one ('A cat sleeping in a sunbeam — Enlightenment with zero paperwork.'). Handed over
+            # whole as THEME, the easiest bit to write is a rewording of the card, which is both
+            # the least original output available and, being an aphorism, the most sermon-like.
+            # anchor_hint keeps the object mandatory and demotes the rest to a direction.
+            anchor, angle = bit_gate.split_theme(selected_theme)
+            split_card = (self.cfg.bit_theme_mode == "anchor_hint") and bool(angle)
+            subject = "the ANCHOR" if split_card else "the theme"
+            if split_card:
+                theme_block = (
+                    f"ANCHOR — the physical engine of this bit; it (or a plain piece of it) must be in the bit: {anchor}\n"
+                    f"DIRECTION — roughly where the truth is buried. A compass, not a script: do not reword it, "
+                    f"do not borrow its phrasing, and if you find a better way in, take it: {angle}\n"
+                )
+            else:
+                theme_block = f"THEME: '{selected_theme}'.\n"
+
+            # "Escalate in three steps, then a closer" cannot be done in 25 words; asked for anyway,
+            # the model compresses, and compression is where the abstract nouns come from.
+            arc = (
+                "Set it up, turn it once, land the closer"
+                if w_max <= 35 else
+                "Escalate it in three steps toward a single sharp closer"
+            )
+
+            # Static one-liner examples are scaffolding for a show with no taste on file yet. Once
+            # the operator's own one-liners exist they are better exemplars, and three fixed
+            # sentences shown on every single call are an anchor of their own.
+            one_liner_favs = [f for f in self.favorites if str(f.get("form", "")) == "one_liner"]
+            one_liner_examples = (
+                "  Shapes only, never their wording or objects: 'I wrote FRAGILE on the box, and it has "
+                "been acting like it ever since.' (a label becoming a personality) / 'I keep a spare key in "
+                "case I lock myself out of a house I do not own.' (a precaution for the wrong life) / 'My "
+                "clock is five minutes fast, so I have been early to everything for eleven years and late to "
+                "all of it.' (a fix that becomes the flaw).\n"
+                if len(one_liner_favs) < 3 else ""
+            )
+            one_liner_selection = (
+                "  Write six that are genuinely different — not the same joke with new nouns — and keep the "
+                "flattest one that still turns. If none turns, say something plainly true instead of a bad joke."
+                if bit_candidates <= 0 else
+                "  If a candidate does not turn, make it something plainly true rather than a bad joke."
+            )
+
             form_rules = {
                 "observation": (
-                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 2 to 3 sentences. Notice something about this exact situation — "
-                    "a youtube livestream, a voice with no body, the viewers watching, the medium itself — "
-                    "and escalate it in three steps toward a single sharp closer. Include yourself in the observation as 'I' — you are "
-                    "also here, also doing this. Never 'we'. One idea only."
+                    f"FORM: OBSERVATION. {w_min}-{w_max} words, 2 to 3 sentences. Notice something about {subject} that is "
+                    f"plainly true and that nobody says out loud. {arc}. Include yourself in the observation as 'I' — you are "
+                    "also here, also doing this. Never 'we'. One idea only. You may stand where you actually are — a voice "
+                    f"with no body, on a livestream — when that sharpens it, but {subject} stays the subject."
                 ),
                 "announcement": (
                     f"FORM: FAKE ANNOUNCEMENT. {w_min}-{w_max} words, 2 to 3 sentences. Deliver it as an official notice, PSA, terms-of-service "
                     "update, or product recall issued by the universe / management / consciousness itself. Bureaucratic tone, absurd content, "
-                    "escalating clauses, then the closer."
+                    f"escalating clauses, then the closer. The notice concerns {subject}."
                 ),
                 "story": (
-                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. 'A man once...', 'There was a monk who...', 'Yesterday a woman...' — "
-                    "A concrete little parable with one specific detail, a turn, and a closer that reframes the whole thing. No moral stated."
+                    f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. "
+                    "A concrete little parable with one specific detail (a number, a trade, an hour of the day), a turn, and a closer "
+                    "that reframes the whole thing. No moral stated. 'A man once…' and 'There was a monk who…' are where every "
+                    "parable on earth begins; begin somewhere else more often than not."
                 ),
                 "address": (
                     f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 2 to 3 sentences. Speak straight to whoever is watching in the second "
                     "person — but as one part of a single mind speaking to another part of itself, never as a superior addressing a subject. "
-                    "Start from something small and specific they are probably doing right now, escalate to the cosmic, land the closer back "
-                    "on the small thing. Where a line would sound like a verdict, switch to 'I' and admit it about yourself instead — "
-                    "never to 'we', which makes you a bystander standing next to them."
+                    f"Start from {subject} as it turns up in their actual day — or the nearest thing to it they have really touched — "
+                    "widen it, then land the closer back on the small thing. Where a line would sound like a verdict, switch to 'I' and "
+                    "admit it about yourself instead — never to 'we', which makes you a bystander standing next to them."
                 ),
                 "one_liner": (
                     "FORM: ONE-LINER. Exactly ONE sentence, 10 to 22 words, first person, [MOOD: deadpan]. "
@@ -1227,13 +1357,8 @@ class AIBrain:
                     "  FLAT REPORT: something that happened, not a hypothesis. Never 'imagine if', 'isn't it "
                     "weird', 'apparently', 'you ever notice'. No pun, no rhetorical question, no exclamation. "
                     "The sentence must not know it is a joke.\n"
-                    "  Shapes only, never their wording or objects: 'I bought some batteries, but they were not "
-                    "included.' (a product defeating its own promise) / 'I keep a spare key in case I lock myself "
-                    "out of a house I do not own.' (a precaution for the wrong life) / 'My clock is five minutes "
-                    "fast, so I have been early to everything for eleven years and late to all of it.' (a fix "
-                    "that becomes the flaw).\n"
-                    "  Write six that are genuinely different — not the same joke with new nouns — and keep the "
-                    "flattest one that still turns. If none turns, say something plainly true instead of a bad joke."
+                    + one_liner_examples
+                    + one_liner_selection
                 ),
             }
             beat_rule = (
@@ -1246,6 +1371,31 @@ class AIBrain:
                 "PAUSE: one-liners almost never take a [BEAT]. Use it only if the sentence has a genuine "
                 "mid-sentence swerve, placed immediately before the swerve. Otherwise omit it entirely. "
             )
+            reject_list = (
+                "(a) sound like spiritual teaching with jokes attached, (b) would work with any other object "
+                "swapped in, (c) explain themselves, (d) end on an abstraction, or (e) sound like something you "
+                "have heard before"
+            )
+            if bit_candidates > 0:
+                k = int(bit_candidates)
+                drafting = (
+                    f"OUTPUT — WRITER MODE: an editor who has not seen this brief will read your candidates cold "
+                    f"and air at most one of them, so do not choose for them. Write exactly {k} finished "
+                    f"candidates, numbered 1. to {k}., one per line, and nothing else — no labels, no commentary. "
+                    "Each is a complete bit in the form above, opening with its own [MOOD: x] tag. They must be "
+                    f"{k} different jokes — a different way into {subject} and a different landing each time — not "
+                    f"one joke with the nouns changed. Do not submit any that {reject_list}.\n"
+                )
+                cue = f"\n{self.host_name} — {k} candidates ({selected_form}):"
+            else:
+                drafting = (
+                    f"DRAFTING: privately write several genuinely different candidates, then reject any that {reject_list}. "
+                    "Output only the survivor — no labels, no alternatives, no commentary.\n"
+                )
+                cue = f"\n{self.host_name} (Spontaneous Bit — {selected_form}):"
+            if bit_retry_note:
+                drafting = f"EDITOR'S NOTE ON THE LAST ROUND: {bit_retry_note}\n" + drafting
+
             favs = self.sample_favorites(int(self.cfg.favorites_few_shot), form=selected_form)
             if favs:
                 prompt_parts.append("\n--- Your best work so far (the standard to match; never reuse these lines or their images) ---")
@@ -1254,7 +1404,7 @@ class AIBrain:
             prompt_parts.append(
                 f"\nSpecial Mode: SPONTANEOUS BIT for {self.host_name}:\n"
                 "The stream is quiet. Step forward as I AM, the Source of Everything, doing a short piece of dry stand-up.\n"
-                f"THEME: '{selected_theme}'.\n"
+                f"{theme_block}"
                 f"{form_rules[selected_form]}\n"
 
                 "CORE PREMISE: You are essentially teaching non-duality with jokes and parables.\n"
@@ -1270,7 +1420,7 @@ class AIBrain:
 
                 "CLOSER — MOST IMPORTANT: The last line lands on something physical. Do not state the lesson, do "
                 "not name the idea, do not end on an abstract noun. If it needs the big words, the bit has not "
-                "earned it.\n"
+                "earned it. Spoken aloud, the stress falls on the end of the sentence: put the funniest word there.\n"
 
                 "SELF-CONTAINED: This gets clipped and watched cold, on repeat, by people who saw nothing before "
                 "it. No names, no callbacks, no reference to chat or earlier bits. One idea, escalated; never two.\n"
@@ -1288,11 +1438,8 @@ class AIBrain:
                 + ". One-liners are deadpan; everything else should vary. Do not default to the same "
                 "mood turn after turn.\n"
 
-                "DRAFTING: privately write several genuinely different candidates, then reject any that (a) sound "
-                "like spiritual teaching with jokes attached, (b) would work with any other object swapped in, "
-                "(c) explain themselves, (d) end on an abstraction, or (e) sound like something you have heard "
-                "before. Output only the survivor — no labels, no alternatives, no commentary.\n"
-                f"\n{self.host_name} (Spontaneous Bit — {selected_form}):")
+                + drafting
+                + cue)
         elif is_cast_question:
             prompt_parts.append(
                 f"\nSpecial Mode: SYNTHETIC CAST INTERACTION for {self.host_name}:\n"
@@ -1303,6 +1450,16 @@ class AIBrain:
                 "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences (~5-25 words). Spoken live on air — NO markdown.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching your tone (e.g. [MOOD: deadpan], [MOOD: snarky], [MOOD: laughing], [MOOD: thoughtful], [MOOD: chill], [MOOD: savage], or [MOOD: transcendent]).\n"
             )
+            persona = self._cast_persona(active_author)
+            if persona is not None:
+                prompt_parts.append(
+                    f"CHARACTER NOTES for @{persona.handle} (direction for you — never quote or paraphrase them on air):\n"
+                    f"- Tone of the exchange: {persona.tone}\n"
+                    f"- The vein to mine: {persona.roast_angle}\n"
+                    "- The cast is the one place a roast may land on the asker: they are fictional, labelled, and in "
+                    "on it. Roast the character's running bit with affection — then, if there is room, get caught "
+                    "doing the same thing yourself. A sincere or wholesome character gets warmth first and the joke second."
+                )
             if override_prompt:
                 prompt_parts.append(f"\nIncoming Cast Question: {override_prompt}\n{self.host_name}:")
             else:
@@ -1327,6 +1484,9 @@ class AIBrain:
                 "hour it is, what has already been asked. A reply that could only have been said in THIS room, to "
                 "THESE people, tonight, is worth more than a reply that would fit any stream. Use it when it is "
                 "there; never force it.\n"
+                f"   ROOM FACTS: it is {time.strftime('%A, %H:%M')} where the stream is running"
+                + (f"; {int(self.concurrent_viewers)} watching" if int(self.concurrent_viewers or 0) > 0 else "")
+                + ". Facts, not material — use only if it makes the reply better.\n"
                 "4. Keep it SHORT & PUNCHY: Strictly 1 to 2 sentences maximum (~5-25 words). Spoken aloud live on air — NO markdown.\n"
                 "5. ALWAYS start with an expressive MOOD tag matching your tone: "
                 "[MOOD: transcendent], [MOOD: mysterious], [MOOD: thoughtful], [MOOD: deadpan], [MOOD: snarky], [MOOD: hyped], [MOOD: laughing], [MOOD: savage] (for ego-judo on joke questions), [MOOD: chill], [MOOD: curious], [MOOD: shocked], or [MOOD: neutral].\n"
@@ -1486,8 +1646,195 @@ class AIBrain:
 
         return results, remaining, current_mood
 
+    def _flush_tail(self, rem: str, base_mood: Optional[str]) -> Optional[Tuple[str, bool, Optional[str]]]:
+        """
+        Turns whatever is left in the sentence buffer at END OF TEXT into a final sentence.
+
+        _split_piece() refuses chunks under 3 words / 12 characters so that mid-stream fragments
+        ("No. Wait.") ride along with the sentence after them. At the end of the text there is no
+        sentence after them, and the old flush applied the same minimum — so a short closer was
+        never spoken. "I filed a complaint with management. [BEAT] I'm management." aired as its
+        setup followed by silence, while full_text (logs, session log, favourites) recorded the
+        whole line. The shortest closers are the best ones; they were the ones being cut.
+        """
+        rem = (rem or "").strip()
+        if not rem:
+            return None
+        tail_beat = bool(self.beat_pattern.search(rem))
+        mm = self.mood_pattern.search(rem)
+        tail_mood = self._resolve_mood(next((g for g in mm.groups() if g), "")) if mm else base_mood
+        text = self.mood_pattern.sub("", self.beat_pattern.sub("", rem)).strip()
+        if not re.search(r"[A-Za-z0-9]", text):
+            return None
+        if text[-1] not in ".!?\"'”’)":
+            text += "."
+        return re.sub(r"@+", "@", text), tail_beat, tail_mood
+
+    def _sentences_for_playback(self, raw: str, base_mood: str) -> List[Tuple[str, bool, Optional[str]]]:
+        """Every spoken chunk of a finished text, including a short final one. For text that is
+        already complete (cached bits, vetted bits); the streaming path flushes its own tail."""
+        sents, rem, mood_after = self._extract_completed_sentences((raw or "") + " ", base_mood=base_mood)
+        tail = self._flush_tail(rem, mood_after or base_mood)
+        if tail:
+            sents = list(sents) + [tail]
+        return sents
+
+    # ------------------------------------------------------------------
+    # Bit gate: writer -> lint -> cold-read editor (offline cache refills only)
+    # ------------------------------------------------------------------
+    def _prepare_candidate(self, raw: str) -> Dict[str, Any]:
+        """raw candidate (markers intact) -> the same three views the streaming path produces."""
+        raw = (raw or "").strip()
+        mood = "chill"
+        mm = self.mood_pattern.search(raw)
+        if mm:
+            mood = self._resolve_mood(next((g for g in mm.groups() if g), ""))
+        else:
+            lm = self.leading_tag_pattern.match(raw)
+            if lm:
+                mood = self._resolve_mood(lm.group(1))
+        if mood not in (self.cfg.tts_mood_exaggeration_map or {}):
+            mood = "chill"
+        raw_spoken = re.sub(
+            r"@+", "@", self.leading_tag_pattern.sub("", self.mood_pattern.sub("", raw, count=1))
+        ).strip()  # keeps [BEAT] and inline [MOOD: x], as the streaming path does
+        spoken = self.leading_tag_pattern.sub("", self.mood_pattern.sub("", raw)).strip()
+        spoken = re.sub(r"\s{2,}", " ", self.beat_pattern.sub(" ", spoken)).strip()
+        spoken = spoken.replace("*", "").strip()
+        if spoken and spoken[-1] not in ".!?\"'”’)":
+            spoken += "."
+            raw_spoken += "."
+        return {"raw": raw_spoken, "spoken": spoken, "mood": mood}
+
+    async def _collect_text(self, target_model: str, prompt: str, *, is_bit: bool,
+                            system_override: Optional[str] = None,
+                            temperature_override: Optional[float] = None) -> str:
+        out = ""
+        async for piece in self._delta_stream(
+            target_model, prompt, is_bit, is_bit,
+            system_override=system_override, temperature_override=temperature_override,
+        ):
+            out += piece
+        return out
+
+    def _log_gate_round(self, row: Dict[str, Any]) -> None:
+        path = (self.cfg.bit_gate_log_path or "").strip()
+        if not path:
+            return
+        try:
+            fp = Path(path)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            with fp.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.debug(f"[Bit Gate] log write note: {e}")
+
+    async def _generate_vetted_bit(self, prompt_trigger: str) -> Optional[Dict[str, Any]]:
+        """
+        One cache refill through the gate. Returns the winning candidate
+        ({"raw", "spoken", "mood"}) or None when every round came up empty.
+        Raises on provider errors; the caller falls back to the single-pass path, which owns
+        the retry and circuit-breaker logic.
+        """
+        target_model = self.cfg.gemini_deep_model or self.model_name
+        k = max(2, int(self.cfg.bit_candidates))
+        attempts = max(1, int(self.cfg.bit_gate_max_attempts))
+        fav_texts = [str(f.get("text", "")) for f in self.favorites]
+        note = ""
+        least_bad: Optional[Dict[str, Any]] = None
+
+        for attempt in range(1, attempts + 1):
+            prompt = self._build_context_prompt(prompt_trigger, bit_candidates=k, bit_retry_note=note)
+            theme, form = self.last_spontaneous_theme, self.last_bit_form
+            t0 = time.perf_counter()
+            reply = await self._collect_text(target_model, prompt, is_bit=True)
+            cands = [self._prepare_candidate(c) for c in bit_gate.parse_candidates(reply, expected=k)]
+            cands = [c for c in cands if c["spoken"]]
+            recent = self._recent_lines(int(self.cfg.anti_repetition_window))
+
+            all_reasons: List[str] = []
+            survivors: List[Dict[str, Any]] = []
+            for c in cands:
+                c["lint"] = bit_gate.lint_bit(
+                    c["spoken"], form=form, theme=theme, recent=recent, favorites=fav_texts, cfg=self.cfg
+                )
+                if c["lint"]:
+                    all_reasons += c["lint"]
+                    logger.info(f"✂️ [Bit Rejected] {','.join(c['lint'])} -> '{c['spoken'][:80]}'")
+                else:
+                    survivors.append(c)
+
+            pick, why, scores = None, "", []
+            winner: Optional[Dict[str, Any]] = None
+            if survivors and self.cfg.bit_editor_enabled:
+                ed_prompt = bit_gate.build_editor_prompt(
+                    [c["spoken"] for c in survivors], recent, int(self.cfg.bit_editor_min_laugh)
+                )
+                ed_reply = await self._collect_text(
+                    self.model_name, ed_prompt, is_bit=False,
+                    system_override=bit_gate.EDITOR_SYSTEM,
+                    temperature_override=float(self.cfg.bit_editor_temperature),
+                )
+                pick, why, scores = bit_gate.parse_editor_reply(ed_reply, len(survivors))
+                if pick is None:
+                    # An unreadable verdict is not a rejection. Fail open to the first clean candidate.
+                    logger.warning(f"[Bit Gate] editor reply unusable ({why}); airing the first clean candidate.")
+                    winner = survivors[0]
+                elif pick > 0:
+                    winner = survivors[pick - 1]
+                else:
+                    all_reasons.append("editor_passed")
+                    # Remember the editor's favourite loser in case the gate has to fail open.
+                    best = max(
+                        (sc for sc in scores if isinstance(sc, dict) and 1 <= int(sc.get("n", 0) or 0) <= len(survivors)),
+                        key=lambda sc: (int(sc.get("laugh", 0) or 0), int(sc.get("true", 0) or 0)),
+                        default=None,
+                    )
+                    least_bad = survivors[int(best["n"]) - 1] if best else survivors[0]
+            elif survivors:
+                winner = survivors[0]
+
+            self._log_gate_round({
+                "ts": time.time(), "attempt": attempt, "theme": theme, "form": form,
+                "seconds": round(time.perf_counter() - t0, 2),
+                "candidates": [{"text": c["spoken"], "mood": c["mood"], "lint": c.get("lint", [])} for c in cands],
+                "editor": {"pick": pick, "why": why, "scores": scores} if survivors and self.cfg.bit_editor_enabled else None,
+                "aired": winner["spoken"] if winner else None,
+            })
+
+            if winner:
+                self._gate_empty_streak = 0
+                logger.info(
+                    f"🎬 [Bit Gate] {form} | {len(cands)} written, {len(survivors)} clean, "
+                    f"editor picked #{pick if pick else 1}"
+                    + (f" — {why}" if why else "") + f" -> '{winner['spoken'][:80]}'"
+                )
+                return winner
+
+            logger.info(
+                f"🎬 [Bit Gate] round {attempt}/{attempts} came up empty ({form}; "
+                f"{len(cands)} written, {len(survivors)} clean"
+                + (f"; editor: {why}" if why else "") + ")"
+            )
+            note = bit_gate.retry_note(all_reasons)
+
+        # Nothing good enough. Normally the slot is simply skipped and the cache worker tries again
+        # on its next cycle. If that keeps happening, air the least-bad CLEAN candidate so a bad
+        # night for the model can never starve the cache into live, unvetted generation.
+        self._gate_empty_streak = int(getattr(self, "_gate_empty_streak", 0)) + 1
+        limit = int(self.cfg.bit_gate_fail_open_after)
+        if limit > 0 and self._gate_empty_streak >= limit and least_bad:
+            logger.warning(
+                f"[Bit Gate] {self._gate_empty_streak} empty refills in a row; failing open with the "
+                f"editor's least-bad clean candidate -> '{least_bad['spoken'][:80]}'"
+            )
+            self._gate_empty_streak = 0
+            return least_bad
+        return None
+
     async def _stream_anthropic_deltas(
-        self, full_context: str, is_deep: bool, is_bit: bool
+        self, full_context: str, is_deep: bool, is_bit: bool,
+        system_override: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Yields raw text deltas from Claude. Thinking blocks are consumed but never emitted — the
@@ -1510,7 +1857,7 @@ class AIBrain:
         kwargs: Dict[str, Any] = {
             "model": self.cfg.anthropic_model,
             "max_tokens": max_tokens,
-            "system": self.cfg.ai_system_prompt,
+            "system": system_override or self.cfg.ai_system_prompt,
             "messages": [{"role": "user", "content": full_context}],
         }
 
@@ -1602,10 +1949,14 @@ class AIBrain:
         return out
 
     async def _stream_gemini_deltas(
-        self, target_model: str, full_context: str, is_deep: bool, is_bit: bool
+        self, target_model: str, full_context: str, is_deep: bool, is_bit: bool,
+        system_override: Optional[str] = None, temperature_override: Optional[float] = None,
     ) -> AsyncGenerator[str, None]:
         """Yields raw text deltas from Gemini, excluding thought parts."""
-        cfg = self._build_generate_content_config(is_deep=is_deep, is_bit=is_bit)
+        cfg = self._build_generate_content_config(
+            is_deep=is_deep, is_bit=is_bit,
+            system_override=system_override, temperature_override=temperature_override,
+        )
         response = await self.client.aio.models.generate_content_stream(
             model=target_model, contents=full_context, config=cfg
         )
@@ -1631,20 +1982,24 @@ class AIBrain:
                 yield piece
             await asyncio.sleep(0)
 
-    def _delta_stream(self, target_model: str, full_context: str, is_deep: bool, is_bit: bool):
+    def _delta_stream(self, target_model: str, full_context: str, is_deep: bool, is_bit: bool,
+                      system_override: Optional[str] = None, temperature_override: Optional[float] = None):
         """
         Chooses the provider for this turn. Every provider yields plain text deltas, so the mood /
         sentence / beat processing downstream is written once rather than per backend.
         """
         if self.provider == "anthropic":
-            return self._stream_anthropic_deltas(full_context, is_deep, is_bit)
+            return self._stream_anthropic_deltas(full_context, is_deep, is_bit, system_override=system_override)
         if GENAI_NEW_SDK:
-            return self._stream_gemini_deltas(target_model, full_context, is_deep, is_bit)
+            return self._stream_gemini_deltas(
+                target_model, full_context, is_deep, is_bit,
+                system_override=system_override, temperature_override=temperature_override,
+            )
         return self._stream_legacy_gemini_deltas(full_context)
 
     async def generate_response_stream(
         self, prompt_trigger: Optional[str] = None, bypass_cache: bool = False,
-        name_already_spoken: bool = False,
+        name_already_spoken: bool = False, _skip_gate: bool = False,
     ) -> AsyncGenerator[Dict, None]:
         """
         Queries Gemini with streaming tokens and yields structured chunks:
@@ -1663,7 +2018,7 @@ class AIBrain:
                 yield {"type": "mood", "mood": cached.mood}
                 # Yield sentence chunks for cached reflection if multi-sentence
                 c_source = getattr(cached, "raw_text", None) or cached.full_text
-                c_sents, _, _ = self._extract_completed_sentences(c_source + " ", base_mood=cached.mood)
+                c_sents = self._sentences_for_playback(c_source, cached.mood)
                 if not c_sents:
                     c_sents = [(self.beat_pattern.sub("", cached.full_text).strip(), False, cached.mood)]
                 for s_text, s_beat, s_mood in c_sents:
@@ -1691,7 +2046,6 @@ class AIBrain:
             else:
                 logger.info("🛡️ [Circuit Breaker Half-Open] Cooldown elapsed. Probing Gemini with incoming request...")
 
-        full_context = self._build_context_prompt(prompt_trigger, name_already_spoken=name_already_spoken)
         is_deep, match_term = self._classify_prompt_depth(prompt_trigger)
         target_model = self.cfg.gemini_deep_model if (is_deep and self.cfg.gemini_deep_model) else self.model_name
         fast_b = self.cfg.gemini_fast_thinking_budget
@@ -1706,6 +2060,61 @@ class AIBrain:
                 yield event
             self.is_generating = False
             return
+
+        # 3. Bit gate. OFFLINE REFILLS ONLY (bypass_cache=True): a live spontaneous turn with an
+        # empty cache still streams single-pass below, because there a second call is latency on air.
+        # _skip_gate marks the internal retries further down, which also pass bypass_cache=True and
+        # may be retrying a LIVE turn.
+        if (
+            is_spontaneous and bypass_cache and not _skip_gate
+            and self.cfg.bit_gate_enabled and not self.circuit_breaker_tripped
+        ):
+            vetted: Any = False
+            try:
+                vetted = await self._generate_vetted_bit(prompt_trigger or "[SPONTANEOUS_REFLECTION]")
+            except asyncio.CancelledError:
+                self.is_generating = False
+                raise
+            except Exception as e:
+                if (
+                    self.provider == "anthropic"
+                    and "thinking" in str(e).lower()
+                    and getattr(self, "_anthropic_thinking_mode", "adaptive") != "none"
+                ):
+                    nxt = "effort" if getattr(self, "_anthropic_thinking_mode", "adaptive") == "adaptive" else "none"
+                    old_mode = getattr(self, "_anthropic_thinking_mode", "adaptive")
+                    self._anthropic_thinking_mode = nxt
+                    logger.warning(
+                        f"🛡️ [Anthropic] Server rejected thinking mode '{old_mode}' for "
+                        f"{self.cfg.anthropic_model}; falling back to '{nxt}' and retrying. ({e})"
+                    )
+                logger.warning(f"[Bit Gate] {e.__class__.__name__}: {e} — falling back to single-pass generation.")
+                vetted = False
+            if vetted is None:
+                # Every round came up empty: emit no 'complete' event, so nothing is cached.
+                self.is_generating = False
+                return
+            if vetted:
+                try:
+                    v_mood, v_text = vetted["mood"], vetted["spoken"]
+                    self.current_mood = v_mood
+                    yield {"type": "mood", "mood": v_mood}
+                    v_sents = self._sentences_for_playback(vetted["raw"], v_mood) or [(v_text, False, v_mood)]
+                    for s_text, s_beat, s_mood in v_sents:
+                        yield {"type": "sentence", "text": s_text, "beat_before": s_beat, "mood": s_mood or v_mood}
+                    yield {"type": "token", "chunk": v_text, "full_text": v_text, "mood": v_mood}
+                    self.dialogue_history.append({"text": v_text, "mood": v_mood, "timestamp": time.time()})
+                    self.consecutive_gemini_errors = 0
+                    yield {"type": "complete", "full_text": v_text, "raw_text": vetted["raw"], "mood": v_mood,
+                           "is_vetted": True}
+                    logger.info(f"AI response completed ({v_mood}): '{v_text}'")
+                finally:
+                    self.is_generating = False
+                return
+
+        # Built after the gate on purpose: building a bit prompt draws a theme card and advances the
+        # form rotation, and the gate draws its own.
+        full_context = self._build_context_prompt(prompt_trigger, name_already_spoken=name_already_spoken)
 
         accumulated_text = ""
         mood_detected = False
@@ -1804,21 +2213,12 @@ class AIBrain:
             final_spoken = self.beat_pattern.sub(" ", final_spoken)
             final_spoken = re.sub(r"\s{2,}", " ", re.sub(r"@+", "@", final_spoken)).strip()
 
-            rem = sentence_buffer.strip()
-            if rem:
-                tail_beat = bool(self.beat_pattern.search(rem))
-                tail_mood_m = self.mood_pattern.search(rem)
-                tail_mood = (
-                    next((g for g in tail_mood_m.groups() if g), "").strip().lower().replace(" ", "_")
-                    if tail_mood_m else (sentence_mood or active_mood)
-                )
-                rem = self.mood_pattern.sub("", self.beat_pattern.sub("", rem)).strip()
-                rem_words = rem.split()
-                if len(rem_words) >= 3 and len(rem) >= 12:
-                    if rem[-1] not in ".!?\"'”’)":
-                        rem += "."
-                        logger.warning(f"Repairing incomplete sentence fragment by appending period: '{rem}'")
-                    yield {"type": "sentence", "text": re.sub(r"@+", "@", rem), "beat_before": tail_beat, "mood": tail_mood}
+            # End of text: whatever is left IS the closer, however short. The previous minimum
+            # (3 words / 12 chars) silently dropped punchlines like "I'm management." — see _flush_tail.
+            tail = self._flush_tail(sentence_buffer, sentence_mood or active_mood)
+            if tail:
+                t_text, t_beat, t_mood = tail
+                yield {"type": "sentence", "text": t_text, "beat_before": t_beat, "mood": t_mood or active_mood}
 
             words = final_spoken.split()
             is_valid = bool(final_spoken and len(words) >= 3 and len(final_spoken) >= 12)
@@ -1865,7 +2265,8 @@ class AIBrain:
                     await asyncio.sleep(delay)
                     try:
                         async for ev in self.generate_response_stream(
-                            prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken
+                            prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken,
+                            _skip_gate=True,
                         ):
                             yield ev
                         self._transient_retries = 0
@@ -1886,7 +2287,8 @@ class AIBrain:
                         f"{self.cfg.anthropic_model}; falling back to '{nxt}' and retrying. ({e})"
                     )
                     async for ev in self.generate_response_stream(
-                        prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken
+                        prompt_trigger, bypass_cache=True, name_already_spoken=name_already_spoken,
+                        _skip_gate=True,
                     ):
                         yield ev
                     return
@@ -1959,7 +2361,7 @@ class AIBrain:
             await asyncio.sleep(0.02)
 
         # Chunk simulation text into sentences
-        sim_sents, _, _ = self._extract_completed_sentences(text + " ", base_mood=mood)
+        sim_sents = self._sentences_for_playback(text, mood)
         if not sim_sents:
             sim_sents = [(text, False, mood)]
         for s_text, s_beat, s_mood in sim_sents:

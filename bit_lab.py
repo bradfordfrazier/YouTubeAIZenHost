@@ -21,12 +21,15 @@ USAGE
   # A/B a prompt edit: stash the current ai_brain.py, edit it, and pass --b-file
   python bit_lab.py --n 24 --b-file ai_brain_variant.py
 
+  # Overrides may be key=value pairs (works in every shell, including Windows PowerShell, which
+  # mangles the JSON form). 'default' = no overrides.
   # A/B the bit gate (writer -> lint -> cold-read editor) against single-pass generation
-  python bit_lab.py --n 24 --a '{"bit_gate_enabled": false}' --b "{}"
+  python bit_lab.py --n 24 --a bit_gate_enabled=false --b default
   # ...the editor alone (lint stays on in both arms)
-  python bit_lab.py --n 24 --a '{"bit_editor_enabled": false}' --b "{}"
-  # ...handing the whole theme card over (legacy) vs anchor + direction
-  python bit_lab.py --n 24 --a '{"bit_theme_mode": "full"}' --b "{}"
+  python bit_lab.py --n 24 --a bit_editor_enabled=false --b default
+  # ...handing the whole theme card over (legacy) vs anchor + direction, vs anchor only
+  python bit_lab.py --n 24 --a bit_theme_mode=full --b default
+  python bit_lab.py --n 24 --a bit_theme_mode=anchor_hint --b bit_theme_mode=anchor_only
 
   # score a finished blind file back into a verdict
   python bit_lab.py --score bitlab/20260908-141500/blind.md
@@ -61,6 +64,38 @@ def _load_brain(module_path: Optional[str] = None):
         return mod.AIBrain
     from ai_brain import AIBrain
     return AIBrain
+
+
+def _parse_overrides(arg: Optional[str]) -> Dict[str, Any]:
+    """
+    Accepts either JSON ('{"bit_gate_enabled": false}') or shell-proof pairs
+    (bit_gate_enabled=false,bit_candidates=5). The pair form exists because Windows PowerShell
+    strips the inner double quotes from a JSON argument before Python ever sees it, which made
+    every documented A/B command die in json.loads before a single file was written.
+    'default', 'current', 'none' and '{}' all mean "no overrides".
+    """
+    a = (arg or "").strip()
+    if a.lower() in ("", "{}", "default", "current", "none"):
+        return {}
+    if a.startswith("{"):
+        try:
+            return json.loads(a)
+        except json.JSONDecodeError:
+            raise SystemExit(
+                f"Could not read overrides {a!r} as JSON — your shell probably ate the quotes.\n"
+                "Use the pair form instead, e.g.  --a bit_gate_enabled=false --b default"
+            )
+    out: Dict[str, Any] = {}
+    for pair in a.split(","):
+        if "=" not in pair:
+            raise SystemExit(f"Override {pair!r} is not key=value.")
+        k, v = pair.split("=", 1)
+        v = v.strip()
+        try:
+            out[k.strip()] = json.loads(v.lower() if v.lower() in ("true", "false", "null") else v)
+        except json.JSONDecodeError:
+            out[k.strip()] = v          # bare string, e.g. bit_theme_mode=full
+    return out
 
 
 def _apply_overrides(cfg, overrides: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,12 +252,12 @@ async def main_async(args) -> None:
     brain_a = AIBrainA()
     rows: List[Dict] = []
 
-    a_over = json.loads(args.a) if args.a else {}
+    a_over = _parse_overrides(args.a)
     print(f"\n--- variant A ({args.label or 'current'}) overrides={a_over or 'none'} ---")
     rows += await _generate_batch(brain_a, args.n, "A", a_over)
 
     if args.b is not None or args.b_file:
-        b_over = json.loads(args.b) if args.b else {}
+        b_over = _parse_overrides(args.b)
         if args.b_file:
             AIBrainB = _load_brain(args.b_file)
             brain_b = AIBrainB()
@@ -240,7 +275,7 @@ async def main_async(args) -> None:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     _write_blind(rows, outdir, two_variants=len({r["variant"] for r in rows}) == 2)
 
-    print(f"\nWrote {len(rows)} bits to {outdir}")
+    print(f"\nWrote {len(rows)} bits to {outdir.resolve()}")
     print(f"  1. Mark the ones that land in {outdir / 'blind.md'}")
     print(f"  2. python bit_lab.py --score {outdir / 'blind.md'}")
 

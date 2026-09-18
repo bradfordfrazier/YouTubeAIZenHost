@@ -446,6 +446,11 @@ class AppConfig:
     # One jsonl row per round: theme, form, every candidate, why it died, what the editor scored.
     # This is the raw material for open item 6 (negative theme deck). Empty string disables it.
     bit_gate_log_path: str = os.getenv("BIT_GATE_LOG_PATH", "data/bit_gate_log.jsonl")
+    # "plain": bits are written for the EAR — kitchen-table words, a feeling behind the line, the
+    #   surprise carried by the idea and not the vocabulary. Added 18 Sept after the operator's blind
+    #   read of every arm: "an English major trying to impress me ... close on structure, flat on
+    #   effect". "legacy" removes the block. See PROJECT_MASTER §6, "Voice".
+    bit_voice: str = os.getenv("BIT_VOICE", "plain").strip().lower()
     # Lint thresholds.
     bit_gate_duplicate_similarity: float = _get_float("BIT_GATE_DUPLICATE_SIMILARITY", 0.62)
     bit_gate_theme_overlap_max: float = _get_float("BIT_GATE_THEME_OVERLAP_MAX", 0.6)

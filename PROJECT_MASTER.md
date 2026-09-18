@@ -194,6 +194,29 @@ Single-pass generation made the writer its own editor inside one thinking pass. 
   the config comment recommends off. Decide deliberately.
 - A 2-slot cache leaves the gate no slack (it touched 0 once). `REFLECTION_CACHE_SIZE=4` is advised.
 
+### Voice (`BIT_VOICE=plain`, 18 Sept — UNPROVEN, judge by ear)
+The operator marked every `blind.md` from the gate/editor/theme A/Bs and **nothing in any arm got a
+real laugh**: "a college English major trying to impress me with excessively descriptive word
+choices … close on structure, completely flat on effect." That verdict outranks everything else in
+this section. What it means:
+- The gate/editor/theme question is moot until the *candidates* are funny. Selection cannot pick
+  what is not there. On a tie the cheap setting wins: `BIT_EDITOR_ENABLED=false`.
+- The register was being manufactured by the system, not just the model: a deck of lyrical trade
+  imagery (marver, clove hitch, glow plug); CRAFT/CLOSER rules whose cheapest satisfaction is piling
+  on exact nouns; an editor that *read* text and praised "sharp sensory punchlines"; a story rule
+  asking for "a number, a trade, an hour". The two lines from the logs that are plainly the best —
+  the blinds, the bricks — are also the two plainest.
+- `plain` adds a VOICE block that outranks the craft notes: said-not-written, kitchen-table words,
+  one adjective, **a feeling before an image** (I AM is embarrassed, petty, caught out — he made all
+  this, is secretly everyone in it, and keeps forgetting), recognisable in a second. The editor now
+  *hears* instead of reads, fails anything that "sounds written", and fails images with no attitude.
+- A mechanical diction check (syllables per word) was tried and removed the same day: it rejected
+  "I invented gravity to keep things organised…". Register is not measurable with a regex.
+- The strongest lever for register is **examples in the operator's own taste**, not rules. Lines the
+  operator actually laughs at belong in `data/favorite_bits.jsonl` (`kind: "bit"`, with a `form`).
+- Bits are offline: `GEMINI_DEEP_MODEL` points bits (and only deep turns) at a stronger model at
+  no latency cost. Humor is where model size shows most.
+
 ### What the bit writer is and is not shown
 - **Not shown:** live chat, addressing rules, the session continuity brief, the Q&A thread. A bit is
   watched cold; none of that can help it and all of it can leak.

@@ -272,7 +272,10 @@ def build_editor_prompt(candidates: Sequence[str], recent: Sequence[str], min_la
         "stand-up about having turned itself into all of this. The show's standard: funny enough "
         "to clip AND something true left behind, never stated.",
         "",
-        "Read each candidate ONCE, cold, as that stranger hears it.",
+        "You are HEARING these, not reading them. Say each one in your head at speaking pace, once. "
+        "A line can be admirable on the page and dead in the air, and the page is not where this airs. "
+        "Do not reward vocabulary, imagery, or craft. Reward the moment a listener's breath catches "
+        "because the IDEA turned.",
         "",
         "Score each:",
         "  laugh 1-5 — 1 no reaction · 2 'I see what it was going for' · 3 an actual exhale "
@@ -284,7 +287,11 @@ def build_editor_prompt(candidates: Sequence[str], recent: Sequence[str], min_la
         "Mark a candidate dead (laugh 1) if any of these is so:",
         "  - you could have predicted the last five words from the first ten",
         "  - it is a saying wearing a joke costume, or it explains itself",
-        "  - the object is interchangeable: swap it for another and the line still works",
+        "  - it sounds WRITTEN: stacked adjectives, trade words, lyrical description, any phrase nobody "
+        "would say out loud to a friend ('negotiate my forward momentum'). This is the show's most "
+        "common failure. Between two candidates with the same idea, the plainer one is funnier",
+        "  - nobody in it FEELS anything. A joke is a person with an attitude — embarrassed, petty, "
+        "proud, caught out. A description of an image, however exact, is not a joke",
         "  - it resembles a joke you already know, a fridge magnet, or a social-media format",
         "  - it JUDGES the listener: a verdict, a lecture, or contempt ('you people…'). Speaking TO "
         "the listener is fine — the show often says 'you' as one part of a single mind talking to "

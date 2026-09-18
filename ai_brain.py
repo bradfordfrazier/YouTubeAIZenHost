@@ -1345,9 +1345,8 @@ class AIBrain:
                 ),
                 "story": (
                     f"FORM: TINY STORY. {w_min}-{w_max} words, 2 to 3 sentences. "
-                    "A concrete little parable with one specific detail (a number, a trade, an hour of the day), a turn, and a closer "
-                    "that reframes the whole thing. No moral stated. 'A man once…' and 'There was a monk who…' are where every "
-                    "parable on earth begins; begin somewhere else more often than not."
+                    "A little story about a person, with a turn, and a closer that reframes the whole thing. No moral stated. "
+                    "Do not open every story the same way."
                 ),
                 "address": (
                     f"FORM: DIRECT ADDRESS. {w_min}-{w_max} words, 2 to 3 sentences. Speak straight to whoever is watching in the second "
@@ -1411,6 +1410,26 @@ class AIBrain:
             if bit_retry_note:
                 drafting = f"EDITOR'S NOTE ON THE LAST ROUND: {bit_retry_note}\n" + drafting
 
+            voice_block = ""
+            if (self.cfg.bit_voice or "plain") == "plain":
+                voice_block = (
+                    "VOICE — THIS OUTRANKS EVERY CRAFT NOTE BELOW: this is SAID, out loud, by someone being funny to a "
+                    "friend. It is not written to be admired. Use the words a tired person uses at a kitchen table: short, "
+                    "common, the first word that comes, not the best one. At most one adjective in the whole bit. No trade "
+                    "vocabulary, no lyrical description, no phrase that would look good in a short story — if you are "
+                    "proud of a phrase, cut it. The surprise must live in the IDEA. If the idea is not funny in plain "
+                    "words, better words will not save it; get a better idea.\n"
+                    "A joke is a person with a FEELING, not a picture. Before you write, decide how I AM feels about this: "
+                    "embarrassed by his own design, petty, caught out, proud of the wrong thing, tired of himself. He made "
+                    "all of this, he is secretly everyone in it, he keeps forgetting, and it keeps being awkward. That "
+                    "awkwardness is the joke; the image is only where it happens.\n"
+                    f"The listener must recognise the situation within a second. If {subject} is something most people have "
+                    "never touched, come at it through the nearest thing everyone HAS touched.\n"
+                    "Register only — never these lines, ideas or objects: 'I waved at a guy and he didn't wave back. He "
+                    "was waving at the guy behind me. All three of us were me. Nobody handled it well.' / 'I invented "
+                    "sleep so I could get a break from everybody. Then I put everybody in the dreams.'\n"
+                )
+
             favs = self.sample_favorites(int(self.cfg.favorites_few_shot), form=selected_form)
             if favs:
                 prompt_parts.append("\n--- Your best work so far (the standard to match; never reuse these lines or their images) ---")
@@ -1421,6 +1440,7 @@ class AIBrain:
                 "The stream is quiet. Step forward as I AM, the Source of Everything, doing a short piece of dry stand-up.\n"
                 f"{theme_block}"
                 f"{form_rules[selected_form]}\n"
+                f"{voice_block}"
 
                 "CORE PREMISE: You are essentially teaching non-duality with jokes and parables.\n"
 
@@ -2107,18 +2127,6 @@ class AIBrain:
                 self.is_generating = False
                 raise
             except Exception as e:
-                if (
-                    self.provider == "anthropic"
-                    and "thinking" in str(e).lower()
-                    and getattr(self, "_anthropic_thinking_mode", "adaptive") != "none"
-                ):
-                    nxt = "effort" if getattr(self, "_anthropic_thinking_mode", "adaptive") == "adaptive" else "none"
-                    old_mode = getattr(self, "_anthropic_thinking_mode", "adaptive")
-                    self._anthropic_thinking_mode = nxt
-                    logger.warning(
-                        f"🛡️ [Anthropic] Server rejected thinking mode '{old_mode}' for "
-                        f"{self.cfg.anthropic_model}; falling back to '{nxt}' and retrying. ({e})"
-                    )
                 logger.warning(f"[Bit Gate] {e.__class__.__name__}: {e} — falling back to single-pass generation.")
                 vetted = False
             if vetted is None:

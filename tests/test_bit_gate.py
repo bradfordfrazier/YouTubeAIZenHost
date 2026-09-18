@@ -5,15 +5,11 @@ Each `test_regression_*` exists because the behaviour it guards was broken on th
 every other test passed (see PROJECT_MASTER §11: "add the test that would have caught it").
 No network: the provider is replaced with a scripted delta stream.
 """
-from pathlib import Path
 import asyncio
 import json
-import sys
 import types
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import bit_gate
 from ai_brain import AIBrain
@@ -360,3 +356,20 @@ def test_anchor_only_withholds_the_operators_insight(brain, monkeypatch):
     anchor, angle = bit_gate.split_theme(brain.last_spontaneous_theme)
     assert anchor in p and angle not in p and "Nobody has told you what this object means" in p
     assert "end on different physical things" in p        # writer-diversity instruction
+
+
+# ----------------------------------------------------------------------------------------------
+# Voice: the operator's blind read of every arm was "an English major trying to impress me"
+# ----------------------------------------------------------------------------------------------
+def test_plain_voice_block_is_switchable(brain, monkeypatch):
+    monkeypatch.setattr(config, "bit_voice", "plain")
+    p = brain._build_context_prompt("[SPONTANEOUS_REFLECTION]")
+    assert "THIS OUTRANKS EVERY CRAFT NOTE" in p and "A joke is a person with a FEELING" in p
+    monkeypatch.setattr(config, "bit_voice", "legacy")
+    assert "THIS OUTRANKS" not in brain._build_context_prompt("[SPONTANEOUS_REFLECTION]")
+
+
+def test_editor_listens_instead_of_reading():
+    p = bit_gate.build_editor_prompt(["a", "b"], [], 3, 3)
+    assert "HEARING these, not reading" in p and "sounds WRITTEN" in p and "nobody in it FEELS" in p
+    assert "object is interchangeable" not in p        # that criterion rewarded hyper-specific nouns

@@ -18,3 +18,4 @@ data/*.jsonl
 youtube_cookies.txt
 *.tmp
 logs/
+bitlab/

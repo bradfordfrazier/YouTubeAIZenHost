@@ -430,12 +430,18 @@ class AppConfig:
     bit_gate_max_attempts: int = _get_int("BIT_GATE_MAX_ATTEMPTS", 2)
     # Editor's bar on its 1-5 laugh scale (3 = "an actual exhale through the nose").
     bit_editor_min_laugh: int = _get_int("BIT_EDITOR_MIN_LAUGH", 3)
+    # ...and on its 1-5 "is something true underneath, unstated" scale. The show's job is insight AND
+    # humor from the same line; at 2 a status-bathos gag with nothing under it could win on laughs.
+    bit_editor_min_true: int = _get_int("BIT_EDITOR_MIN_TRUE", 3)
     bit_editor_temperature: float = _get_float("BIT_EDITOR_TEMPERATURE", 0.2)
     # After this many consecutive empty-handed refills the gate airs its least-bad clean candidate
     # instead, so a bad night for the model can never starve the cache. 0 = never fail open.
     bit_gate_fail_open_after: int = _get_int("BIT_GATE_FAIL_OPEN_AFTER", 3)
     # "anchor_hint": the theme card is split — the object is mandatory, the angle is a compass the
     #   bit may not paraphrase. "full": legacy, the whole card is handed over as THEME.
+    # "anchor_only": the writer gets the object and nothing else, and has to find what is true about
+    #   it unaided. The angles on the cards are the OPERATOR's insights; if the point is to mine the
+    #   model's own, this is the mode that does it. Expect more misses and stranger hits. A/B it.
     bit_theme_mode: str = os.getenv("BIT_THEME_MODE", "anchor_hint").strip().lower()
     # One jsonl row per round: theme, form, every candidate, why it died, what the editor scored.
     # This is the raw material for open item 6 (negative theme deck). Empty string disables it.
@@ -529,6 +535,11 @@ class AppConfig:
             "cryptic": "mysterious", "enigmatic": "mysterious", "ominous": "mysterious",
             "brutal": "savage", "cutting": "savage", "harsh": "savage",
             "surprised": "shocked", "stunned": "shocked", "inquisitive": "curious",
+            # Seen live on 18 Sept: [MOOD: quiet] on a hospice answer and [MOOD: charismatic] on a
+            # cached greeting (the greeting prompt itself says "charismatic presence"). Unmapped names
+            # pass through as the turn mood, so the HUD showed QUIET and the voice fell to defaults.
+            "quiet": "thoughtful", "soft": "thoughtful", "tender": "thoughtful", "hushed": "thoughtful",
+            "charismatic": "chill", "welcoming": "chill", "friendly": "chill",
         }
     )
 

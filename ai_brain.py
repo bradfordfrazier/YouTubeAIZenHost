@@ -1283,9 +1283,19 @@ class AIBrain:
             # the least original output available and, being an aphorism, the most sermon-like.
             # anchor_hint keeps the object mandatory and demotes the rest to a direction.
             anchor, angle = bit_gate.split_theme(selected_theme)
-            split_card = (self.cfg.bit_theme_mode == "anchor_hint") and bool(angle)
+            theme_mode = (self.cfg.bit_theme_mode or "anchor_hint").strip().lower()
+            split_card = (theme_mode in ("anchor_hint", "anchor_only")) and bool(angle)
             subject = "the ANCHOR" if split_card else "the theme"
-            if split_card:
+            if split_card and theme_mode == "anchor_only":
+                # The card's angle is withheld entirely: the insight has to be the writer's own.
+                theme_block = (
+                    f"ANCHOR — the physical engine of this bit; it (or a plain piece of it) must be in the bit: {anchor}\n"
+                    "Nobody has told you what this object means. Look at it until you see something about it that is "
+                    "actually true and that you have not heard said before — about how it works, what it costs, who it "
+                    "fools, what it is like to be it — and build the bit on that. The first thing that comes to mind is "
+                    "the thing everyone has already said; keep looking.\n"
+                )
+            elif split_card:
                 theme_block = (
                     f"ANCHOR — the physical engine of this bit; it (or a plain piece of it) must be in the bit: {anchor}\n"
                     f"DIRECTION — roughly where the truth is buried. A compass, not a script: do not reword it, "
@@ -1384,7 +1394,12 @@ class AIBrain:
                     f"candidates, numbered 1. to {k}., one per line, and nothing else — no labels, no commentary. "
                     "Each is a complete bit in the form above, opening with its own [MOOD: x] tag. They must be "
                     f"{k} different jokes — a different way into {subject} and a different landing each time — not "
-                    f"one joke with the nouns changed. Do not submit any that {reject_list}.\n"
+                    "one joke with the nouns changed. The editor's most common verdict is 'all of these are the same "
+                    "joke', so check before you submit: the candidates must end on different physical things, and no "
+                    "two may share a premise. If the obvious joke about this anchor is one a stranger could finish "
+                    "for you, write it once at most and spend the other candidates somewhere nobody has looked — the "
+                    "object's own side of it, who made it and why, what it costs, what becomes of it long afterwards. "
+                    f"Do not submit any that {reject_list}.\n"
                 )
                 cue = f"\n{self.host_name} — {k} candidates ({selected_form}):"
             else:
@@ -1768,7 +1783,8 @@ class AIBrain:
             winner: Optional[Dict[str, Any]] = None
             if survivors and self.cfg.bit_editor_enabled:
                 ed_prompt = bit_gate.build_editor_prompt(
-                    [c["spoken"] for c in survivors], recent, int(self.cfg.bit_editor_min_laugh)
+                    [c["spoken"] for c in survivors], recent,
+                    int(self.cfg.bit_editor_min_laugh), int(self.cfg.bit_editor_min_true),
                 )
                 ed_reply = await self._collect_text(
                     self.model_name, ed_prompt, is_bit=False,
@@ -1776,6 +1792,16 @@ class AIBrain:
                     temperature_override=float(self.cfg.bit_editor_temperature),
                 )
                 pick, why, scores = bit_gate.parse_editor_reply(ed_reply, len(survivors))
+                # The rule is applied to the editor's scores here rather than trusted to its sums.
+                said = pick
+                computed = bit_gate.choose_from_scores(
+                    scores, [c["spoken"] for c in survivors],
+                    int(self.cfg.bit_editor_min_laugh), int(self.cfg.bit_editor_min_true),
+                )
+                if computed is not None:
+                    pick = computed
+                    if said is not None and said != computed:
+                        why = f"{why} [scores select #{computed}; editor wrote #{said}]"
                 if pick is None:
                     # An unreadable verdict is not a rejection. Fail open to the first clean candidate.
                     logger.warning(f"[Bit Gate] editor reply unusable ({why}); airing the first clean candidate.")
@@ -1817,6 +1843,11 @@ class AIBrain:
                 + (f"; editor: {why}" if why else "") + ")"
             )
             note = bit_gate.retry_note(all_reasons)
+            if why and "editor_passed" in all_reasons:
+                # The editor's own words beat a canned note. The next round has a different anchor,
+                # so what carries over is the KIND of failure, which is what the writer needs.
+                note = (note + f" The editor's verdict on the last round (a different anchor): \"{why[:220]}\" "
+                        "— do not fail the same way.").strip()
 
         # Nothing good enough. Normally the slot is simply skipped and the cache worker tries again
         # on its next cycle. If that keeps happening, air the least-bad CLEAN candidate so a bad

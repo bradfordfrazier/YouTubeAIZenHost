@@ -263,7 +263,8 @@ EDITOR_SYSTEM = (
 )
 
 
-def build_editor_prompt(candidates: Sequence[str], recent: Sequence[str], min_laugh: int) -> str:
+def build_editor_prompt(candidates: Sequence[str], recent: Sequence[str], min_laugh: int,
+                        min_true: int = 3) -> str:
     lines = [
         "A calm synthetic voice will speak ONE of the lines below over looping music. It will be "
         "clipped and watched by a stranger who has seen nothing else: no theme, no chat, no "
@@ -285,20 +286,28 @@ def build_editor_prompt(candidates: Sequence[str], recent: Sequence[str], min_la
         "  - it is a saying wearing a joke costume, or it explains itself",
         "  - the object is interchangeable: swap it for another and the line still works",
         "  - it resembles a joke you already know, a fridge magnet, or a social-media format",
-        "  - it is aimed at the listener ('you people…') rather than at the speaker",
+        "  - it JUDGES the listener: a verdict, a lecture, or contempt ('you people…'). Speaking TO "
+        "the listener is fine — the show often says 'you' as one part of a single mind talking to "
+        "another part, and a line that starts with 'you' and ends with the speaker caught doing the "
+        "same thing is the house style, not a fault",
+        "  - it is only the house cliché: 'I [did something cosmic] just to [petty payoff]' with "
+        "nothing true underneath. That groove is this speaker's laziest reflex. It can still win, "
+        "but only if nothing in the recent list used it and it scores true >= 4",
         "  - the funniest word is not at or near the end",
         "  - it would sound like a mistake read aloud (tongue-twisting, or two ideas at once)",
     ]
     if recent:
         lines += ["", "Already aired recently — a candidate that is the same joke again is dead:"]
-        lines += [f"  - {r}" for r in list(recent)[-6:]]
+        lines += [f"  - {r}" for r in list(recent)[-10:]]
     lines += ["", "CANDIDATES:"]
     lines += [f"  {i}. {c}" for i, c in enumerate(candidates, 1)]
     lines += [
         "",
-        f"Pick the candidate with the highest laugh score, provided laugh >= {int(min_laugh)} and "
-        "true >= 2. Break ties toward the shorter line. If none qualifies, pick 0 — airing nothing "
-        "is better than airing a dud, and the writer will try again.",
+        f"A candidate qualifies only with laugh >= {int(min_laugh)} AND true >= {int(min_true)}: the show "
+        "exists to get real insight and real humor out of the same line, so a funny line with nothing "
+        "underneath fails exactly as a wise line with no laugh does. Among qualifiers pick the highest "
+        "laugh + true; break ties toward the higher laugh, then the shorter line. If none qualifies, "
+        "pick 0 — airing nothing is better than airing a dud, and the writer will try again.",
         "",
         "Reply with ONLY this JSON, nothing before or after it:",
         '{"scores": [{"n": 1, "laugh": 2, "true": 3}], "pick": 0, "why": "one short sentence"}',
@@ -330,3 +339,30 @@ def parse_editor_reply(text: str, n_candidates: int) -> Tuple[Optional[int], str
         return None, "pick out of range", []
     scores = data.get("scores") if isinstance(data.get("scores"), list) else []
     return pick, str(data.get("why", ""))[:200], scores
+
+
+def choose_from_scores(scores: Sequence[Any], texts: Sequence[str], min_laugh: int,
+                       min_true: int) -> Optional[int]:
+    """
+    Applies the selection rule to the editor's own scores. Returns a 1-based pick, 0 for "none
+    qualifies", or None when the scores do not cover every candidate (the caller then falls back
+    to the pick the editor wrote). Deterministic on purpose: the rule is config, not vibes, and a
+    model that scores well can still add badly.
+    """
+    n = len(texts)
+    table: Dict[int, Tuple[int, int]] = {}
+    for sc in scores or []:
+        if not isinstance(sc, dict):
+            continue
+        try:
+            i, la, tr = int(sc.get("n")), int(sc.get("laugh")), int(sc.get("true"))
+        except Exception:
+            continue
+        if 1 <= i <= n:
+            table[i] = (la, tr)
+    if len(table) != n:
+        return None
+    ok = [i for i, (la, tr) in table.items() if la >= int(min_laugh) and tr >= int(min_true)]
+    if not ok:
+        return 0
+    return max(ok, key=lambda i: (sum(table[i]), table[i][0], -len(texts[i - 1].split()), -i))

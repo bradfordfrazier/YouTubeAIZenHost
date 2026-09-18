@@ -314,3 +314,49 @@ def test_gate_can_be_switched_off_for_ab(brain, monkeypatch):
     monkeypatch.setattr(config, "bit_gate_enabled", False)
     calls = script(brain, [GOOD_A])
     assert run(brain, bypass_cache=True)[-1]["type"] == "complete" and len(calls) == 1
+
+
+# ----------------------------------------------------------------------------------------------
+# 18 Sept live log: what the first gated session showed
+# ----------------------------------------------------------------------------------------------
+def test_regression_editor_does_not_kill_the_address_form():
+    """Address rounds went 0 for 5 live; the editor's verdict was 'aims straight at the listener
+    with an accusatory You'. The rubric condemned second person itself, which IS the address form."""
+    p = bit_gate.build_editor_prompt(["You are holding your phone like it might leave."], [], 3, 3)
+    assert "Speaking TO the listener is fine" in p and "JUDGES the listener" in p
+    assert "rather than at the speaker" not in p
+
+
+def test_editor_requires_insight_as_well_as_a_laugh():
+    p = bit_gate.build_editor_prompt(["a", "b"], [], 3, 3)
+    assert "laugh >= 3 AND true >= 3" in p
+    texts = ["short funny line here", "a somewhat longer line that is funny and also true"]
+    pick = lambda sc: bit_gate.choose_from_scores(sc, texts, 3, 3)
+    assert pick([{"n": 1, "laugh": 5, "true": 2}, {"n": 2, "laugh": 3, "true": 4}]) == 2   # bathos loses to insight
+    assert pick([{"n": 1, "laugh": 4, "true": 3}, {"n": 2, "laugh": 3, "true": 4}]) == 1   # tie on sum -> laugh
+    assert pick([{"n": 1, "laugh": 4, "true": 2}, {"n": 2, "laugh": 2, "true": 5}]) == 0   # neither does both jobs
+    assert pick([{"n": 1, "laugh": 4, "true": 4}]) is None                                  # incomplete -> caller falls back
+    assert pick([]) is None
+
+
+def test_scores_decide_the_pick_not_the_editors_arithmetic(brain):
+    reply = ('{"scores": [{"n": 1, "laugh": 4, "true": 2}, {"n": 2, "laugh": 3, "true": 4}], '
+             '"pick": 1, "why": "first one is funnier"}')
+    script(brain, [f"1. {GOOD_A}\n2. {GOOD_B}", reply])
+    evs = run(brain, bypass_cache=True)
+    assert evs[-1]["full_text"].startswith("I spent four billion")      # candidate 2: the one that does both jobs
+
+
+def test_retry_carries_the_editors_own_verdict(brain):
+    none = '{"scores": [{"n": 1, "laugh": 2, "true": 3}, {"n": 2, "laugh": 2, "true": 3}], "pick": 0, "why": "All four run the identical landlord joke."}'
+    calls = script(brain, [f"1. {GOOD_A}\n2. {GOOD_B}", none, f"1. {GOOD_A}\n2. {GOOD_B}", none])
+    run(brain, bypass_cache=True)
+    assert "All four run the identical landlord joke." in calls[2]["prompt"] and "do not fail the same way" in calls[2]["prompt"]
+
+
+def test_anchor_only_withholds_the_operators_insight(brain, monkeypatch):
+    monkeypatch.setattr(config, "bit_theme_mode", "anchor_only")
+    p = brain._build_context_prompt("[SPONTANEOUS_REFLECTION]", bit_candidates=4)
+    anchor, angle = bit_gate.split_theme(brain.last_spontaneous_theme)
+    assert anchor in p and angle not in p and "Nobody has told you what this object means" in p
+    assert "end on different physical things" in p        # writer-diversity instruction

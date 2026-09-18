@@ -1,7 +1,8 @@
 # I AM — AI Livestream Host: Project Master Document
 
 **Verified against the running code on 8 September 2026; §4, §6, §8–§11 revised 18 September 2026
-(bit gate, short-closer fix, bit-prompt isolation — not yet A/B'd on the operator's machine, see §11).** Every fact below was checked against
+(bit gate, short-closer fix, bit-prompt isolation). §9 re-verified against the operator's real `.env` and the
+first gated live session on 18 September; see "First gated session" in §6. Not yet blind-A/B'd (§11).** Every fact below was checked against
 the actual modules, not remembered. This supersedes everything in `docs/archive/`.
 
 **Audience:** Antigravity, any other coding agent, and future-you. Read this before changing code.
@@ -169,6 +170,30 @@ Single-pass generation made the writer its own editor inside one thinking pass. 
 - The word lists (`BIT_GATE_ABSTRACT_NOUNS`, `BIT_GATE_BANNED_PHRASES`) are the operator's call and
   deliberately short. A false positive costs one candidate out of four, not a bit.
 
+### First gated session (18 Sept 2026, 8 minutes, 0 viewers) — what the log showed
+- 12 refills → 9 bits cached, 3 gave up. 21 writer rounds, editor picked in 9 (43 %/round).
+- **Address form went 0 for 5.** The editor's rubric condemned lines "aimed at the listener", which is
+  the definition of the form. Fixed: the rubric now condemns *judging* the listener, and says
+  plainly that second person is house style. Watch the address rate in `bit_gate_log.jsonl`.
+- The editor's commonest verdict (5 of 12 empty rounds) was "all four are the same joke". The writer
+  brief now requires different landings and different premises, and an empty round passes the
+  editor's own verdict to the next writer call instead of a canned note.
+- The editor caught the show's default groove unprompted — *'I [did something cosmic] just to
+  [petty payoff]'* — once a recent line had used it. In the previous (ungated) 47 minutes that groove
+  was about a third of all bits (13–15 of 45, hand-counted). It is now named in the rubric as the house cliché.
+- Selection is `laugh >= BIT_EDITOR_MIN_LAUGH AND true >= BIT_EDITOR_MIN_TRUE`, highest sum wins,
+  and the pick is computed in code from the editor's scores. Insight is half the job (§1).
+- Moods varied for the first time (snarky, chill, thoughtful, deadpan); ungated, 38 of 45 bits were
+  deadpan and the other 7 thoughtful. Likely cause: the Q&A thread that used to be shown to the bit writer printed
+  `I Am [DEADPAN]: "…"` four times above every bit.
+- **Length is now enforced.** Ungated bits ran 13–47 words (median 32; 24 of 45 over the 30-word hard cap) against `BIT_WORDS_MAX=25`;
+  whatever rejection `reflection_cache` does was not stopping them. Gated bits ran 14–30. If the
+  longer bits were part of the show's feel, raise `BIT_WORDS_MAX`; do not loosen the gate.
+- `ANCHOR_BAN_ENABLED=true` had been dead code since it was written (it sat inside the branch that
+  never ran, §8). It is live now. It is a third layer of constraint on top of lint and editor;
+  the config comment recommends off. Decide deliberately.
+- A 2-slot cache leaves the gate no slack (it touched 0 once). `REFLECTION_CACHE_SIZE=4` is advised.
+
 ### What the bit writer is and is not shown
 - **Not shown:** live chat, addressing rules, the session continuity brief, the Q&A thread. A bit is
   watched cold; none of that can help it and all of it can leak.
@@ -177,6 +202,9 @@ Single-pass generation made the writer its own editor inside one thinking pass. 
   replies in `favorite_bits.jsonl` are never bit exemplars.
 - **Theme card** (`BIT_THEME_MODE=anchor_hint`): the object before the dash is mandatory (`ANCHOR`);
   the text after it is a `DIRECTION` the bit may not reword. `full` restores the legacy `THEME:` line.
+  `anchor_only` withholds the angle altogether: the angles on the cards are the operator's insights,
+  and several of the best ungated lines were re-dressings of them ("the gap between stones…" → the
+  bricks that do not notice they are touching). If the aim is the *model's* insight, A/B this mode.
 - Form rules refer to the anchor (the observation form used to say "notice this livestream" while
   the theme said "a blacksmith"). At `BIT_WORDS_MAX ≤ 35` the arc is "set up, turn once, land", not
   "three steps".
@@ -250,25 +278,26 @@ what *this* audience finds funny; everything else is a guess encoded as a rule.
 ## 9. Configuration — the operator's current values
 
 ```ini
-# Persona / model
-GEMINI_MODEL=gemini-3.7-flash        TTS_REFERENCE_VOICE=pure_oracle
+# Persona / model   (re-verified against the real .env, 18 Sept)
+GEMINI_MODEL=gemini-3.8-flash        TTS_REFERENCE_VOICE=pure_oracle
 VISUALIZER_ASPECT_RATIO=9:16
 # Bit cadence and length (tuned for clip harvesting)
 IDLE_SILENCE_THRESHOLD_SEC=25  SPONTANEOUS_MIN_INTERVAL_SEC=10  SPONTANEOUS_MAX_BACKOFF_SEC=45
-BIT_WORDS_MIN=10  BIT_WORDS_MAX=25  ONE_LINER_RATIO=0.60  TTS_BEAT_GAP_SEC=0.55
+BIT_WORDS_MIN=10  BIT_WORDS_MAX=25  ONE_LINER_RATIO=0.25 (≈20 % actual)  TTS_BEAT_GAP_SEC=0.55
+ANCHOR_BAN_ENABLED=true (live only since 18 Sept)  REFLECTION_CACHE_SIZE=2  GREETING_CACHE_SIZE=2
 # Clip-friendly spacing
 MIN_TURN_GAP_SEC=15  REFLECTION_POST_SPEECH_CHAT_DELAY_SEC=4  COMMENT_POST_SPEECH_HOLD_SEC=3
 QUESTION_MIN_DISPLAY_SEC=2.5  MOTTO_PRE_FADE_IN_SEC=2.75  PROMO_OVERLAY_INTERVAL_SEC=240
 # Chat
 SMALL_ROOM_VIEWERS=5  MAX_RESPONSES_PER_MINUTE=6  READ_QUESTION_ALOUD=all
 # Cast
-CAST_MIN_INTERVAL_SEC=125  CAST_MAX_INTERVAL_SEC=200  CAST_MAX_PER_SESSION=200
+CAST_MIN_INTERVAL_SEC=125  CAST_MAX_INTERVAL_SEC=200  CAST_MAX_PER_SESSION=400
 # TTS
 TTS_CFG_WEIGHT=0.4  (per-mood overrides in config; deadpan 0.30 … hyped 0.60)
 ```
 Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERATION_MAX=0.7`,
 `BIT_THINKING_BUDGET=1024`, `BIT_TEMPERATURE=0.85`, `ANTI_REPETITION_WINDOW=20`,
-`ANCHOR_BAN_ENABLED=false`, `ASSUMED_VIEWERS_WHEN_UNKNOWN=1`, `TURN_MAX_SEC=75`,
+`ASSUMED_VIEWERS_WHEN_UNKNOWN=1`, `TURN_MAX_SEC=75`, `BIT_EDITOR_MIN_TRUE=3`,
 `BIT_GATE_ENABLED=true`, `BIT_EDITOR_ENABLED=true`, `BIT_CANDIDATES=4`, `BIT_GATE_MAX_ATTEMPTS=2`,
 `BIT_EDITOR_MIN_LAUGH=3`, `BIT_EDITOR_TEMPERATURE=0.2`, `BIT_GATE_FAIL_OPEN_AFTER=3`,
 `BIT_THEME_MODE=anchor_hint`, `BIT_GATE_LOG_PATH=data/bit_gate_log.jsonl`.
@@ -288,7 +317,19 @@ Defaults not overridden in `.env`: `NDI_AUDIO_BLOCK_SAMPLES=2400`, `TTS_EXAGGERA
 5. **Room awareness** — the prompt has viewer count, uptime, and time of day but does not use them.
 6. **Negative theme deck** — `data/bit_gate_log.jsonl` now records theme → candidates → editor
    scores → aired. Still to do: aggregate it and prune cards that never produce a pick.
-7. Stalls during cache primes: both processes stalled ~200–400 ms while the reflection cache and
+7. **Dead air between a read-aloud question and its answer** (seen 11:04:19 on 18 Sept: 6.8 s, 136
+   render-worker underruns). The lead gate budgets synthesis time for the unreceived answer but
+   nothing for the model's time-to-first-token, so it can open on the intro alone; that turn's
+   TTFT was 13.2 s. It is a knife-edge on intro length (6.6 s opened, 5.3 s waited). Proposed guard,
+   not yet applied — audio path, §5: do not satisfy the lead while
+   `intro_text and answer_sentences_queued == 0 and not is_completed`.
+8. **`underruns=0` in `[Turn Timing]` is blind.** It reads the main-process counter; the underruns
+   above were counted in the render worker. The §11 checklist item cannot currently fail.
+9. HUD: `Uptime` is always `00:00:00`; `Cast:` advances by 2 per cast turn.
+10. Off-air testing thrashes chat: with OBS offline pytchat lands in *replay* mode, reports the
+   stream ended, and reconnects every ~18 s; each reconnect blocks the event loop ~1 s (the
+   alternating 12 ms / 1000 ms drift). Harmless to audio (separate process); gone when truly live.
+11. Stalls during cache primes: both processes stalled ~200–400 ms while the reflection cache and
    chatter DB wrote to disk. Move those writes off the event-loop thread.
 
 ---
